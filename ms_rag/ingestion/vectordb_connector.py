@@ -569,7 +569,10 @@ class _FAISSFactory:
         self._store: object | None = None
 
     def add_documents(self, docs: list) -> None:
-        from langchain_community.vectorstores import FAISS  # noqa: PLC0415
+        try:
+            from langchain_community.vectorstores import FAISS  # noqa: PLC0415
+        except ImportError:
+            from langchain_community.vectorstores import FAISS  # noqa: PLC0415
         if self._store is None:
             self._store = FAISS.from_documents(docs, self._embeddings)  # type: ignore[arg-type]
         else:

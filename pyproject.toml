@@ -48,7 +48,8 @@ dependencies = [
     # LangChain experimental (SemanticChunker)
     "langchain-experimental>=0.3.0",
 
-    # Vector stores
+    # Vector stores (core — always available)
+    "langchain-chroma>=0.1.0",
     "chromadb>=0.5.0",
     "faiss-cpu>=1.8.0",
 

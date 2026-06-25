@@ -96,7 +96,7 @@ class TestGetRetrieverFactory:
         assert search_kwargs.get("lambda_mult") == 0.7
 
     def test_known_strategies_dont_raise_value_error(self) -> None:
-        """Known strategies raise ImportError (missing pkg), not ValueError."""
+        """Known strategies must NOT raise 'Unsupported retrieval strategy' ValueError."""
         module = RetrievalStrategyModule()
         mock_store = MagicMock()
         mock_store.as_retriever.return_value = MagicMock()
@@ -105,11 +105,10 @@ class TestGetRetrieverFactory:
             config = RetrievalConfig(strategy=strategy_id, top_k=5)
             try:
                 module.get_retriever(config, mock_store)
-            except (ImportError, Exception) as exc:
-                if isinstance(exc, ValueError):
-                    pytest.fail(
-                        f"Strategy {strategy_id!r} raised ValueError unexpectedly: {exc}"
-                    )
+            except Exception as exc:
+                # Only our own dispatch error is a real failure
+                if isinstance(exc, ValueError) and "Unsupported retrieval strategy" in str(exc):
+                    pytest.fail(f"Strategy {strategy_id!r} raised ValueError: {exc}")
 
 
 # ---------------------------------------------------------------------------

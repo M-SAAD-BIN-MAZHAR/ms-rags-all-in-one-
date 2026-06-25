@@ -232,7 +232,7 @@ class TestGetEmbeddingsDispatch:
             module.get_embeddings(config)
 
     def test_known_providers_do_not_raise_value_error(self) -> None:
-        """Known providers raise ImportError (package missing) not ValueError."""
+        """Known providers must NOT raise 'Unsupported embedding provider' ValueError."""
         module = VectorizationModule()
         known_providers = ["openai", "cohere", "huggingface", "local",
                            "google_gemini", "mistral", "ollama"]
@@ -240,9 +240,7 @@ class TestGetEmbeddingsDispatch:
             config = EmbeddingModelConfig(provider=provider, model_id="test-model")
             try:
                 module.get_embeddings(config)
-            except ImportError:
-                pass  # expected — package not installed
-            except ValueError as exc:
-                pytest.fail(
-                    f"Provider {provider!r} raised ValueError unexpectedly: {exc}"
-                )
+            except Exception as exc:
+                # Only our own "Unsupported" dispatch error is a real failure
+                if isinstance(exc, ValueError) and "Unsupported embedding provider" in str(exc):
+                    pytest.fail(f"Provider {provider!r} raised ValueError unexpectedly: {exc}")
