@@ -100,33 +100,46 @@ Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generat
 
 ## Installation
 
+### One-Command Production Install (Recommended)
+
 ```bash
 # 1. Clone the repository
 git clone https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-.git
 cd MS-RAG-ALL-IN-ONE-
 
-# 2. Create virtual environment
+# 2. Create and activate virtual environment
 python -m venv .venv
 
-# 3. Activate virtual environment
-# Windows:
+# Windows
 .venv\Scripts\activate
-# Linux / macOS:
+
+# Linux / macOS
 source .venv/bin/activate
 
-# 4. Install core dependencies
+# 3. Install EVERYTHING — core + all vector DBs + all evaluators + rerankers
+pip install -e ".[production]"
+
+# 4. Run
+ms-rag
+```
+
+That's it. **No manual extra installs needed.** The `[production]` extra includes:
+- All 12 LLM providers
+- All 12 vector databases
+- All 12 evaluation frameworks (RAGAS, DeepEval, TruLens, LangSmith, Langfuse, etc.)
+- All rerankers (FlashRank, Cohere)
+- All document loaders (PDF, DOCX, CSV, HTML, YouTube, images, etc.)
+
+### Minimal Install (core only)
+
+```bash
 pip install -e .
+```
 
-# 5. (Optional) Install provider-specific extras
-pip install -e ".[pinecone]"       # Pinecone vector DB
-pip install -e ".[qdrant]"         # Qdrant vector DB
-pip install -e ".[ragas]"          # RAGAS evaluation
-pip install -e ".[deepeval]"       # DeepEval evaluation
-pip install -e ".[langsmith]"      # LangSmith tracing
-pip install -e ".[rerankers]"      # FlashRank + Cohere rerankers
+### Install specific extras only
 
-# 6. Install dev/test dependencies
-pip install -e ".[dev]"
+```bash
+pip install -e ".[pinecone,qdrant,ragas,langsmith,rerankers]"
 ```
 
 ---

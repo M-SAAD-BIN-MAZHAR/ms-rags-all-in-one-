@@ -320,6 +320,14 @@ class IngestionOrchestrator:
             return PyPDFLoader(source).load()
 
         if loader_class_name == "UnstructuredPDFLoader":
+            try:
+                from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
+                return UnstructuredLoader(source).load()
+            except Exception:  # noqa: BLE001
+                from langchain_community.document_loaders import PyPDFLoader  # noqa: PLC0415
+                return PyPDFLoader(source).load()
+
+        if loader_class_name == "UnstructuredPDFLoader":
             from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
             return UnstructuredLoader(source).load()
 
@@ -331,6 +339,16 @@ class IngestionOrchestrator:
         if loader_class_name == "UnstructuredWordDocumentLoader":
             from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
             return UnstructuredLoader(source).load()
+
+        # ── DOCX loaders ─────────────────────────────────────────────
+        if loader_class_name == "UnstructuredWordDocumentLoader":
+            # Try unstructured first, fall back to docx2txt
+            try:
+                from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
+                return UnstructuredLoader(source).load()
+            except Exception:  # noqa: BLE001
+                from langchain_community.document_loaders import Docx2txtLoader  # noqa: PLC0415
+                return Docx2txtLoader(source).load()
 
         if loader_class_name == "Docx2txtLoader":
             from langchain_community.document_loaders import Docx2txtLoader  # noqa: PLC0415
