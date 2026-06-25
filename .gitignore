@@ -43,5 +43,11 @@ ms_rag_output/
 pipeline.py
 generated/
 
+# Runtime ChromaDB data
+chroma_db/
+
+# Personal files
+Resume/
+
 # Kiro internal (keep specs visible but not workspace settings)
 .kiro/settings/
