@@ -1,0 +1,14 @@
+"""Entry point for `python -m ms_rag` and `ms-rag` CLI command."""
+
+import click
+
+
+def main() -> None:
+    """MS_RAG CLI entry point — implemented in ms_rag.cli.main."""
+    # Deferred import to avoid circular imports at package load time
+    from ms_rag.cli.main import run  # noqa: PLC0415
+    run()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,111 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ms-rag"
+version = "0.1.0"
+description = "Production-Grade RAG Framework Builder — terminal-based interactive CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    # Terminal UI
+    "rich>=13.0.0",
+    "questionary>=2.0.0",
+
+    # CLI framework
+    "click>=8.1.0",
+
+    # LangChain core
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-community>=0.3.0",
+    "langchain-text-splitters>=0.3.0",
+
+    # LangGraph (agentic RAG)
+    "langgraph>=0.2.0",
+
+    # LLM provider packages
+    "langchain-openai>=0.2.0",
+    "langchain-anthropic>=0.3.0",
+    "langchain-cohere>=0.3.0",
+    "langchain-google-genai>=2.0.0",
+    "langchain-mistralai>=0.2.0",
+    "langchain-groq>=0.2.0",
+
+    # HuggingFace (NOT langchain-community — deprecated)
+    "langchain-huggingface>=0.1.0",
+    "sentence-transformers>=3.0.0",
+
+    # Ollama (NOT langchain-community — deprecated)
+    "langchain-ollama>=0.2.0",
+
+    # Unstructured (NOT langchain-community — deprecated)
+    "langchain-unstructured>=0.1.0",
+
+    # LangChain experimental (SemanticChunker)
+    "langchain-experimental>=0.3.0",
+
+    # Vector stores
+    "chromadb>=0.5.0",
+    "faiss-cpu>=1.8.0",
+
+    # Credential encryption
+    "cryptography>=41.0.0",
+
+    # Code generation templates
+    "jinja2>=3.1.0",
+
+    # Session persistence
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+pinecone = ["langchain-pinecone>=0.2.0", "pinecone-client>=4.0.0"]
+qdrant = ["langchain-qdrant>=0.2.0", "qdrant-client>=1.9.0"]
+weaviate = ["langchain-weaviate>=0.0.3", "weaviate-client>=4.0.0"]
+milvus = ["pymilvus>=2.4.0"]
+redis = ["redis>=5.0.0"]
+pgvector = ["psycopg2-binary>=2.9.0", "pgvector>=0.3.0"]
+elasticsearch = ["elasticsearch>=8.0.0"]
+opensearch = ["opensearch-py>=2.4.0"]
+
+# Evaluation frameworks
+ragas = ["ragas>=0.2.0"]
+deepeval = ["deepeval>=1.0.0"]
+trulens = ["trulens-core>=1.0.0", "trulens-apps-langchain>=1.0.0"]
+langsmith = ["langsmith>=0.1.0"]
+langfuse = ["langfuse>=3.0.0"]
+arize-phoenix = ["arize-phoenix>=4.0.0", "openinference-instrumentation-langchain>=0.1.0"]
+
+# Rerankers
+rerankers = [
+    "flashrank>=0.2.0",
+    "cohere>=5.0.0",
+]
+
+# Development / testing
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.12.0",
+    "pytest-asyncio>=0.23.0",
+    "hypothesis>=6.100.0",
+    "coverage>=7.4.0",
+]
+
+[project.scripts]
+ms-rag = "ms_rag.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ms_rag*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["ms_rag"]
+omit = ["tests/*", "ms_rag/codegen/templates/*"]
