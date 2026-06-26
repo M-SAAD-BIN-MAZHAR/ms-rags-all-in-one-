@@ -20,7 +20,7 @@ from ms_rag.ingestion.vectordb_connector import (
     ConnectionResult,
     VectorDBConnector,
 )
-from ms_rag.models import VectorDBConfig
+from ms_rag.models import EmbeddingModelConfig, VectorDBConfig
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +194,58 @@ class TestGetVectorStoreDispatch:
                         pytest.fail(
                             f"DB type {db_type!r} raised ValueError unexpectedly: {exc}"
                         )
+
+    def test_chroma_accepts_legacy_persist_dir_alias(self) -> None:
+        connector = VectorDBConnector()
+        config = VectorDBConfig(
+            db_type="chroma",
+            connection_params={"CHROMA_PERSIST_DIR": "./legacy_chroma"},
+            collection_name="test_collection",
+        )
+
+        with patch("langchain_chroma.Chroma") as mock_chroma:
+            connector.get_vector_store(config, MagicMock())
+
+        assert mock_chroma.call_args is not None
+        assert mock_chroma.call_args.kwargs["persist_directory"] == "./legacy_chroma"
+
+    def test_faiss_gets_default_persistence_path(self) -> None:
+        connector = VectorDBConnector()
+        config = VectorDBConfig(
+            db_type="faiss",
+            connection_params={},
+            collection_name="test_collection",
+        )
+
+        store = connector.get_vector_store(config, MagicMock())
+
+        assert store is not None
+        assert config.connection_params["FAISS_INDEX_PATH"].endswith(
+            "faiss_indexes\\test_collection"
+        ) or config.connection_params["FAISS_INDEX_PATH"].endswith(
+            "faiss_indexes/test_collection"
+        )
+
+    def test_embedding_dimension_is_carried_into_vector_db_config(self) -> None:
+        connector = VectorDBConnector()
+        embedding = EmbeddingModelConfig(
+            provider="openai",
+            model_id="text-embedding-3-small",
+        )
+
+        with patch("ms_rag.ingestion.vectordb_connector.questionary") as mock_q, \
+             patch("ms_rag.ui.prompts.questionary") as mock_prompt_q, \
+             patch("ms_rag.ui.prompts.get_console") as mock_console:
+            mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
+            mock_q.text.return_value.ask.return_value = ""
+            mock_prompt_q.select.return_value.ask.return_value = "chroma"
+            mock_prompt_q.text.return_value.ask.return_value = "test_collection"
+            mock_prompt_q.confirm.return_value.ask.return_value = True
+            mock_console.return_value = MagicMock()
+
+            config = connector.prompt_and_configure(embedding)
+
+        assert config.dimension == 1536
 
 
 class TestIngestDocuments:

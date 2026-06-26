@@ -32,8 +32,9 @@ MS\_RAG is a **production-grade, terminal-based interactive CLI framework** that
 Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generator**:
 
 - You configure interactively through 16 guided steps
+- You can optionally enable OpenTelemetry tracing from the terminal at startup
 - Your documents are ingested and indexed live during Step 9
-- You query your pipeline in real-time from Step 10 onwards
+- The live query loop starts after the full setup flow and runtime build complete
 - At the end, MS\_RAG generates a **standalone `pipeline.py`** you own completely — no runtime dependency on MS\_RAG
 
 ---
@@ -64,6 +65,7 @@ Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generat
 │                      MS_RAG CLI                          │
 ├──────────────┬──────────────────────────────────────────┤
 │ Step 1       │ ASCII Banner (MS_RAG)                    │
+│ Optional     │ OpenTelemetry tracing prompt             │
 │ Step 2       │ LLM Provider Credentials (12 providers)  │
 │ Step 3       │ RAG Architecture Selection (15 types)    │
 │ Step 4       │ Document Type Selection (18 types)       │
@@ -71,16 +73,13 @@ Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generat
 │ Steps 6–7    │ Chunking Strategy + Parameters           │
 │ Step 8       │ Embedding Model Selection (22+ models)   │
 │ Step 9       │ Vector DB + LIVE Ingestion (12 databases)│
-├──────────────┴──────────────────────────────────────────┤
-│              LIVE QUERY LOOP                             │
-├──────────────┬──────────────────────────────────────────┤
-│ Step 10      │ Interactive Query Input                  │
-│ Step 11      │ Query Enhancement (7 techniques)         │
-│ Step 12      │ Retrieval Strategy (10 strategies)       │
-│ Step 13      │ Reranking (6 rerankers)                  │
-│ Step 14      │ Context Compression (6 techniques)       │
-│ Step 15      │ System Prompt Configuration              │
-│ Step 16      │ Evaluation Frameworks (12 frameworks)    │
+│ Step 10      │ Query Enhancement (7 techniques)         │
+│ Step 11      │ Retrieval Strategy (10 strategies)       │
+│ Step 12      │ Reranking (6 rerankers)                  │
+│ Step 13      │ Context Compression (6 techniques)       │
+│ Step 14      │ System Prompt Configuration              │
+│ Step 15      │ Evaluation Frameworks (12 frameworks)    │
+│ Step 16      │ Runtime build + interactive query loop   │
 ├──────────────┴──────────────────────────────────────────┤
 │              CODE GENERATOR                              │
 │         pipeline.py + requirements.txt                   │
@@ -148,7 +147,7 @@ pip install -e ".[pinecone,qdrant,ragas,langsmith,rerankers]"
 ## Quick Start
 
 ```bash
-# Interactive mode — starts the 16-step workflow
+# Interactive mode — starts the guided workflow
 ms-rag
 
 # Or using Python directly
@@ -159,6 +158,8 @@ ms-rag --load session.json
 ```
 
 Saved sessions rebuild the live vector store connection, retriever stack, LLM, and RAG chain via `rebuild_session_runtime()`. Your vector DB data must still exist on disk or at the configured endpoint.
+
+At startup, the CLI also asks whether you want to enable OpenTelemetry tracing for that session. If you decline, the framework continues with normal structured logging only.
 
 ---
 
@@ -201,11 +202,17 @@ Choose your RAG variant. Types marked `[LangGraph]` use a StateGraph agentic loo
  8. GraphRAG
 ```
 
-**Step 9 — Live Ingestion**
-After selecting your vector DB and entering credentials, MS\_RAG runs a connection test, then ingests your documents with a real-time progress bar.
+**Startup Prompt — Optional Tracing**
+Right after the banner, MS\_RAG can ask whether you want OpenTelemetry tracing for the current session. This is optional and does not affect normal usage if you decline it.
 
-**Step 10 — Query Loop**
-Type natural language questions. Available commands:
+**Step 9 — Live Ingestion**
+After selecting your vector DB and entering credentials, MS\_RAG runs a connection test, shows a final ingestion review, asks for confirmation, then ingests your documents with a real-time progress bar.
+
+**Step 10–15 — Query Pipeline Configuration**
+Query enhancement, retrieval, reranking, compression, system prompt, and evaluation are configured before the live runtime starts.
+
+**Step 16 — Live Query Loop**
+Once the runtime is built, you can type natural language questions. Available commands:
 
 | Command | Action |
 |---------|--------|
@@ -214,7 +221,7 @@ Type natural language questions. Available commands:
 | `/help` | List available query-loop commands |
 | `/exit` or `/quit` | Exit with confirmation prompt |
 
-Empty Enter in the query loop re-prompts instead of exiting. Required workflow inputs (providers, document sources, vector DB connection, etc.) loop until valid.
+Empty Enter in the query loop re-prompts instead of exiting. Required workflow inputs (providers, document sources, vector DB connection, telemetry choice, etc.) loop until valid.
 
 ---
 
@@ -284,6 +291,13 @@ LANGCHAIN_TRACING_V2=true
 LANGCHAIN_PROJECT=ms_rag_pipeline
 LANGFUSE_PUBLIC_KEY=...
 LANGFUSE_SECRET_KEY=...
+
+# Optional OpenTelemetry fallback for non-interactive runs
+MS_RAG_OTEL_ENABLED=1
+OTEL_SERVICE_NAME=ms-rag
+OTEL_ENVIRONMENT=production
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer your-token
 ```
 
 ---
@@ -391,7 +405,7 @@ pytest tests/ --cov=ms_rag --cov-report=html
 
 ## Evaluation Runtime
 
-When evaluation is enabled in Step 16, metrics are computed **live after each query**:
+When evaluation is enabled in Step 15, metrics are computed **live after each query**:
 
 | Evaluator | Runtime behaviour |
 |-----------|-------------------|

@@ -45,6 +45,11 @@ generated/
 
 # Runtime ChromaDB data
 chroma_db/
+faiss_indexes/
+
+# Runtime telemetry / evaluation artifacts
+.deepeval/
+ms_rag_metrics.jsonl
 
 # Personal files
 Resume/

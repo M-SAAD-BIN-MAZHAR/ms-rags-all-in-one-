@@ -34,6 +34,7 @@ from ms_rag.models import (
 )
 from ms_rag.utils.exceptions import IngestionError
 from ms_rag.utils.metadata import sanitize_documents
+from ms_rag.utils.telemetry import TelemetryReporter
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +190,7 @@ class IngestionOrchestrator:
             IngestionResult with chunk_count, collection_name, failed_documents.
         """
         console = Console()
+        telemetry = TelemetryReporter()
         doc_types = list(loader_map.keys())
         discovered = self.discover_documents(sources, doc_types)
         total = len(discovered)
@@ -212,35 +214,43 @@ class IngestionOrchestrator:
         total_chunks = 0
         failed_documents: list[tuple[str, str]] = []
 
-        for idx, source in enumerate(discovered):
-            source_str = str(source)
-            try:
-                # Load document(s)
-                docs = self._load_source(
-                    source=source,
-                    loader_map=loader_map,
-                    youtube_language=youtube_language,
-                )
+        with telemetry.span(
+            "ingestion.run",
+            source_count=total,
+            collection_name=vector_db.collection_name,
+            db_type=vector_db.db_type,
+        ):
+            for idx, source in enumerate(discovered):
+                source_str = str(source)
+                try:
+                    with telemetry.span("ingestion.source", source=source_str):
+                        # Load document(s)
+                        docs = self._load_source(
+                            source=source,
+                            loader_map=loader_map,
+                            youtube_language=youtube_language,
+                        )
 
-                # Chunk
-                chunks = splitter.split_documents(docs)
-                sanitize_documents(chunks)
+                        # Chunk
+                        chunks = splitter.split_documents(docs)
+                        sanitize_documents(chunks)
 
-                # Store (with retry)
-                def _store(c: list = chunks, vs: object = vector_store) -> None:
-                    vs.add_documents(c)  # type: ignore[union-attr]
+                        # Store (with retry)
+                        def _store(c: list = chunks, vs: object = vector_store) -> None:
+                            vs.add_documents(c)  # type: ignore[union-attr]
 
-                retry_with_backoff(_store)
-                total_chunks += len(chunks)
+                        retry_with_backoff(_store)
+                        total_chunks += len(chunks)
 
-            except Exception as exc:  # noqa: BLE001
-                failed_documents.append((source_str, str(exc)))
-                console.print(
-                    f"[yellow]  ⚠ Skipped: {source_str} — {exc}[/yellow]"
-                )
+                except Exception as exc:  # noqa: BLE001
+                    failed_documents.append((source_str, str(exc)))
+                    telemetry.record_error("ingestion.source_failed", str(exc), source=source_str)
+                    console.print(
+                        f"[yellow]  ⚠ Skipped: {source_str} — {exc}[/yellow]"
+                    )
 
-            if progress_callback:
-                progress_callback(idx + 1, total)
+                if progress_callback:
+                    progress_callback(idx + 1, total)
 
         result = IngestionResult(
             chunk_count=total_chunks,

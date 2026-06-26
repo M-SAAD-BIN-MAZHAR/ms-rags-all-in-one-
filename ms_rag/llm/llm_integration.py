@@ -13,6 +13,7 @@ from typing import Any
 
 from ms_rag.models import PipelineConfig
 from ms_rag.utils.credentials import resolve_credential, resolve_model_id
+from ms_rag.utils.telemetry import TelemetryReporter
 from ms_rag.workflow.rag_type_selector import LANGGRAPH_TYPES
 
 
@@ -220,6 +221,7 @@ def build_rag_chain(
     from langchain_core.prompts import ChatPromptTemplate  # noqa: PLC0415
     from langchain_core.output_parsers import StrOutputParser  # noqa: PLC0415
     from langchain_core.runnables import RunnablePassthrough  # noqa: PLC0415
+    telemetry = TelemetryReporter()
 
     def format_docs(docs: list) -> str:
         return "\n\n".join(
@@ -232,15 +234,16 @@ def build_rag_chain(
         ("human", "Context passages:\n\n{context}\n\nQuestion: {question}"),
     ])
 
-    rag_chain = (
-        {
-            "context": retriever | format_docs,  # type: ignore[operator]
-            "question": RunnablePassthrough(),
-        }
-        | prompt
-        | llm  # type: ignore[operator]
-        | StrOutputParser()
-    )
+    with telemetry.span("rag.chain.build"):
+        rag_chain = (
+            {
+                "context": retriever | format_docs,  # type: ignore[operator]
+                "question": RunnablePassthrough(),
+            }
+            | prompt
+            | llm  # type: ignore[operator]
+            | StrOutputParser()
+        )
 
     return rag_chain
 
@@ -287,9 +290,7 @@ def rebuild_session_runtime(
     """Rebuild vector store, retriever, LLM, and RAG chain from a saved config."""
     from ms_rag.ingestion.vectorization_module import VectorizationModule  # noqa: PLC0415
     from ms_rag.ingestion.vectordb_connector import VectorDBConnector  # noqa: PLC0415
-    from ms_rag.query.context_compressor import ContextCompressor  # noqa: PLC0415
-    from ms_rag.query.reranking_module import RerankingModule  # noqa: PLC0415
-    from ms_rag.query.retrieval_strategy import RetrievalStrategyModule  # noqa: PLC0415
+    telemetry = TelemetryReporter()
 
     if config.embedding_model is None or config.vector_db is None or config.retrieval is None:
         raise ValueError(
@@ -297,10 +298,44 @@ def rebuild_session_runtime(
             "strategy are required to rebuild the runtime pipeline."
         )
 
-    vectorization = VectorizationModule()
-    embeddings = vectorization.get_embeddings(config.embedding_model, credential_store)
-    db_connector = VectorDBConnector(credential_store=credential_store)
-    vector_store = db_connector.get_vector_store(config.vector_db, embeddings)
+    with telemetry.span("session.runtime.rebuild"):
+        vectorization = VectorizationModule()
+        embeddings = vectorization.get_embeddings(config.embedding_model, credential_store)
+        db_connector = VectorDBConnector(credential_store=credential_store)
+        vector_store = db_connector.get_vector_store(config.vector_db, embeddings)
+
+        runtime = build_session_runtime_from_vector_store(
+            config,
+            credential_store,
+            vector_store=vector_store,
+            embeddings=embeddings,
+        )
+    runtime["vector_store"] = vector_store
+    return runtime
+
+
+def build_session_runtime_from_vector_store(
+    config: PipelineConfig,
+    credential_store: object,
+    *,
+    vector_store: object,
+    embeddings: object | None = None,
+) -> dict[str, object]:
+    """Build retriever, LLM, and RAG chain from an existing vector store.
+
+    The interactive setup path has already populated ``vector_store`` during
+    ingestion. Reusing it is important for in-memory stores such as FAISS,
+    where creating a new wrapper would lose the just-ingested documents.
+    """
+    from ms_rag.query.context_compressor import ContextCompressor  # noqa: PLC0415
+    from ms_rag.query.reranking_module import RerankingModule  # noqa: PLC0415
+    from ms_rag.query.retrieval_strategy import RetrievalStrategyModule  # noqa: PLC0415
+
+    if config.retrieval is None:
+        raise ValueError(
+            "Session config is incomplete — retrieval strategy is required "
+            "to build the runtime pipeline."
+        )
 
     provider = config.configured_providers[0] if config.configured_providers else "ollama"
     llm = get_llm(provider, "default", credential_store=credential_store)
@@ -564,54 +599,56 @@ def process_query(
         The generated answer string.
     """
     from ms_rag.models import SessionState  # noqa: PLC0415
+    telemetry = TelemetryReporter()
 
     ss: SessionState = session_state  # type: ignore[assignment]
     cfg = ss.config
 
-    # Step 1: Query Enhancement
-    enhanced_queries = [query]
-    if query_enhancer and cfg.query_enhancement:
+    with telemetry.span("query.process", query_length=len(query)):
+        # Step 1: Query Enhancement
+        enhanced_queries = [query]
+        if query_enhancer and cfg.query_enhancement:
+            try:
+                enhanced_queries = query_enhancer.enhance(  # type: ignore[union-attr]
+                    query=query,
+                    techniques=cfg.query_enhancement,
+                    llm=ss.llm,
+                )
+            except Exception:  # noqa: BLE001
+                enhanced_queries = [query]
+
+        # Use the first enhanced query for retrieval
+        primary_query = enhanced_queries[0] if enhanced_queries else query
+
+        # Step 2: invoke the RAG chain
+        if ss.rag_chain is None:
+            return "Pipeline not initialised. Please complete all setup steps first."
+
         try:
-            enhanced_queries = query_enhancer.enhance(  # type: ignore[union-attr]
-                query=query,
-                techniques=cfg.query_enhancement,
-                llm=ss.llm,
+            requires_langgraph = bool(
+                cfg.rag_type and cfg.rag_type.requires_langgraph
             )
-        except Exception:  # noqa: BLE001
-            enhanced_queries = [query]
-
-    # Use the first enhanced query for retrieval
-    primary_query = enhanced_queries[0] if enhanced_queries else query
-
-    # Step 2: invoke the RAG chain
-    if ss.rag_chain is None:
-        return "Pipeline not initialised. Please complete all setup steps first."
-
-    try:
-        requires_langgraph = bool(
-            cfg.rag_type and cfg.rag_type.requires_langgraph
-        )
-        answer = invoke_rag_chain(
-            ss.rag_chain,
-            primary_query,
-            requires_langgraph=requires_langgraph,
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise exc  # re-raise so QueryLoop can handle it
-
-    # Step 3: Evaluation (if enabled)
-    if evaluation_framework and cfg.evaluation_enabled and cfg.evaluation:
-        try:
-            context_docs = []
-            if ss.retriever:
-                context_docs = ss.retriever.invoke(primary_query)
-            evaluation_framework.evaluate(  # type: ignore[union-attr]
-                query=query,
-                context=context_docs,
-                answer=answer,
-                config=cfg.evaluation,
+            answer = invoke_rag_chain(
+                ss.rag_chain,
+                primary_query,
+                requires_langgraph=requires_langgraph,
             )
-        except Exception:  # noqa: BLE001
-            pass  # evaluation failure is non-fatal
+        except Exception as exc:  # noqa: BLE001
+            raise exc  # re-raise so QueryLoop can handle it
 
-    return answer
+        # Step 3: Evaluation (if enabled)
+        if evaluation_framework and cfg.evaluation_enabled and cfg.evaluation:
+            try:
+                context_docs = []
+                if ss.retriever:
+                    context_docs = ss.retriever.invoke(primary_query)
+                evaluation_framework.evaluate(  # type: ignore[union-attr]
+                    query=query,
+                    context=context_docs,
+                    answer=answer,
+                    config=cfg.evaluation,
+                )
+            except Exception:  # noqa: BLE001
+                pass  # evaluation failure is non-fatal
+
+        return answer

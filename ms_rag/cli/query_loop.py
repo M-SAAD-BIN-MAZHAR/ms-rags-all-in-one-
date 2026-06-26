@@ -28,6 +28,8 @@ except ImportError:
 
 from ms_rag.models import SessionState
 from ms_rag.ui.prompts import get_console, print_error, print_hint, print_success
+from ms_rag.utils.logging import get_logger, log_error, log_event
+from ms_rag.utils.telemetry import TelemetryReporter
 
 # Valid slash commands
 VALID_COMMANDS: list[str] = ["/exit", "/quit", "/config", "/save", "/help"]
@@ -60,6 +62,8 @@ class QueryLoop:
     def run(self, session_state: SessionState) -> None:
         """Run the interactive query loop until the user exits."""
         console = get_console()
+        logger = get_logger()
+        telemetry = TelemetryReporter()
 
         console.print(
             Panel(
@@ -131,7 +135,13 @@ class QueryLoop:
             session_state.query_history.append((query, ""))
 
             try:
-                answer = self._process_query(query, session_state)
+                with telemetry.span("query.process", query_length=len(query)):
+                    with console.status(
+                        "[bold cyan]Retrieving context and generating answer...[/bold cyan]",
+                        spinner="dots",
+                    ):
+                        answer = self._process_query(query, session_state)
+                log_event(logger, "query.completed", "Query answered", query_length=len(query))
                 if session_state.query_history:
                     last = session_state.query_history[-1]
                     session_state.query_history[-1] = (last[0], answer)
@@ -146,6 +156,12 @@ class QueryLoop:
                 )
             except Exception as exc:  # noqa: BLE001
                 print_error(console, f"Query error: {type(exc).__name__}: {exc}")
+                log_error(logger, "query.failed", "Query processing failed", query_length=len(query))
+                telemetry.record_error(
+                    "query.failed",
+                    f"{type(exc).__name__}: {exc}",
+                    query_length=len(query),
+                )
 
     def _classify_input(self, raw: str) -> str:
         """Classify raw user input."""

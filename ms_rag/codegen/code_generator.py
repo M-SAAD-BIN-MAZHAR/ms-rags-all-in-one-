@@ -429,6 +429,7 @@ def create_chunks(documents: list) -> list:
         collection = config.vector_db.collection_name if config.vector_db else "ms_rag_collection"
         emb_provider = config.embedding_model.provider if config.embedding_model else "openai"
         emb_model = config.embedding_model.model_id if config.embedding_model else "text-embedding-3-small"
+        params = config.vector_db.connection_params if config.vector_db else {}
 
         emb_init = {
             "openai": f'OpenAIEmbeddings(model="{emb_model}")',
@@ -440,11 +441,62 @@ def create_chunks(documents: list) -> list:
             "mistral": f'MistralAIEmbeddings(model="{emb_model}")',
         }.get(emb_provider, f'OpenAIEmbeddings(model="{emb_model}")')
 
+        if db_type == "faiss":
+            default_path = params.get("FAISS_INDEX_PATH") or f"./faiss_indexes/{collection}"
+            default_path_literal = repr(str(default_path))
+            return f'''# ─── Embedding + Vector Store ─────────────────────────────────
+def init_vector_store(chunks: list = None):
+    """Initialise embeddings and FAISS vector store with local persistence."""
+    embeddings = {emb_init}
+    index_path = Path(os.getenv("FAISS_INDEX_PATH", {default_path_literal}))
+
+    if chunks:
+        vector_store = FAISS.from_documents(chunks, embeddings)
+        index_path.mkdir(parents=True, exist_ok=True)
+        vector_store.save_local(str(index_path))
+        return vector_store
+
+    if not index_path.exists():
+        raise RuntimeError(
+            f"FAISS index not found at {{index_path}}. "
+            "Run with --ingest first or set FAISS_INDEX_PATH to an existing index."
+        )
+
+    return FAISS.load_local(
+        str(index_path),
+        embeddings,
+        allow_dangerous_deserialization=True,
+    )'''
+
+        if db_type == "qdrant":
+            return f'''# ─── Embedding + Vector Store ─────────────────────────────────
+def init_vector_store(chunks: list = None):
+    """Initialise embeddings and Qdrant vector store. Ingest chunks if provided."""
+    from qdrant_client import QdrantClient
+
+    embeddings = {emb_init}
+    url = os.getenv("QDRANT_URL", "http://localhost:6333")
+    api_key = os.getenv("QDRANT_API_KEY") or None
+
+    if chunks:
+        return QdrantVectorStore.from_documents(
+            chunks,
+            embeddings,
+            url=url,
+            api_key=api_key,
+            collection_name="{collection}",
+        )
+
+    client = QdrantClient(url=url, api_key=api_key)
+    return QdrantVectorStore(
+        client=client,
+        collection_name="{collection}",
+        embedding=embeddings,
+    )'''
+
         store_init = {
             "chroma": f'Chroma(collection_name="{collection}", embedding_function=embeddings, persist_directory="./chroma_db")',
-            "faiss": "FAISS.from_documents(chunks, embeddings)",
             "pinecone": f'PineconeVectorStore(index_name="{collection}", embedding=embeddings)',
-            "qdrant": f'QdrantVectorStore.from_documents(chunks, embeddings, url=os.getenv("QDRANT_URL", "http://localhost:6333"), collection_name="{collection}")',
             "pgvector": f'PGVector(embeddings=embeddings, collection_name="{collection}", connection=os.getenv("PGVECTOR_CONNECTION_STRING", ""))',
             "milvus": f'Milvus(embedding_function=embeddings, collection_name="{collection}", connection_args={{"uri": os.getenv("MILVUS_URI", "http://localhost:19530")}})',
             "elasticsearch": f'ElasticsearchStore(index_name="{collection}", embedding=embeddings, es_url=os.getenv("ELASTICSEARCH_URL", "http://localhost:9200"))',

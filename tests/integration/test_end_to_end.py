@@ -101,7 +101,7 @@ def test_complete_rag_lifecycle_end_to_end() -> None:
             ),
             vector_db=VectorDBConfig(
                 db_type="faiss",
-                connection_params={},
+                connection_params={"FAISS_INDEX_PATH": str(temp_dir / "faiss_index")},
                 collection_name="test_collection",
             ),
             document_sources=[str(doc_file)],

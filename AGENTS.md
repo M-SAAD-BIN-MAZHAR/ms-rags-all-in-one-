@@ -40,6 +40,40 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
+### Recent Runtime Fix — Vector Store Rebuild Crash
+
+**Issue observed:** Running `ms-rag` with FAISS local vector DB could ingest documents successfully, then crash before the live query loop with:
+
+```text
+RuntimeError: FAISS store has no documents yet.
+```
+
+**Root cause:** The interactive setup path ingested into a populated vector store, then called `rebuild_session_runtime()`, which created a brand-new vector store wrapper. FAISS made this visible immediately because the fresh wrapper had no in-memory documents, so MMR/dense retrieval failed when building the retriever. The same pattern was risky for Chroma, Pinecone, Qdrant, Weaviate, Milvus, Redis, PGVector, Elasticsearch, OpenSearch, Azure AI Search, and MongoDB Atlas because the live setup should always query the exact store that ingestion just populated.
+
+**Resolution:** The interactive path now calls `build_session_runtime_from_vector_store()` and reuses the already-populated vector store for every backend. `_FAISSFactory` also persists by default to `./faiss_indexes/{collection_name}`, honors `FAISS_INDEX_PATH`, loads an existing local FAISS index on startup, and saves after `add_documents()`, so `--load` can rebuild FAISS-backed sessions when the persisted index directory exists. Chroma accepts both `CHROMA_PERSIST_DIRECTORY` and the legacy `CHROMA_PERSIST_DIR` alias.
+
+**Generated pipeline hardening:** Standalone generated FAISS pipelines now save on ingest and load the persisted index in query-only mode. Standalone generated Qdrant pipelines now connect to an existing collection in query-only mode instead of calling `from_documents()` without chunks.
+
+**Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\property\test_codegen_properties.py tests\integration\test_rebuild_session_runtime.py tests\integration\test_end_to_end.py tests\unit\test_vectordb_connector.py -q` passed with 41 tests.
+
+### Recent Production UX Hardening — Permissions, Embeddings, and Logs
+
+**User permission principle:** Before irreversible or state-changing setup work, keep an explicit confirmation gate. The live setup now reviews embedding model, embedding dimension, vector DB, collection/index, and sources before ingestion, then asks for confirmation before writing vectors.
+
+**Embedding/vector DB compatibility:** Step 8 now explains that embedding dimensions must match the vector DB collection/index. Step 9 carries the selected embedding dimension into `VectorDBConfig.dimension` and displays it in the vector DB summary. If users change embedding models, guide them to create a fresh collection/index or re-ingest.
+
+**Recovery path:** Embedding/vector-store/ingestion setup failures now show likely causes and offer retry, change embedding model, change vector DB settings, or abort. Runtime build failures are wrapped with a clearer production-facing message.
+
+**Terminal feedback:** Query mode now shows a Rich status spinner while context retrieval and answer generation are running.
+
+**Structured observability:** The CLI and query loop now emit structured JSON logs plus lightweight telemetry events for session start/load, selection steps, ingestion approval/completion, and query success/failure. This is intentionally small and local-first so it can later be swapped for a real backend.
+
+**OpenTelemetry:** Optional OpenTelemetry tracing now wraps the main workflow phases and is enabled through a startup terminal prompt in the CLI. Env vars are still supported as a fallback for non-interactive runs, and the usual knobs are `OTEL_SERVICE_NAME`, `OTEL_ENVIRONMENT`, `OTEL_EXPORTER_OTLP_ENDPOINT`, and `OTEL_EXPORTER_OTLP_HEADERS`. It is safe to leave off in local runs.
+
+**Smoke tests:** `tests/smoke/test_vector_db_smoke.py` contains opt-in live backend checks for Chroma, FAISS, and Qdrant. They only run when `MS_RAG_SMOKE_VECTOR_DBS` names the target backend and the required connection settings are present.
+
+**Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\property\test_vectorization_properties.py tests\unit\test_vectordb_connector.py tests\property\test_query_loop_properties.py -q` passed with 66 tests.
+
 ### Task Checklist
 
 - [x] Task 1 — Project scaffold + core data models (`ms_rag/models.py`, `pyproject.toml`, exceptions, validation)
@@ -242,6 +276,7 @@ class SessionState:
 
 ```
 Step 1  → Banner (ASCII art "MS_RAG")
+Optional → OpenTelemetry startup prompt (user can enable tracing for the session)
 Step 2  → LLM Provider credentials (12 providers, encrypted persistence)
 Step 3  → RAG type selection (15 types; 4 require LangGraph)
 Step 4  → Document type selection (16+ types, multi-select)
@@ -250,13 +285,13 @@ Step 6  → Chunking strategy (11 strategies)
 Step 7  → Chunking parameters (chunk_size, overlap, separators, tokenizer)
 Step 8  → Embedding model (20+ models, filtered by configured providers)
 Step 9  → Vector DB selection + credentials + connection test + LIVE INGESTION
-Step 10 → LIVE query loop (/exit confirm, /config structured, /save, unknown cmd error)
-Step 11 → Query enhancement (7 techniques, HyDE needs LLM selection)
-Step 12 → Retrieval strategy (10 strategies including TF-IDF separate from BM25)
-Step 13 → Reranking (6 rerankers, local model prompt for cross-encoder/BGE/ColBERT)
-Step 14 → Context compression (6 techniques, ordered, LLM-dependency check)
-Step 15 → System prompt (5 testable properties, 10k char limit for replace)
-Step 16 → Evaluation (12 frameworks including TruLens, RAGAS, DeepEval, LangSmith)
+Step 10 → Query enhancement (7 techniques, HyDE needs LLM selection)
+Step 11 → Retrieval strategy (10 strategies including TF-IDF separate from BM25)
+Step 12 → Reranking (6 rerankers, local model prompt for cross-encoder/BGE/ColBERT)
+Step 13 → Context compression (6 techniques, ordered, LLM-dependency check)
+Step 14 → System prompt (5 testable properties, 10k char limit for replace)
+Step 15 → Evaluation (12 frameworks including TruLens, RAGAS, DeepEval, LangSmith)
+Step 16 → Runtime build + LIVE query loop (/exit confirm, /config structured, /save, unknown cmd error)
 → Code Generator → pipeline.py + requirements.txt (standalone, no MS_RAG dependency)
 ```
 

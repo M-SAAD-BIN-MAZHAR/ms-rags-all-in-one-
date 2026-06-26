@@ -22,6 +22,8 @@ from ms_rag.ingestion.vectorization_module import (
     EmbeddingModelInfo,
     VectorizationModule,
     get_displayable_models,
+    get_embedding_dimension,
+    get_embedding_model_info,
 )
 from ms_rag.models import EmbeddingModelConfig
 
@@ -78,6 +80,25 @@ def test_openai_models_shown_when_openai_configured() -> None:
     openai_models = {m.model_id for m in EMBEDDING_MODELS if m.provider == "openai"}
     displayable_ids = {m.model_id for m in get_displayable_models(["openai"])}
     assert openai_models.issubset(displayable_ids)
+
+
+def test_embedding_dimension_lookup_returns_catalogue_dimension() -> None:
+    config = EmbeddingModelConfig(
+        provider="openai",
+        model_id="text-embedding-3-small",
+    )
+
+    assert get_embedding_dimension(config) == 1536
+
+
+def test_unknown_embedding_dimension_returns_none() -> None:
+    config = EmbeddingModelConfig(
+        provider="ollama",
+        model_id="custom-local-model",
+    )
+
+    assert get_embedding_model_info(config.model_id) is None
+    assert get_embedding_dimension(config) is None
 
 
 def test_openai_models_not_shown_without_credentials() -> None:
@@ -246,4 +267,3 @@ class TestGetEmbeddingsDispatch:
                         pytest.fail(
                             f"Provider {provider!r} raised ValueError unexpectedly: {exc}"
                         )
-

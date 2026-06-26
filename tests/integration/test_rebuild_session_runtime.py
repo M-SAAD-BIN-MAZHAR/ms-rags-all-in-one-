@@ -6,7 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ms_rag.llm.llm_integration import rebuild_session_runtime
+from ms_rag.llm.llm_integration import (
+    build_session_runtime_from_vector_store,
+    rebuild_session_runtime,
+)
 from ms_rag.models import (
     ChunkingConfig,
     CredentialStore,
@@ -152,3 +155,33 @@ class TestRebuildSessionRuntime:
 
         mock_build_stack.assert_called_once()
         assert runtime["retriever"] is stacked
+
+    @patch("ms_rag.llm.llm_integration.build_rag_chain")
+    @patch("ms_rag.llm.llm_integration.get_llm")
+    @patch("ms_rag.query.retrieval_strategy.RetrievalStrategyModule.get_retriever")
+    def test_builds_runtime_from_existing_vector_store(
+        self,
+        mock_get_retriever: MagicMock,
+        mock_get_llm: MagicMock,
+        mock_build_chain: MagicMock,
+    ) -> None:
+        config = _minimal_config()
+        existing_store = MagicMock(name="already_populated_vector_store")
+        retriever = MagicMock(name="retriever")
+        llm = MagicMock(name="llm")
+        chain = MagicMock(name="rag_chain")
+        mock_get_retriever.return_value = retriever
+        mock_get_llm.return_value = llm
+        mock_build_chain.return_value = chain
+
+        runtime = build_session_runtime_from_vector_store(
+            config,
+            CredentialStore(),
+            vector_store=existing_store,
+            embeddings=MagicMock(name="embeddings"),
+        )
+
+        assert runtime["vector_store"] is existing_store
+        assert runtime["retriever"] is retriever
+        mock_get_retriever.assert_called_once()
+        assert mock_get_retriever.call_args.args[1] is existing_store

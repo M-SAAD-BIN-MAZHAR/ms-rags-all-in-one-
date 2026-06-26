@@ -234,6 +234,21 @@ EMBEDDING_MODELS: list[EmbeddingModelInfo] = [
 EMBEDDING_MODEL_IDS: list[str] = [m.model_id for m in EMBEDDING_MODELS]
 
 
+def get_embedding_model_info(model_id: str) -> EmbeddingModelInfo | None:
+    """Return catalogue metadata for a known embedding model id."""
+    return next((m for m in EMBEDDING_MODELS if m.model_id == model_id), None)
+
+
+def get_embedding_dimension(config: EmbeddingModelConfig | None) -> int | None:
+    """Return the selected embedding dimension when the catalogue knows it."""
+    if config is None:
+        return None
+    info = get_embedding_model_info(config.model_id)
+    if info and info.dimensions > 0:
+        return info.dimensions
+    return None
+
+
 def get_displayable_models(configured_providers: list[str]) -> list[EmbeddingModelInfo]:
     """Return models whose provider is configured, plus all local/Ollama/HF models.
 
@@ -284,6 +299,11 @@ class VectorizationModule:
         """
         console = Console()
         console.print("\n[bold cyan]Step 8 — Select Embedding Model[/bold cyan]\n")
+        console.print(
+            "[dim]  Pick the embedding model before the vector database. "
+            "The vector dimension must match the collection/index you use; "
+            "changing models later usually means creating a new collection or re-indexing.[/dim]\n"
+        )
 
         displayable = get_displayable_models(configured_providers)
         if not displayable:
@@ -296,7 +316,11 @@ class VectorizationModule:
 
         choices = [
             questionary.Choice(
-                title=f"{m.display_name}  ({m.dimensions}d)  —  {m.description}",
+                title=(
+                    f"{m.display_name}  "
+                    f"({m.dimensions if m.dimensions else 'custom'} dimensions)  —  "
+                    f"{m.description}"
+                ),
                 value=m.model_id,
             )
             for m in displayable
@@ -350,6 +374,16 @@ class VectorizationModule:
             f"[green]  ✓ Embedding model: [bold]{selected_id}[/bold] "
             f"(provider: {provider})[/green]"
         )
+        if selected_info and selected_info.dimensions:
+            console.print(
+                f"[dim]  Vector dimension: {selected_info.dimensions}. "
+                "Use a fresh collection/index if your existing database was built with a different dimension.[/dim]"
+            )
+        elif provider == "ollama":
+            console.print(
+                "[yellow]  ⚠ Custom Ollama dimension is model-dependent. "
+                "Check the model's embedding dimension before reusing an existing vector index.[/yellow]"
+            )
 
         return config
 

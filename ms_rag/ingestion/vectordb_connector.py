@@ -16,6 +16,7 @@ Requirement 9:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 try:
     import questionary
@@ -31,7 +32,7 @@ except ImportError:
     BarColumn = None  # type: ignore[assignment]
     Table = None  # type: ignore[assignment]
 
-from ms_rag.models import VectorDBConfig, IngestionResult
+from ms_rag.models import EmbeddingModelConfig, VectorDBConfig, IngestionResult
 from ms_rag.utils.exceptions import ConnectionError as MSRAGConnectionError
 from ms_rag.utils.metadata import sanitize_documents
 
@@ -189,7 +190,10 @@ class VectorDBConnector:
     def __init__(self, credential_store: object | None = None) -> None:
         self._credential_store = credential_store
 
-    def prompt_and_configure(self) -> VectorDBConfig:
+    def prompt_and_configure(
+        self,
+        embedding_model: EmbeddingModelConfig | None = None,
+    ) -> VectorDBConfig:
         """Interactive flow: select DB → prompt credentials → confirm → return config.
 
         Requirement 9.1-9.3.
@@ -214,6 +218,8 @@ class VectorDBConnector:
 
         db_info = VECTOR_DB_MAP[db_type]
         connection_params: dict[str, str] = {}
+        embedding_dimension = self._embedding_dimension(embedding_model)
+        self._display_embedding_compatibility(db_info, embedding_model, embedding_dimension, console)
 
         # Prompt for required credential fields
         if db_info.credential_fields:
@@ -243,6 +249,7 @@ class VectorDBConnector:
             db_type=db_type,
             connection_params=connection_params,
             collection_name=collection_name,
+            dimension=embedding_dimension,
         )
 
         # Show summary (Req 9.3)
@@ -321,7 +328,11 @@ class VectorDBConnector:
 
         if db_type == "chroma":
             from langchain_chroma import Chroma  # noqa: PLC0415
-            persist_dir = params.get("CHROMA_PERSIST_DIRECTORY", "./chroma_db")
+            persist_dir = (
+                params.get("CHROMA_PERSIST_DIRECTORY")
+                or params.get("CHROMA_PERSIST_DIR")
+                or "./chroma_db"
+            )
             return Chroma(
                 collection_name=config.collection_name,
                 embedding_function=embeddings,  # type: ignore[arg-type]
@@ -550,6 +561,8 @@ class VectorDBConnector:
 
         table.add_row("Database Type", db_info.display_name)
         table.add_row("Collection / Index", config.collection_name)
+        if config.dimension:
+            table.add_row("Embedding Dimension", str(config.dimension))
 
         for key, val in config.connection_params.items():
             # Mask secret values
@@ -558,6 +571,33 @@ class VectorDBConnector:
             table.add_row(key, display_val)
 
         console.print(table)  # type: ignore[union-attr]
+
+    @staticmethod
+    def _embedding_dimension(embedding_model: EmbeddingModelConfig | None) -> int | None:
+        if embedding_model is None:
+            return None
+        from ms_rag.ingestion.vectorization_module import get_embedding_dimension  # noqa: PLC0415
+
+        return get_embedding_dimension(embedding_model)
+
+    @staticmethod
+    def _display_embedding_compatibility(
+        db_info: VectorDBInfo,
+        embedding_model: EmbeddingModelConfig | None,
+        embedding_dimension: int | None,
+        console: object,
+    ) -> None:
+        """Explain dimension/index compatibility before the user confirms the DB."""
+        model_name = embedding_model.model_id if embedding_model else "not selected"
+        dimension = f"{embedding_dimension} dimensions" if embedding_dimension else "custom/unknown dimension"
+        console.print(  # type: ignore[union-attr]
+            "\n[bold white]Embedding compatibility note[/bold white]\n"
+            f"  Model: [cyan]{model_name}[/cyan]\n"
+            f"  Output: [cyan]{dimension}[/cyan]\n"
+            f"  Target DB: [cyan]{db_info.display_name}[/cyan]\n"
+            "  [yellow]If an existing collection/index was created with a different embedding dimension, "
+            "create a new collection or re-ingest before querying.[/yellow]\n"
+        )
 
     def _probe_connection(self, config: VectorDBConfig) -> None:
         """Lightweight connection probe — raises on failure."""
@@ -610,23 +650,56 @@ class _FAISSFactory:
         self._config = config
         self._embeddings = embeddings
         self._store: object | None = None
+        self._load_existing_index()
 
     def add_documents(self, docs: list) -> None:
-        try:
-            from langchain_community.vectorstores import FAISS  # noqa: PLC0415
-        except ImportError:
-            from langchain_community.vectorstores import FAISS  # noqa: PLC0415
+        from langchain_community.vectorstores import FAISS  # noqa: PLC0415
+
         if self._store is None:
             self._store = FAISS.from_documents(docs, self._embeddings)  # type: ignore[arg-type]
         else:
             self._store.add_documents(docs)  # type: ignore[union-attr]
+        self._save_index()
 
     def as_retriever(self, **kwargs: object) -> object:
         if self._store is None:
-            raise RuntimeError("FAISS store has no documents yet.")
+            index_path = self._index_path()
+            suffix = (
+                f" No persisted index was found at {index_path}."
+                if index_path is not None
+                else " Run ingestion first or configure FAISS_INDEX_PATH for session reloads."
+            )
+            raise RuntimeError(f"FAISS store has no documents yet.{suffix}")
         return self._store.as_retriever(**kwargs)  # type: ignore[union-attr]
 
     def similarity_search(self, query: str, k: int = 4) -> list:
         if self._store is None:
             return []
         return self._store.similarity_search(query, k=k)  # type: ignore[union-attr]
+
+    def _index_path(self) -> Path | None:
+        raw = self._config.connection_params.get("FAISS_INDEX_PATH")
+        if not raw:
+            raw = str(Path("./faiss_indexes") / self._config.collection_name)
+            self._config.connection_params["FAISS_INDEX_PATH"] = raw
+        return Path(raw).expanduser()
+
+    def _load_existing_index(self) -> None:
+        index_path = self._index_path()
+        if index_path is None or not index_path.exists():
+            return
+
+        from langchain_community.vectorstores import FAISS  # noqa: PLC0415
+
+        self._store = FAISS.load_local(
+            str(index_path),
+            self._embeddings,  # type: ignore[arg-type]
+            allow_dangerous_deserialization=True,
+        )
+
+    def _save_index(self) -> None:
+        index_path = self._index_path()
+        if index_path is None or self._store is None:
+            return
+        index_path.mkdir(parents=True, exist_ok=True)
+        self._store.save_local(str(index_path))  # type: ignore[union-attr]

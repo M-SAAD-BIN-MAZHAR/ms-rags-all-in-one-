@@ -228,3 +228,43 @@ def test_requirements_txt_deduplicated() -> None:
     result = generator.generate(config)
     lines = [l for l in result.requirements_txt.splitlines() if l.strip()]
     assert len(lines) == len(set(lines)), "Requirements must be deduplicated"
+
+
+def test_generated_faiss_pipeline_loads_or_saves_persisted_index() -> None:
+    """Generated FAISS pipelines must work in ingest and query-only modes."""
+    config = _make_config()
+    config.vector_db = VectorDBConfig(
+        db_type="faiss",
+        connection_params={},
+        collection_name="faiss_test",
+    )
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert "FAISS_INDEX_PATH" in code
+    assert "FAISS.from_documents(chunks, embeddings)" in code
+    assert "vector_store.save_local(str(index_path))" in code
+    assert "FAISS.load_local(" in code
+    assert "allow_dangerous_deserialization=True" in code
+
+
+def test_generated_qdrant_query_mode_connects_to_existing_collection() -> None:
+    """Generated Qdrant pipelines must not require chunks for query-only mode."""
+    config = _make_config()
+    config.vector_db = VectorDBConfig(
+        db_type="qdrant",
+        connection_params={},
+        collection_name="qdrant_test",
+    )
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert "from qdrant_client import QdrantClient" in code
+    assert "if chunks:" in code
+    assert "QdrantVectorStore.from_documents(" in code
+    assert "client = QdrantClient(url=url, api_key=api_key)" in code
+    assert 'collection_name="qdrant_test"' in code

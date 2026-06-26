@@ -225,3 +225,60 @@ def prompt_save_path(
         if prompt_confirm("  Save cancelled. Try again?", default=True, console=con):
             continue
         return None
+
+
+def prompt_telemetry_configuration(
+    *,
+    console: Console | None = None,
+) -> "TelemetryConfig | None":
+    """Prompt the user to enable optional OpenTelemetry tracing."""
+    from ms_rag.utils.telemetry import TelemetryConfig  # noqa: PLC0415
+
+    con = console or get_console()
+    print_hint(
+        con,
+        "Optional: enable tracing so you can inspect setup and query timings in a monitoring backend.",
+    )
+
+    if not prompt_confirm("  Enable OpenTelemetry tracing for this session?", default=False, console=con):
+        return TelemetryConfig(enabled=False)
+
+    service_name = prompt_text(
+        "  Service name:",
+        default="ms-rag",
+        required=True,
+        console=con,
+    )
+    environment = prompt_text(
+        "  Environment (development/staging/production):",
+        default="development",
+        required=True,
+        console=con,
+    )
+    endpoint = prompt_text(
+        "  OTLP endpoint (leave blank for console spans only):",
+        default="",
+        required=False,
+        console=con,
+    )
+    headers_raw = prompt_text(
+        "  OTLP headers (optional, comma-separated k=v pairs):",
+        default="",
+        required=False,
+        console=con,
+    )
+
+    headers: dict[str, str] = {}
+    for pair in str(headers_raw).split(","):
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+            headers[key.strip()] = value.strip()
+
+    return TelemetryConfig(
+        enabled=True,
+        service_name=str(service_name).strip() or "ms-rag",
+        environment=str(environment).strip() or "development",
+        otlp_endpoint=str(endpoint).strip(),
+        otlp_headers=headers,
+        console_exporter=True,
+    )
