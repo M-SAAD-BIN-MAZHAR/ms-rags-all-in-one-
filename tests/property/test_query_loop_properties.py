@@ -202,13 +202,18 @@ class TestSlashCommandClassification:
         loop = QueryLoop()
         assert loop._classify_input("/unknown") == "unknown_command"
         assert loop._classify_input("/foo") == "unknown_command"
-        assert loop._classify_input("/help") == "unknown_command"
+        assert loop._classify_input("/helpme") == "unknown_command"
+
+    def test_help_command(self) -> None:
+        loop = QueryLoop()
+        assert loop._classify_input("/help") == "help"
 
     def test_valid_commands_list_is_complete(self) -> None:
         assert "/exit" in VALID_COMMANDS
         assert "/quit" in VALID_COMMANDS
         assert "/config" in VALID_COMMANDS
         assert "/save" in VALID_COMMANDS
+        assert "/help" in VALID_COMMANDS
 
 
 # ---------------------------------------------------------------------------

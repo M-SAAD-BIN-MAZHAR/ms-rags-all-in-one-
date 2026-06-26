@@ -208,14 +208,14 @@ class ContextCompressor:
         if len(compressors) == 1:
             single = compressors[0]
         else:
-            from langchain.retrievers.document_compressors import (  # noqa: PLC0415
+            from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
                 DocumentCompressorPipeline,
             )
             single = DocumentCompressorPipeline(transformers=compressors)
 
         # Wrap with ContextualCompressionRetriever if base_retriever provided
         if base_retriever is not None:
-            from langchain.retrievers import ContextualCompressionRetriever  # noqa: PLC0415
+            from langchain_classic.retrievers import ContextualCompressionRetriever  # noqa: PLC0415
             return ContextualCompressionRetriever(
                 base_compressor=single,
                 base_retriever=base_retriever,
@@ -239,7 +239,7 @@ class ContextCompressor:
         if technique == "llm_chain_extraction":
             if llm is None:
                 return None
-            from langchain.retrievers.document_compressors import (  # noqa: PLC0415
+            from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
                 LLMChainExtractor,
             )
             return LLMChainExtractor.from_llm(llm)  # type: ignore[arg-type]
@@ -247,7 +247,7 @@ class ContextCompressor:
         if technique == "embeddings_filter":
             if embeddings is None:
                 return None
-            from langchain.retrievers.document_compressors import (  # noqa: PLC0415
+            from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
                 EmbeddingsFilter,
             )
             return EmbeddingsFilter(
@@ -258,7 +258,7 @@ class ContextCompressor:
         if technique == "redundancy_removal":
             if embeddings is None:
                 return None
-            from langchain.retrievers.document_compressors import (  # noqa: PLC0415
+            from langchain_community.document_transformers import (  # noqa: PLC0415
                 EmbeddingsRedundantFilter,
             )
             return EmbeddingsRedundantFilter(embeddings=embeddings)  # type: ignore[arg-type]
@@ -274,7 +274,7 @@ class ContextCompressor:
         if technique == "summary_compression":
             if llm is None:
                 return None
-            from langchain.retrievers.document_compressors import (  # noqa: PLC0415
+            from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
                 LLMChainFilter,
             )
             return LLMChainFilter.from_llm(llm)  # type: ignore[arg-type]

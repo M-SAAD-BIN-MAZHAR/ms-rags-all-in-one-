@@ -37,6 +37,7 @@ from ms_rag.workflow.rag_type_selector import LANGGRAPH_TYPES
 
 _BASE_REQUIREMENTS = [
     "langchain>=0.3.0",
+    "langchain-classic>=0.3.0",
     "langchain-core>=0.3.0",
     "langchain-community>=0.3.0",
     "langchain-text-splitters>=0.3.0",
@@ -67,7 +68,7 @@ _VECTOR_DB_REQUIREMENTS: dict[str, list[str]] = {
     "weaviate":      ["langchain-weaviate>=0.0.3", "weaviate-client>=4.0.0"],
     "pgvector":      ["langchain-postgres>=0.0.9", "psycopg2-binary>=2.9.0"],
     "milvus":        ["langchain-milvus>=0.1.0", "pymilvus>=2.4.0"],
-    "redis":         ["redis>=5.0.0"],
+    "redis":         ["langchain-redis>=0.2.0", "redis>=5.0.0"],
     "elasticsearch": ["langchain-elasticsearch>=0.2.0", "elasticsearch>=8.0.0"],
     "opensearch":    ["opensearch-py>=2.4.0"],
     "azure_ai_search": ["azure-search-documents>=11.6.0"],
@@ -207,8 +208,20 @@ class CodeGenerator:
                 reqs.add("sentence-transformers>=3.0.0")
             elif rr == "cohere_reranker":
                 reqs.add("cohere>=5.0.0")
+                reqs.add("langchain-cohere>=0.3.0")
             elif rr == "flashrank":
                 reqs.add("flashrank>=0.2.0")
+
+        # Keyword / hybrid retrieval
+        if config.retrieval:
+            if config.retrieval.strategy in ("keyword_bm25", "hybrid", "ensemble"):
+                reqs.add("rank-bm25>=0.2.2")
+            if config.retrieval.strategy in ("tfidf", "ensemble"):
+                reqs.add("scikit-learn>=1.4.0")
+
+        # Context compression (LangChain 1.x retriever compressors live in langchain-classic)
+        if config.compression_enabled and config.compression:
+            reqs.add("langchain-classic>=0.3.0")
 
         return sorted(reqs)
 
@@ -313,6 +326,8 @@ load_dotenv()
                 lines.append("from langchain_milvus import Milvus")
             elif db == "elasticsearch":
                 lines.append("from langchain_elasticsearch import ElasticsearchStore")
+            elif db == "redis":
+                lines.append("from langchain_redis import RedisConfig, RedisVectorStore")
 
         # LLM imports
         for pid in config.configured_providers:
@@ -389,11 +404,25 @@ def load_documents(sources: list[str]) -> list:
 def create_chunks(documents: list) -> list:
     """Split documents into chunks using {strategy} strategy."""
     from langchain_text_splitters import RecursiveCharacterTextSplitter
+    import json
     splitter = RecursiveCharacterTextSplitter(
         chunk_size={size},
         chunk_overlap={overlap},
     )
-    return splitter.split_documents(documents)'''
+    chunks = splitter.split_documents(documents)
+    for chunk in chunks:
+        clean = {{}}
+        for key, value in chunk.metadata.items():
+            if value is None:
+                continue
+            if isinstance(value, (str, int, float, bool)):
+                clean[key] = value
+            elif isinstance(value, list) and value and all(isinstance(v, (str, int, float, bool)) for v in value):
+                clean[key] = value
+            else:
+                clean[key] = json.dumps(value, default=str)
+        chunk.metadata = clean
+    return chunks'''
 
     def _render_vector_store_function(self, config: PipelineConfig) -> str:
         db_type = config.vector_db.db_type if config.vector_db else "chroma"
@@ -419,6 +448,11 @@ def create_chunks(documents: list) -> list:
             "pgvector": f'PGVector(embeddings=embeddings, collection_name="{collection}", connection=os.getenv("PGVECTOR_CONNECTION_STRING", ""))',
             "milvus": f'Milvus(embedding_function=embeddings, collection_name="{collection}", connection_args={{"uri": os.getenv("MILVUS_URI", "http://localhost:19530")}})',
             "elasticsearch": f'ElasticsearchStore(index_name="{collection}", embedding=embeddings, es_url=os.getenv("ELASTICSEARCH_URL", "http://localhost:9200"))',
+            "redis": (
+                f'RedisVectorStore(embeddings=embeddings, config=RedisConfig('
+                f'index_name=os.getenv("REDIS_INDEX_NAME", "{collection}"), '
+                f'redis_url=os.getenv("REDIS_URL", "redis://localhost:6379")))'
+            ),
         }.get(db_type, f'Chroma(collection_name="{collection}", embedding_function=embeddings)')
 
         return f'''# ─── Embedding + Vector Store ─────────────────────────────────
@@ -434,6 +468,72 @@ def init_vector_store(chunks: list = None):
     def _render_retriever_function(self, config: PipelineConfig) -> str:
         strategy = config.retrieval.strategy if config.retrieval else "dense_vector"
         top_k = config.retrieval.top_k if config.retrieval else 5
+        alpha = config.retrieval.alpha if config.retrieval and config.retrieval.alpha is not None else 0.5
+        lam = (
+            config.retrieval.lambda_diversity
+            if config.retrieval and config.retrieval.lambda_diversity is not None
+            else 0.5
+        )
+
+        if strategy == "hybrid":
+            return f'''# ─── Retriever ────────────────────────────────────────────────
+def _extract_corpus_texts(vector_store):
+    """Extract indexed texts for BM25 keyword retrieval."""
+    texts = []
+    get_fn = getattr(vector_store, "get", None)
+    if callable(get_fn):
+        try:
+            result = get_fn()
+            documents = result.get("documents", []) if isinstance(result, dict) else []
+            texts.extend(doc for doc in documents if isinstance(doc, str) and doc.strip())
+        except Exception:
+            pass
+    return texts
+
+
+def build_retriever(vector_store):
+    """Build hybrid retriever (BM25 + dense), top_k={top_k}, alpha={alpha}."""
+    from langchain_community.retrievers import BM25Retriever
+    from langchain_classic.retrievers import EnsembleRetriever
+
+    dense = vector_store.as_retriever(search_kwargs={{"k": {top_k}}})
+    texts = _extract_corpus_texts(vector_store)
+    if not texts:
+        return dense
+    bm25 = BM25Retriever.from_texts(texts, k={top_k})
+    return EnsembleRetriever(
+        retrievers=[bm25, dense],
+        weights=[{1 - alpha}, {alpha}],
+    )'''
+
+        if strategy == "keyword_bm25":
+            return f'''# ─── Retriever ────────────────────────────────────────────────
+def build_retriever(vector_store):
+    """Build BM25 retriever, top_k={top_k}."""
+    from langchain_community.retrievers import BM25Retriever
+
+    texts = []
+    get_fn = getattr(vector_store, "get", None)
+    if callable(get_fn):
+        try:
+            result = get_fn()
+            documents = result.get("documents", []) if isinstance(result, dict) else []
+            texts.extend(doc for doc in documents if isinstance(doc, str) and doc.strip())
+        except Exception:
+            pass
+    if not texts:
+        return vector_store.as_retriever(search_kwargs={{"k": {top_k}}})
+    return BM25Retriever.from_texts(texts, k={top_k})'''
+
+        if strategy == "mmr":
+            return f'''# ─── Retriever ────────────────────────────────────────────────
+def build_retriever(vector_store):
+    """Build MMR retriever, top_k={top_k}, lambda={lam}."""
+    return vector_store.as_retriever(
+        search_type="mmr",
+        search_kwargs={{"k": {top_k}, "lambda_mult": {lam}}},
+    )'''
+
         return f'''# ─── Retriever ────────────────────────────────────────────────
 def build_retriever(vector_store):
     """Build retriever using {strategy} strategy, top_k={top_k}."""
@@ -470,8 +570,8 @@ def rerank_documents(query: str, docs: list) -> list:
         return f'''# ─── Context Compression ──────────────────────────────────────
 def compress_context(retriever, embeddings):
     """Apply context compression: {techniques}."""
-    from langchain.retrievers.document_compressors import EmbeddingsFilter
-    from langchain.retrievers import ContextualCompressionRetriever
+    from langchain_classic.retrievers.document_compressors import EmbeddingsFilter
+    from langchain_classic.retrievers import ContextualCompressionRetriever
     compressor = EmbeddingsFilter(
         embeddings=embeddings,
         similarity_threshold={threshold},
@@ -484,14 +584,14 @@ def compress_context(retriever, embeddings):
     def _render_lcel_chain(self, config: PipelineConfig) -> str:
         provider = config.configured_providers[0] if config.configured_providers else "openai"
         llm_init = {
-            "openai": 'ChatOpenAI(model="gpt-4o", api_key=OPENAI_API_KEY)',
+            "openai": 'ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY)',
             "anthropic": 'ChatAnthropic(model="claude-3-5-sonnet-20241022", api_key=ANTHROPIC_API_KEY)',
             "cohere": 'ChatCohere(model="command-r-plus", cohere_api_key=COHERE_API_KEY)',
             "google_gemini": 'ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=GOOGLE_API_KEY)',
             "mistral": 'ChatMistralAI(model="mistral-large-latest", api_key=MISTRAL_API_KEY)',
             "groq": 'ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=GROQ_API_KEY)',
-            "ollama": 'ChatOllama(model="llama3", base_url=OLLAMA_BASE_URL)',
-        }.get(provider, 'ChatOpenAI(model="gpt-4o")')
+            "ollama": 'ChatOllama(model=os.getenv("OLLAMA_MODEL_NAME", "llama3"), base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))',
+        }.get(provider, 'ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY)')
 
         return f'''# ─── RAG Chain (LCEL) ─────────────────────────────────────────
 def build_rag_chain(retriever):
@@ -523,10 +623,10 @@ def build_rag_chain(retriever):
         rag_type = config.rag_type.rag_type if config.rag_type else "self_rag"
         provider = config.configured_providers[0] if config.configured_providers else "openai"
         llm_init = {
-            "openai": 'ChatOpenAI(model="gpt-4o", api_key=OPENAI_API_KEY)',
+            "openai": 'ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY)',
             "anthropic": 'ChatAnthropic(model="claude-3-5-sonnet-20241022", api_key=ANTHROPIC_API_KEY)',
-            "ollama": 'ChatOllama(model="llama3", base_url=OLLAMA_BASE_URL)',
-        }.get(provider, 'ChatOpenAI(model="gpt-4o")')
+            "ollama": 'ChatOllama(model=os.getenv("OLLAMA_MODEL_NAME", "llama3"), base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))',
+        }.get(provider, 'ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY)')
 
         return f'''# ─── LangGraph Workflow ({rag_type}) ───────────────────────────
 class GraphState(TypedDict):

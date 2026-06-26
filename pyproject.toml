@@ -20,6 +20,7 @@ dependencies = [
 
     # LangChain core
     "langchain>=0.3.0",
+    "langchain-classic>=0.3.0",
     "langchain-core>=0.3.0",
     "langchain-community>=0.3.0",
     "langchain-text-splitters>=0.3.0",
@@ -61,6 +62,22 @@ dependencies = [
     "chromadb>=0.5.0",
     "faiss-cpu>=1.8.0",
 
+    # Vector store integrations (LangChain 1.x standalone packages)
+    "langchain-aws>=0.2.0",
+    "langchain-elasticsearch>=0.2.0",
+    "langchain-milvus>=0.1.0",
+    "langchain-postgres>=0.0.9",
+    "langchain-mongodb>=0.2.0",
+    "langchain-pinecone>=0.2.0",
+    "langchain-qdrant>=0.2.0",
+    "langchain-weaviate>=0.0.3",
+    "boto3>=1.34.0",
+    "pymongo>=4.6.0",
+
+    # gRPC — aligned for weaviate-client (<1.80) and grpcio-status
+    "grpcio>=1.59.5,<1.80.0",
+    "grpcio-status>=1.78.0,<1.80.0",
+
     # Web loaders
     "beautifulsoup4>=4.12.0",
     "requests>=2.31.0",
@@ -93,11 +110,13 @@ dependencies = [
 pinecone = ["langchain-pinecone>=0.2.0", "pinecone-client>=4.0.0"]
 qdrant = ["langchain-qdrant>=0.2.0", "qdrant-client>=1.9.0"]
 weaviate = ["langchain-weaviate>=0.0.3", "weaviate-client>=4.0.0"]
-milvus = ["pymilvus>=2.4.0"]
-redis = ["redis>=5.0.0"]
-pgvector = ["psycopg2-binary>=2.9.0", "pgvector>=0.3.0"]
-elasticsearch = ["elasticsearch>=8.0.0"]
+milvus = ["langchain-milvus>=0.1.0", "pymilvus>=2.4.0"]
+redis = ["langchain-redis>=0.2.0", "redis>=5.0.0"]
+pgvector = ["langchain-postgres>=0.0.9", "psycopg2-binary>=2.9.0", "pgvector>=0.3.0"]
+elasticsearch = ["langchain-elasticsearch>=0.2.0", "elasticsearch>=8.0.0"]
 opensearch = ["opensearch-py>=2.4.0"]
+mongodb = ["langchain-mongodb>=0.2.0", "pymongo>=4.6.0"]
+aws = ["langchain-aws>=0.2.0", "boto3>=1.34.0"]
 
 # ── Individual evaluation framework extras ────────────────────────────────────
 ragas = ["ragas>=0.2.0"]
@@ -120,11 +139,19 @@ production = [
     "qdrant-client>=1.9.0",
     "langchain-weaviate>=0.0.3",
     "weaviate-client>=4.0.0",
+    "langchain-milvus>=0.1.0",
     "pymilvus>=2.4.0",
+    "langchain-postgres>=0.0.9",
+    "langchain-redis>=0.2.0",
     "redis>=5.0.0",
     "psycopg2-binary>=2.9.0",
     "pgvector>=0.3.0",
+    "langchain-elasticsearch>=0.2.0",
     "elasticsearch>=8.0.0",
+    "langchain-mongodb>=0.2.0",
+    "pymongo>=4.6.0",
+    "langchain-aws>=0.2.0",
+    "boto3>=1.34.0",
     "opensearch-py>=2.4.0",
     # All evaluation frameworks
     "ragas>=0.2.0",

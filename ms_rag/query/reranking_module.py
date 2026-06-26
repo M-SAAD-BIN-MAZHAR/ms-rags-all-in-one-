@@ -28,11 +28,6 @@ from ms_rag.utils.exceptions import ValidationError
 from ms_rag.utils.validation import validate_numeric
 
 
-# ---------------------------------------------------------------------------
-# Reranker registry
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class RerankerInfo:
     """Metadata for a single reranker."""
@@ -233,6 +228,7 @@ class RerankingModule:
         query: str,
         docs: list,
         config: RerankingConfig,
+        llm: object | None = None,
     ) -> list:
         """Re-score and return top-k documents using the configured reranker.
 
@@ -260,7 +256,7 @@ class RerankingModule:
                 return self._rerank_bge(query, docs, config)
 
             if reranker_id == "llm_reranker":
-                return self._rerank_llm(query, docs, config)
+                return self._rerank_llm(query, docs, config, llm)
 
             if reranker_id == "colbert":
                 return self._rerank_colbert(query, docs, config)
@@ -287,9 +283,9 @@ class RerankingModule:
 
     def _rerank_cohere(self, query: str, docs: list, config: RerankingConfig) -> list:
         import cohere  # noqa: PLC0415
-        api_key = ""
-        if self._credential_store is not None:
-            api_key = self._credential_store.get("cohere", "COHERE_API_KEY") or ""  # type: ignore[union-attr]
+        from ms_rag.utils.credentials import resolve_credential  # noqa: PLC0415
+
+        api_key = resolve_credential("COHERE_API_KEY", self._credential_store, "cohere") or ""
         co = cohere.Client(api_key)
         texts = [doc.page_content for doc in docs]
         response = co.rerank(
@@ -308,18 +304,48 @@ class RerankingModule:
         ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
         return [doc for _, doc in ranked[: config.top_k]]
 
-    def _rerank_llm(self, query: str, docs: list, config: RerankingConfig) -> list:
-        # Pointwise scoring — return top-k by original order (LLM not available here)
-        return docs[: config.top_k]
+    def _rerank_llm(
+        self,
+        query: str,
+        docs: list,
+        config: RerankingConfig,
+        llm: object | None = None,
+    ) -> list:
+        if llm is None:
+            return docs[: config.top_k]
+
+        from langchain_core.prompts import ChatPromptTemplate  # noqa: PLC0415
+        from langchain_core.output_parsers import StrOutputParser  # noqa: PLC0415
+
+        prompt = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                "Score relevance from 0 to 10. Reply with only the number.",
+            ),
+            (
+                "human",
+                "Query: {query}\n\nDocument:\n{document}",
+            ),
+        ])
+        chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
+
+        scored: list[tuple[float, object]] = []
+        for doc in docs:
+            raw = chain.invoke({
+                "query": query,
+                "document": doc.page_content,
+            })
+            try:
+                score = float(str(raw).strip().split()[0])
+            except (ValueError, IndexError):
+                score = 0.0
+            scored.append((score, doc))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [doc for _, doc in scored[: config.top_k]]
 
     def _rerank_colbert(self, query: str, docs: list, config: RerankingConfig) -> list:
-        try:
-            from langchain_community.document_compressors import (  # noqa: PLC0415
-                CohereRerank,
-            )
-        except ImportError:
-            pass
-        return docs[: config.top_k]
+        return self._rerank_bge(query, docs, config)
 
     def _rerank_flashrank(self, query: str, docs: list, config: RerankingConfig) -> list:
         from flashrank import Ranker, RerankRequest  # noqa: PLC0415

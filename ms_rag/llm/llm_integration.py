@@ -9,10 +9,10 @@ Requirement 17.3: generated code uses LangGraph for agentic RAG types
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from ms_rag.models import PipelineConfig
+from ms_rag.utils.credentials import resolve_credential, resolve_model_id
 from ms_rag.workflow.rag_type_selector import LANGGRAPH_TYPES
 
 
@@ -57,26 +57,28 @@ def get_llm(
         ValueError:  If the provider is not recognised.
     """
 
-    def _env(field: str) -> str | None:
+    def _env(field: str, provider_id: str | None = None) -> str | None:
         """Get credential from store or fall back to environment variable."""
-        if credential_store is not None:
-            val = credential_store.get(provider, field)  # type: ignore[union-attr]
-            if val:
-                return val
-        return os.getenv(field)
+        return resolve_credential(field, credential_store, provider_id or provider)
+
+    resolved_model = resolve_model_id(provider, model_id, credential_store)
 
     if provider == "openai":
         from langchain_openai import ChatOpenAI  # noqa: PLC0415
-        return ChatOpenAI(
-            model=model_id,
-            api_key=_env("OPENAI_API_KEY"),  # type: ignore[arg-type]
-            **kwargs,
-        )
+        openai_kwargs: dict[str, Any] = {"model": resolved_model}
+        api_key = _env("OPENAI_API_KEY")
+        if api_key:
+            openai_kwargs["openai_api_key"] = api_key
+        org_id = _env("OPENAI_ORG_ID")
+        if org_id:
+            openai_kwargs["openai_organization"] = org_id
+        openai_kwargs.update(kwargs)
+        return ChatOpenAI(**openai_kwargs)
 
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic  # noqa: PLC0415
         return ChatAnthropic(
-            model=model_id,
+            model=resolved_model,
             api_key=_env("ANTHROPIC_API_KEY"),  # type: ignore[arg-type]
             **kwargs,
         )
@@ -84,7 +86,7 @@ def get_llm(
     if provider == "cohere":
         from langchain_cohere import ChatCohere  # noqa: PLC0415
         return ChatCohere(
-            model=model_id,
+            model=resolved_model,
             cohere_api_key=_env("COHERE_API_KEY"),  # type: ignore[arg-type]
             **kwargs,
         )
@@ -92,7 +94,7 @@ def get_llm(
     if provider == "huggingface":
         from langchain_huggingface import HuggingFaceEndpoint  # noqa: PLC0415
         return HuggingFaceEndpoint(
-            repo_id=model_id,
+            repo_id=resolved_model,
             huggingfacehub_api_token=_env("HUGGINGFACEHUB_API_TOKEN"),
             **kwargs,
         )
@@ -100,7 +102,7 @@ def get_llm(
     if provider == "google_gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI  # noqa: PLC0415
         return ChatGoogleGenerativeAI(
-            model=model_id,
+            model=resolved_model,
             google_api_key=_env("GOOGLE_API_KEY"),  # type: ignore[arg-type]
             **kwargs,
         )
@@ -108,7 +110,7 @@ def get_llm(
     if provider == "mistral":
         from langchain_mistralai import ChatMistralAI  # noqa: PLC0415
         return ChatMistralAI(
-            model=model_id,
+            model=resolved_model,
             api_key=_env("MISTRAL_API_KEY"),  # type: ignore[arg-type]
             **kwargs,
         )
@@ -116,51 +118,63 @@ def get_llm(
     if provider == "groq":
         from langchain_groq import ChatGroq  # noqa: PLC0415
         return ChatGroq(
-            model=model_id,
+            model=resolved_model,
             groq_api_key=_env("GROQ_API_KEY"),  # type: ignore[arg-type]
             **kwargs,
         )
 
     if provider == "together_ai":
         from langchain_openai import ChatOpenAI  # noqa: PLC0415
-        return ChatOpenAI(
-            model=model_id,
-            base_url="https://api.together.xyz/v1",
-            api_key=_env("TOGETHER_API_KEY"),  # type: ignore[arg-type]
-            **kwargs,
-        )
+        together_kwargs: dict[str, Any] = {
+            "model": resolved_model,
+            "base_url": "https://api.together.xyz/v1",
+        }
+        together_key = _env("TOGETHER_API_KEY")
+        if together_key:
+            together_kwargs["openai_api_key"] = together_key
+        together_kwargs.update(kwargs)
+        return ChatOpenAI(**together_kwargs)
 
     if provider == "replicate":
         from langchain_community.llms import Replicate  # noqa: PLC0415
         return Replicate(
-            model=model_id,
+            model=resolved_model,
             replicate_api_token=_env("REPLICATE_API_TOKEN"),
             **kwargs,
         )
 
     if provider == "azure_openai":
         from langchain_openai import AzureChatOpenAI  # noqa: PLC0415
-        return AzureChatOpenAI(
-            azure_deployment=model_id,
-            azure_endpoint=_env("AZURE_OPENAI_ENDPOINT") or "",
-            api_key=_env("AZURE_OPENAI_API_KEY"),  # type: ignore[arg-type]
-            api_version=_env("AZURE_OPENAI_API_VERSION") or "2024-02-01",
-            **kwargs,
-        )
+        azure_kwargs: dict[str, Any] = {
+            "azure_deployment": resolved_model,
+            "azure_endpoint": _env("AZURE_OPENAI_ENDPOINT") or "",
+            "api_version": _env("AZURE_OPENAI_API_VERSION") or "2024-02-01",
+        }
+        azure_key = _env("AZURE_OPENAI_API_KEY")
+        if azure_key:
+            azure_kwargs["openai_api_key"] = azure_key
+        azure_kwargs.update(kwargs)
+        return AzureChatOpenAI(**azure_kwargs)
 
     if provider == "aws_bedrock":
         from langchain_aws import ChatBedrock  # noqa: PLC0415
-        return ChatBedrock(
-            model_id=model_id,
-            region_name=_env("AWS_REGION") or "us-east-1",
-            **kwargs,
-        )
+        bedrock_kwargs: dict[str, Any] = {
+            "model_id": resolved_model,
+            "region_name": _env("AWS_REGION") or "us-east-1",
+        }
+        access_key = _env("AWS_ACCESS_KEY_ID")
+        secret_key = _env("AWS_SECRET_ACCESS_KEY")
+        if access_key and secret_key:
+            bedrock_kwargs["aws_access_key_id"] = access_key
+            bedrock_kwargs["aws_secret_access_key"] = secret_key
+        bedrock_kwargs.update(kwargs)
+        return ChatBedrock(**bedrock_kwargs)
 
     if provider == "ollama":
         # Use langchain-ollama (NOT deprecated langchain-community)
         from langchain_ollama import ChatOllama  # noqa: PLC0415
         return ChatOllama(
-            model=model_id,
+            model=resolved_model,
             base_url=_env("OLLAMA_BASE_URL") or "http://localhost:11434",
             **kwargs,
         )
@@ -229,6 +243,116 @@ def build_rag_chain(
     )
 
     return rag_chain
+
+
+def build_retriever_stack(
+    base_retriever: object,
+    config: PipelineConfig,
+    *,
+    context_compressor: object | None = None,
+    reranking_module: object | None = None,
+    llm: object | None = None,
+    embeddings: object | None = None,
+) -> object:
+    """Apply configured reranking and compression layers to a base retriever."""
+    retriever = base_retriever
+
+    if config.reranking_enabled and config.reranking and reranking_module is not None:
+        from ms_rag.query.reranking_retriever import RerankingRetriever  # noqa: PLC0415
+
+        retriever = RerankingRetriever(
+            base_retriever=retriever,
+            reranking_module=reranking_module,
+            config=config.reranking,
+            llm=llm,
+        )
+
+    if config.compression_enabled and config.compression and context_compressor is not None:
+        wrapped = context_compressor.get_compressor(  # type: ignore[union-attr]
+            config.compression,
+            llm=llm,
+            embeddings=embeddings,
+            base_retriever=retriever,
+        )
+        if wrapped is not None:
+            retriever = wrapped
+
+    return retriever
+
+
+def rebuild_session_runtime(
+    config: PipelineConfig,
+    credential_store: object,
+) -> dict[str, object]:
+    """Rebuild vector store, retriever, LLM, and RAG chain from a saved config."""
+    from ms_rag.ingestion.vectorization_module import VectorizationModule  # noqa: PLC0415
+    from ms_rag.ingestion.vectordb_connector import VectorDBConnector  # noqa: PLC0415
+    from ms_rag.query.context_compressor import ContextCompressor  # noqa: PLC0415
+    from ms_rag.query.reranking_module import RerankingModule  # noqa: PLC0415
+    from ms_rag.query.retrieval_strategy import RetrievalStrategyModule  # noqa: PLC0415
+
+    if config.embedding_model is None or config.vector_db is None or config.retrieval is None:
+        raise ValueError(
+            "Session config is incomplete — embedding model, vector DB, and retrieval "
+            "strategy are required to rebuild the runtime pipeline."
+        )
+
+    vectorization = VectorizationModule()
+    embeddings = vectorization.get_embeddings(config.embedding_model, credential_store)
+    db_connector = VectorDBConnector(credential_store=credential_store)
+    vector_store = db_connector.get_vector_store(config.vector_db, embeddings)
+
+    provider = config.configured_providers[0] if config.configured_providers else "ollama"
+    llm = get_llm(provider, "default", credential_store=credential_store)
+
+    retrieval_module = RetrievalStrategyModule()
+    base_retriever = retrieval_module.get_retriever(
+        config.retrieval,
+        vector_store,
+        llm=llm,
+    )
+
+    reranking_module = RerankingModule(credential_store=credential_store)
+    compressor = ContextCompressor()
+    retriever = build_retriever_stack(
+        base_retriever,
+        config,
+        context_compressor=compressor,
+        reranking_module=reranking_module,
+        llm=llm,
+        embeddings=embeddings,
+    )
+
+    if config.rag_type and config.rag_type.requires_langgraph:
+        rag_chain = build_langgraph_workflow(
+            config.rag_type.rag_type,
+            retriever,
+            llm,
+            config.system_prompt,
+        )
+    else:
+        rag_chain = build_rag_chain(retriever, llm, config.system_prompt)
+
+    return {
+        "vector_store": vector_store,
+        "retriever": retriever,
+        "llm": llm,
+        "rag_chain": rag_chain,
+    }
+
+
+def invoke_rag_chain(rag_chain: object, query: str, *, requires_langgraph: bool) -> str:
+    """Invoke an LCEL chain or LangGraph workflow and return an answer string."""
+    if requires_langgraph:
+        result = rag_chain.invoke({"question": query})  # type: ignore[union-attr]
+        if isinstance(result, dict):
+            generation = result.get("generation")
+            if generation is not None:
+                return str(generation)
+        return str(result)
+
+    answer = rag_chain.invoke(query)  # type: ignore[union-attr]
+    return answer if isinstance(answer, str) else str(answer)
 
 
 # ---------------------------------------------------------------------------
@@ -464,9 +588,14 @@ def process_query(
         return "Pipeline not initialised. Please complete all setup steps first."
 
     try:
-        answer = ss.rag_chain.invoke(primary_query)
-        if not isinstance(answer, str):
-            answer = str(answer)
+        requires_langgraph = bool(
+            cfg.rag_type and cfg.rag_type.requires_langgraph
+        )
+        answer = invoke_rag_chain(
+            ss.rag_chain,
+            primary_query,
+            requires_langgraph=requires_langgraph,
+        )
     except Exception as exc:  # noqa: BLE001
         raise exc  # re-raise so QueryLoop can handle it
 
@@ -480,6 +609,7 @@ def process_query(
                 query=query,
                 context=context_docs,
                 answer=answer,
+                config=cfg.evaluation,
             )
         except Exception:  # noqa: BLE001
             pass  # evaluation failure is non-fatal

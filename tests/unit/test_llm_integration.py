@@ -18,6 +18,7 @@ from ms_rag.llm.llm_integration import (
     build_langgraph_workflow,
     build_rag_chain,
     get_llm,
+    invoke_rag_chain,
     process_query,
 )
 from ms_rag.models import (
@@ -210,3 +211,19 @@ class TestProcessQuery:
 
         with pytest.raises(RuntimeError, match="LLM timeout"):
             process_query("What is RAG?", session)
+
+
+class TestInvokeRagChain:
+    def test_langgraph_returns_generation_field(self) -> None:
+        mock_chain = MagicMock()
+        mock_chain.invoke.return_value = {"generation": "Agentic answer."}
+        answer = invoke_rag_chain(mock_chain, "What is RAG?", requires_langgraph=True)
+        assert answer == "Agentic answer."
+        mock_chain.invoke.assert_called_once_with({"question": "What is RAG?"})
+
+    def test_lcel_chain_returns_string(self) -> None:
+        mock_chain = MagicMock()
+        mock_chain.invoke.return_value = "Direct answer."
+        answer = invoke_rag_chain(mock_chain, "What is RAG?", requires_langgraph=False)
+        assert answer == "Direct answer."
+        mock_chain.invoke.assert_called_once_with("What is RAG?")

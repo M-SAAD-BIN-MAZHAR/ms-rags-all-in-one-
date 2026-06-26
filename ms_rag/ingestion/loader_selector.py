@@ -332,10 +332,15 @@ class LoaderSelector:
             ]
 
             while True:
-                selected_class: str = questionary.select(
+                selected_class = questionary.select(
                     f"Select loader for {dt_name}:",
                     choices=choices,
                 ).ask()
+                if selected_class is None:
+                    console.print(
+                        "[yellow]  Selection cancelled — please choose a loader.[/yellow]"
+                    )
+                    continue
 
                 loader_info = LOADER_MAP[selected_class]
 
@@ -346,7 +351,7 @@ class LoaderSelector:
                             f"[red]  ✗ Credentials required for {loader_info.display_name}. "
                             f"Please select a different loader.[/red]"
                         )
-                        continue  # re-show the selector
+                        continue
 
                 loader_map[doc_type] = selected_class
                 break

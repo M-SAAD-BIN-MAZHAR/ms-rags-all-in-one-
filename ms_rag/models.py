@@ -377,6 +377,10 @@ class CredentialStore:
         """
         return {pid: list(fields.keys()) for pid, fields in self._store.items() if fields}
 
+    def clear(self) -> None:
+        """Remove all stored credentials (e.g. when user re-edits provider selection)."""
+        self._store.clear()
+
 
 # ---------------------------------------------------------------------------
 # SessionState — runtime container, never serialised

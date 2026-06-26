@@ -13,7 +13,6 @@ Deprecation note (from audit):
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 
 try:
@@ -26,6 +25,7 @@ except ImportError:
     Table = None  # type: ignore[assignment]
 
 from ms_rag.models import EmbeddingModelConfig
+from ms_rag.utils.credentials import resolve_credential
 
 
 # ---------------------------------------------------------------------------
@@ -302,10 +302,17 @@ class VectorizationModule:
             for m in displayable
         ]
 
-        selected_id: str = questionary.select(
-            "Select embedding model:",
-            choices=choices,
-        ).ask()
+        while True:
+            selected_id = questionary.select(
+                "Select embedding model:",
+                choices=choices,
+            ).ask()
+            if selected_id is None:
+                console.print(
+                    "[yellow]  Selection cancelled — please choose a model.[/yellow]"
+                )
+                continue
+            break
 
         # Find the selected model info
         selected_info = next(
@@ -315,12 +322,21 @@ class VectorizationModule:
         # Prompt for local path/name for Ollama (Requirement 8.4)
         local_path: str | None = None
         if selected_info and selected_info.model_id == "__user_specified__":
-            local_path = questionary.text(
-                "  Enter Ollama model name (e.g. nomic-embed-text, mxbai-embed-large):",
-            ).ask()
-            if local_path:
+            while True:
+                local_path = questionary.text(
+                    "  Enter Ollama model name (e.g. nomic-embed-text, mxbai-embed-large):",
+                ).ask()
+                if local_path is None:
+                    console.print(
+                        "[yellow]  Please enter an Ollama model name.[/yellow]"
+                    )
+                    continue
                 local_path = local_path.strip()
-                selected_id = local_path  # use model name as the ID
+                if not local_path:
+                    console.print("[red]  ✗ Ollama model name is required.[/red]")
+                    continue
+                selected_id = local_path
+                break
 
         provider = selected_info.provider if selected_info else "huggingface"
 
@@ -367,19 +383,23 @@ class VectorizationModule:
         provider = config.provider
         model_id = config.model_id
 
-        def _env(field: str) -> str | None:
-            if credential_store is not None:
-                val = credential_store.get(provider, field)  # type: ignore[union-attr]
-                if val:
-                    return val
-            return os.getenv(field)
+        def _env(field: str, provider_id: str | None = None) -> str | None:
+            return resolve_credential(
+                field,
+                credential_store,
+                provider_id or provider,
+            )
 
         if provider == "openai":
             from langchain_openai import OpenAIEmbeddings  # noqa: PLC0415
-            return OpenAIEmbeddings(
-                model=model_id,
-                api_key=_env("OPENAI_API_KEY"),  # type: ignore[arg-type]
-            )
+            openai_kwargs: dict[str, str] = {"model": model_id}
+            api_key = _env("OPENAI_API_KEY")
+            if api_key:
+                openai_kwargs["openai_api_key"] = api_key
+            org_id = _env("OPENAI_ORG_ID")
+            if org_id:
+                openai_kwargs["openai_organization"] = org_id
+            return OpenAIEmbeddings(**openai_kwargs)  # type: ignore[arg-type]
 
         if provider == "cohere":
             from langchain_cohere import CohereEmbeddings  # noqa: PLC0415
@@ -391,8 +411,14 @@ class VectorizationModule:
         if provider in ("huggingface", "local"):
             # Use langchain-huggingface (NOT deprecated langchain-community)
             from langchain_huggingface import HuggingFaceEmbeddings  # noqa: PLC0415
+            hf_token = _env("HUGGINGFACEHUB_API_TOKEN", "huggingface")
+            if hf_token:
+                return HuggingFaceEmbeddings(
+                    model_name=config.local_path or model_id,
+                    model_kwargs={"token": hf_token},
+                )
             return HuggingFaceEmbeddings(
-                model_name=config.local_path or model_id
+                model_name=config.local_path or model_id,
             )
 
         if provider == "google_gemini":
@@ -414,7 +440,7 @@ class VectorizationModule:
             from langchain_ollama import OllamaEmbeddings  # noqa: PLC0415
             return OllamaEmbeddings(
                 model=config.local_path or model_id,
-                base_url=_env("OLLAMA_BASE_URL"),
+                base_url=_env("OLLAMA_BASE_URL", "ollama") or "http://localhost:11434",
             )
 
         raise ValueError(

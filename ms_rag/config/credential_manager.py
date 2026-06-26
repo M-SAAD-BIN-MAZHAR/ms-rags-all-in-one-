@@ -30,8 +30,8 @@ from ms_rag.utils.exceptions import CredentialError
 # Provider field definitions
 # ---------------------------------------------------------------------------
 
-PROVIDER_FIELDS: dict[str, list[str]] = {
-    "openai": ["OPENAI_API_KEY", "OPENAI_ORG_ID"],
+PROVIDER_REQUIRED_FIELDS: dict[str, list[str]] = {
+    "openai": ["OPENAI_API_KEY"],
     "anthropic": ["ANTHROPIC_API_KEY"],
     "cohere": ["COHERE_API_KEY"],
     "huggingface": ["HUGGINGFACEHUB_API_TOKEN"],
@@ -43,15 +43,26 @@ PROVIDER_FIELDS: dict[str, list[str]] = {
     "azure_openai": [
         "AZURE_OPENAI_API_KEY",
         "AZURE_OPENAI_ENDPOINT",
-        "AZURE_OPENAI_API_VERSION",
         "AZURE_OPENAI_DEPLOYMENT_NAME",
     ],
     "aws_bedrock": [
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
-        "AWS_REGION",
     ],
-    "ollama": ["OLLAMA_BASE_URL", "OLLAMA_MODEL_NAME"],
+    "ollama": ["OLLAMA_MODEL_NAME"],
+}
+
+PROVIDER_OPTIONAL_FIELDS: dict[str, list[str]] = {
+    "openai": ["OPENAI_ORG_ID"],
+    "azure_openai": ["AZURE_OPENAI_API_VERSION"],
+    "aws_bedrock": ["AWS_REGION"],
+    "ollama": ["OLLAMA_BASE_URL"],
+}
+
+# All fields (required + optional) — used for coverage tests and summaries
+PROVIDER_FIELDS: dict[str, list[str]] = {
+    pid: PROVIDER_REQUIRED_FIELDS[pid] + PROVIDER_OPTIONAL_FIELDS.get(pid, [])
+    for pid in PROVIDER_REQUIRED_FIELDS
 }
 
 PROVIDER_DISPLAY_NAMES: dict[str, str] = {
@@ -112,6 +123,7 @@ class CredentialManager:
             List of selected provider IDs.
         """
         import questionary  # noqa: PLC0415
+        from ms_rag.ui.prompts import prompt_checkbox  # noqa: PLC0415
 
         choices = [
             questionary.Choice(
@@ -121,12 +133,11 @@ class CredentialManager:
             for pid in PROVIDER_IDS
         ]
 
-        selected: list[str] = questionary.checkbox(
+        return prompt_checkbox(
             "Select the LLM providers you want to use:",
-            choices=choices,
-        ).ask()
-
-        return selected or []
+            choices,
+            min_selections=1,
+        )
 
     def collect_credentials(self, provider_id: str) -> dict[str, str]:
         """Prompt the user for all required credential fields for *provider_id*.
@@ -153,15 +164,25 @@ class CredentialManager:
                 provider_id=provider_id,
             )
 
-        fields = PROVIDER_FIELDS[provider_id]
+        required_fields = PROVIDER_REQUIRED_FIELDS[provider_id]
+        optional_fields = PROVIDER_OPTIONAL_FIELDS.get(provider_id, [])
         display_name = PROVIDER_DISPLAY_NAMES[provider_id]
         collected: dict[str, str] = {}
 
         console.print(f"\n[bold cyan]  {display_name}[/bold cyan]")
 
-        for field in fields:
-            value = self._prompt_field(field, provider_id, questionary, console)
+        for field in required_fields:
+            value = self._prompt_field(
+                field, provider_id, questionary, console, required=True
+            )
             collected[field] = value
+
+        for field in optional_fields:
+            value = self._prompt_field(
+                field, provider_id, questionary, console, required=False
+            )
+            if value:
+                collected[field] = value
 
         return collected
 
@@ -191,6 +212,7 @@ class CredentialManager:
             True if user confirms, False if user wants to edit.
         """
         import questionary  # noqa: PLC0415
+        from ms_rag.ui.prompts import prompt_confirm  # noqa: PLC0415
         from rich.console import Console  # noqa: PLC0415
         from rich.table import Table  # noqa: PLC0415
 
@@ -211,12 +233,7 @@ class CredentialManager:
 
         console.print(table)
 
-        confirmed: bool = questionary.confirm(
-            "Proceed with these credentials?",
-            default=True,
-        ).ask()
-
-        return bool(confirmed)
+        return prompt_confirm("Proceed with these credentials?", default=True, console=console)
 
     # ------------------------------------------------------------------
     # Encrypted persistence
@@ -318,22 +335,25 @@ class CredentialManager:
         provider_id: str,
         questionary_module: object,
         console: object,
+        required: bool = True,
     ) -> str:
-        """Prompt for a single credential field, re-prompting on empty input.
+        """Prompt for a single credential field, re-prompting on empty required input.
 
-        Requirement 2.4: re-prompt when user enters empty value.
+        Requirement 2.4: re-prompt when user enters empty value for required fields.
         """
         q = questionary_module  # type: ignore[assignment]
         is_secret = _is_secret_field(field)
+        suffix = "" if required else " (optional, press Enter to skip)"
 
         while True:
             if is_secret:
                 value: str = q.password(
-                    f"    {field}:",
+                    f"    {field}{suffix}:",
                 ).ask()
             else:
                 value = q.text(
-                    f"    {field}:",
+                    f"    {field}{suffix}:",
+                    default="" if not required else None,
                 ).ask()
 
             if value is None:
@@ -343,6 +363,8 @@ class CredentialManager:
             value = value.strip()
 
             if not value:
+                if not required:
+                    return ""
                 console.print(  # type: ignore[union-attr]
                     f"[red]  ✗ {field} is required. Please enter a value.[/red]"
                 )

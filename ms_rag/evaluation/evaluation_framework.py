@@ -25,6 +25,10 @@ except ImportError:
     Console = None  # type: ignore[assignment]
     Table = None  # type: ignore[assignment]
 
+from ms_rag.evaluation.evaluator_runners import (
+    EVALUATOR_RUNNERS,
+    run_monitoring_export,
+)
 from ms_rag.models import EvaluationConfig
 from ms_rag.utils.exceptions import ValidationError
 from ms_rag.utils.validation import validate_numeric
@@ -157,6 +161,7 @@ class EvaluationFramework:
 
     def __init__(self, credential_store: object | None = None) -> None:
         self._credential_store = credential_store
+        self._config: EvaluationConfig | None = None
 
     def configure(self) -> EvaluationConfig | None:
         """Interactive yes/no → evaluator checkbox → credentials → thresholds.
@@ -187,17 +192,21 @@ class EvaluationFramework:
             for e in EVALUATORS
         ]
 
-        selected: list[str] = questionary.checkbox(
-            "  Select evaluation frameworks:",
-            choices=choices,
-        ).ask()
+        while True:
+            selected: list[str] | None = questionary.checkbox(
+                "  Select evaluation frameworks:",
+                choices=choices,
+            ).ask()
+            if selected is None:
+                console.print("[yellow]  Selection cancelled — please try again.[/yellow]")
+                continue
+            if not selected:
+                console.print(
+                    "[red]  ✗ Please select at least one evaluation framework.[/red]"
+                )
+                continue
+            break
 
-        if not selected:
-            console.print("  [dim]No evaluators selected — evaluation disabled.[/dim]")
-            return None
-
-        # Credential prompting for LangSmith/Langfuse/Arize Phoenix (Req 16.4)
-        # Keep evaluator selected even if credentials are not provided
         for evaluator_id in selected:
             info = EVALUATOR_MAP[evaluator_id]
             if info.requires_credentials:
@@ -217,6 +226,7 @@ class EvaluationFramework:
             f"[green]  ✓ Evaluation configured: "
             f"[bold]{', '.join(selected)}[/bold][/green]"
         )
+        self._config = config
         return config
 
     def evaluate(
@@ -225,6 +235,7 @@ class EvaluationFramework:
         context: list,
         answer: str,
         ground_truth: str | None = None,
+        config: EvaluationConfig | None = None,
     ) -> dict[str, float]:
         """Run enabled evaluators and return metric scores.
 
@@ -233,14 +244,62 @@ class EvaluationFramework:
             context:      List of LangChain Document objects used as context.
             answer:       The generated answer.
             ground_truth: Optional reference answer (used by some evaluators).
+            config:       EvaluationConfig override; uses configure() result if omitted.
 
         Returns:
             Dict mapping metric_name -> score (0.0-1.0).
         """
-        # Evaluation is called after configuration — scores are computed here
-        # when the corresponding packages are installed.
-        # Returns empty dict as fallback when packages not installed.
-        return {}
+        active = config or self._config
+        if active is None or not active.evaluators:
+            return {}
+
+        scores: dict[str, float] = {}
+        deferred_export = "monitoring_export" in active.evaluators
+
+        for evaluator_id in active.evaluators:
+            if evaluator_id in ("cicd_gate", "monitoring_export"):
+                continue
+
+            runner = EVALUATOR_RUNNERS.get(evaluator_id)
+            if runner is None:
+                continue
+
+            try:
+                if evaluator_id in ("langsmith", "langfuse", "arize_phoenix", "ragas"):
+                    result = runner(
+                        query,
+                        context,
+                        answer,
+                        credential_store=self._credential_store,
+                    )
+                elif evaluator_id == "langgraph_trace":
+                    result = runner(query, context, answer)
+                else:
+                    result = runner(query, context, answer)
+            except Exception:  # noqa: BLE001
+                result = {}
+
+            for metric, value in result.items():
+                if isinstance(value, (int, float)):
+                    scores[metric] = float(value)
+
+        if deferred_export:
+            export_scores = run_monitoring_export(
+                query,
+                context,
+                answer,
+                scores,
+            )
+            scores.update(export_scores)
+
+        if ground_truth:
+            gt_tokens = set(ground_truth.lower().split())
+            ans_tokens = set(answer.lower().split())
+            if ans_tokens:
+                overlap = len(gt_tokens & ans_tokens) / max(len(gt_tokens), 1)
+                scores["ground_truth_overlap"] = round(min(overlap, 1.0), 4)
+
+        return scores
 
     def check_cicd_thresholds(
         self,

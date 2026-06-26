@@ -244,11 +244,10 @@ class RAGTypeSelector:
         from rich.panel import Panel  # noqa: PLC0415
         from rich.text import Text  # noqa: PLC0415
 
-        console = Console()
+        from ms_rag.ui.prompts import get_console, print_step, prompt_select  # noqa: PLC0415
 
-        console.print(
-            "\n[bold cyan]Step 3 — Select RAG Architecture[/bold cyan]\n"
-        )
+        console = get_console()
+        print_step(console, 3, "Select RAG Architecture")
 
         choices = [
             questionary.Choice(
@@ -259,10 +258,11 @@ class RAGTypeSelector:
             for i, r in enumerate(RAG_TYPES)
         ]
 
-        selected_id: str = questionary.select(
+        selected_id = prompt_select(
             "Which RAG architecture do you want to build?",
-            choices=choices,
-        ).ask()
+            choices,
+            console=console,
+        )
 
         config = RAG_TYPE_MAP[selected_id]
 

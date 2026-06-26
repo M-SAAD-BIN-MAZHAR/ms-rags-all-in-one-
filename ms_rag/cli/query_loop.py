@@ -13,8 +13,6 @@ Requirement 10:
 
 from __future__ import annotations
 
-from typing import Callable
-
 try:
     import questionary
     from rich.console import Console
@@ -29,9 +27,10 @@ except ImportError:
     Text = None  # type: ignore[assignment]
 
 from ms_rag.models import SessionState
+from ms_rag.ui.prompts import get_console, print_error, print_hint, print_success
 
 # Valid slash commands
-VALID_COMMANDS: list[str] = ["/exit", "/quit", "/config", "/save"]
+VALID_COMMANDS: list[str] = ["/exit", "/quit", "/config", "/save", "/help"]
 MAX_QUERY_LENGTH: int = 4096
 
 
@@ -59,82 +58,80 @@ class QueryLoop:
         self._session_manager = session_manager
 
     def run(self, session_state: SessionState) -> None:
-        """Run the interactive query loop until the user exits.
-
-        Handles all slash commands, validation, and query dispatch.
-
-        Args:
-            session_state: The current SessionState holding PipelineConfig and runtime objects.
-        """
-        console = Console()
+        """Run the interactive query loop until the user exits."""
+        console = get_console()
 
         console.print(
-            "\n[bold green]  ✓ Ready to query![/bold green]  "
-            "Type your question, or use a command:\n"
-            f"  [dim]{', '.join(VALID_COMMANDS)}[/dim]\n"
+            Panel(
+                "\n".join(
+                    [
+                        "[bold white]Live Query Mode[/bold white]",
+                        "",
+                        "Type a natural-language question, or use a command:",
+                        f"[cyan]{', '.join(VALID_COMMANDS)}[/cyan]",
+                        "",
+                        "[dim]Empty Enter re-prompts · /exit requires confirmation[/dim]",
+                    ]
+                ),
+                border_style="green",
+                padding=(1, 2),
+            )
         )
 
         while True:
             raw: str | None = questionary.text(
                 "  Query >",
-                instruction="(Enter query or /help for commands)",
+                instruction="(question or /help)",
             ).ask()
 
             if raw is None:
-                # User closed input (Ctrl+D in terminal) — treat as exit
-                raw = ""
+                print_hint(console, "Input cancelled — type your query or /exit to leave.")
+                continue
 
-            if raw is None or (raw == "" and not raw):
-                # Safety: if ask() returns None (mocked/Ctrl+D), exit loop
-                return
-
-            # Dispatch based on input type
             action = self._classify_input(raw)
 
             if action == "empty":
-                # Req 10.3: re-prompt without processing
+                print_hint(console, "Please enter a question or command.")
                 continue
 
             if action == "too_long":
-                # Req 10.2: reject and re-prompt
-                console.print(
-                    f"[red]  ✗ Query too long ({len(raw)} chars). "
-                    f"Maximum is {MAX_QUERY_LENGTH} characters.[/red]"
+                print_error(
+                    console,
+                    f"Query too long ({len(raw.strip())} chars). "
+                    f"Maximum is {MAX_QUERY_LENGTH} characters.",
                 )
                 continue
 
             if action in ("exit", "quit"):
-                # Req 10.4: always confirm before terminating
                 if self._confirm_exit(console):
                     console.print("[dim]  Goodbye.[/dim]")
                     return
                 continue
 
+            if action == "help":
+                self._display_help(console)
+                continue
+
             if action == "config":
-                # Req 10.5: structured config summary
                 self._display_config(session_state, console)
                 continue
 
             if action == "save":
-                # Req 18.1: /save command
                 self._handle_save(session_state, console)
                 continue
 
             if action == "unknown_command":
-                # Req 10.6: unknown slash command
-                console.print(
-                    f"[yellow]  Unknown command. Valid commands: "
-                    f"{', '.join(VALID_COMMANDS)}[/yellow]"
+                print_error(
+                    console,
+                    f"Unknown command. Valid commands: {', '.join(VALID_COMMANDS)}",
                 )
                 continue
 
-            # action == "query": valid natural language query
             query = raw.strip()
-            session_state.query_history.append((query, ""))  # placeholder
+            session_state.query_history.append((query, ""))
 
             try:
                 answer = self._process_query(query, session_state)
-                # Update history with actual answer
                 if session_state.query_history:
                     last = session_state.query_history[-1]
                     session_state.query_history[-1] = (last[0], answer)
@@ -148,28 +145,10 @@ class QueryLoop:
                     )
                 )
             except Exception as exc:  # noqa: BLE001
-                # Req 19.3: query errors return to prompt without terminating
-                console.print(
-                    f"[red]  ✗ Query error: {type(exc).__name__}: {exc}[/red]"
-                )
-
-    # ------------------------------------------------------------------
-    # Input classification
-    # ------------------------------------------------------------------
+                print_error(console, f"Query error: {type(exc).__name__}: {exc}")
 
     def _classify_input(self, raw: str) -> str:
-        """Return a classification string for the raw input.
-
-        Returns one of:
-            "empty"           — zero length or whitespace only
-            "too_long"        — exceeds MAX_QUERY_LENGTH
-            "exit"            — /exit command
-            "quit"            — /quit command
-            "config"          — /config command
-            "save"            — /save command
-            "unknown_command" — unrecognised slash command
-            "query"           — valid natural language query
-        """
+        """Classify raw user input."""
         stripped = raw.strip()
 
         if not stripped:
@@ -188,23 +167,37 @@ class QueryLoop:
                 return "config"
             if cmd == "/save":
                 return "save"
+            if cmd == "/help":
+                return "help"
             return "unknown_command"
 
         return "query"
 
-    # ------------------------------------------------------------------
-    # Command handlers
-    # ------------------------------------------------------------------
-
-    def _confirm_exit(self, console: object) -> bool:
+    def _confirm_exit(self, console: Console) -> bool:
         """Ask Y/n confirmation before exiting. Req 10.4."""
-        confirmed: bool = questionary.confirm(
-            "  Are you sure you want to exit?",
-            default=False,
-        ).ask()
-        return bool(confirmed)
+        while True:
+            result = questionary.confirm(
+                "  Are you sure you want to exit?",
+                default=False,
+            ).ask()
+            if result is None:
+                print_hint(console, "Please confirm Yes to exit or No to continue.")
+                continue
+            return bool(result)
 
-    def _display_config(self, session_state: SessionState, console: object) -> None:
+    def _display_help(self, console: Console) -> None:
+        """Show available slash commands."""
+        table = Table(title="Query Loop Commands", border_style="cyan", show_header=True)
+        table.add_column("Command", style="bold cyan", min_width=12)
+        table.add_column("Description", style="white")
+        table.add_row("/config", "Show full pipeline configuration summary")
+        table.add_row("/save", "Save session config to JSON")
+        table.add_row("/help", "Show this help message")
+        table.add_row("/exit, /quit", "Exit the query loop (confirmation required)")
+        table.add_row("(text)", "Ask a natural-language question")
+        console.print(table)
+
+    def _display_config(self, session_state: SessionState, console: Console) -> None:
         """Display structured Pipeline_Config summary. Req 10.5."""
         cfg = session_state.config
 
@@ -279,33 +272,28 @@ class QueryLoop:
             ),
         )
 
-        console.print(table)  # type: ignore[union-attr]
+        console.print(table)
 
-    def _handle_save(self, session_state: SessionState, console: object) -> None:
+    def _handle_save(self, session_state: SessionState, console: Console) -> None:
         """Handle /save command. Req 18.1."""
         if self._session_manager is None:
-            console.print(  # type: ignore[union-attr]
-                "[yellow]  Session manager not available. Cannot save.[/yellow]"
-            )
+            print_error(console, "Session manager not available. Cannot save.")
             return
 
-        file_path: str = questionary.text(
-            "  Save config to file path:",
-            default="ms_rag_session.json",
-        ).ask()
+        from ms_rag.ui.prompts import prompt_save_path  # noqa: PLC0415
 
-        if not file_path or not file_path.strip():
-            console.print("[yellow]  Save cancelled.[/yellow]")  # type: ignore[union-attr]
+        file_path = prompt_save_path(console=console)
+        if not file_path:
+            print_hint(console, "Save cancelled.")
             return
 
         try:
             from pathlib import Path  # noqa: PLC0415
-            self._session_manager.save(session_state.config, Path(file_path.strip()))  # type: ignore[union-attr]
-            console.print(  # type: ignore[union-attr]
-                f"[green]  ✓ Session saved to {file_path.strip()}[/green]"
-            )
+
+            self._session_manager.save(session_state.config, Path(file_path))  # type: ignore[union-attr]
+            print_success(console, f"Session saved to {file_path}")
         except Exception as exc:  # noqa: BLE001
-            console.print(f"[red]  ✗ Save failed: {exc}[/red]")  # type: ignore[union-attr]
+            print_error(console, f"Save failed: {exc}")
 
     def _process_query(self, query: str, session_state: SessionState) -> str:
         """Route query to the pipeline or return placeholder."""

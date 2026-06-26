@@ -100,6 +100,40 @@ STRATEGY_MAP: dict[str, StrategyInfo] = {s.strategy_id: s for s in STRATEGIES}
 DATA_TYPES: list[str] = ["string", "integer", "float", "date"]
 
 
+def _extract_corpus_texts(vector_store: object) -> list[str]:
+    """Extract indexed document texts from a vector store for keyword retrievers."""
+    texts: list[str] = []
+
+    get_fn = getattr(vector_store, "get", None)
+    if callable(get_fn):
+        try:
+            result = get_fn()
+            if isinstance(result, dict):
+                documents = result.get("documents") or []
+            else:
+                documents = getattr(result, "documents", []) or []
+            for doc in documents:
+                if isinstance(doc, str) and doc.strip():
+                    texts.append(doc)
+                elif hasattr(doc, "page_content") and doc.page_content.strip():
+                    texts.append(doc.page_content)
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not texts:
+        collection = getattr(vector_store, "_collection", None)
+        if collection is not None and hasattr(collection, "get"):
+            try:
+                raw = collection.get(include=["documents"])
+                for doc in raw.get("documents", []) or []:
+                    if isinstance(doc, str) and doc.strip():
+                        texts.append(doc)
+            except Exception:  # noqa: BLE001
+                pass
+
+    return texts
+
+
 # ---------------------------------------------------------------------------
 # RetrievalStrategyModule
 # ---------------------------------------------------------------------------
@@ -131,10 +165,13 @@ class RetrievalStrategyModule:
             )
             for i, s in enumerate(STRATEGIES)
         ]
-        strategy_id: str = questionary.select(
+        from ms_rag.ui.prompts import prompt_select  # noqa: PLC0415
+
+        strategy_id = prompt_select(
             "Select retrieval strategy:",
-            choices=choices,
-        ).ask()
+            choices,
+            console=console,
+        )
 
         # Step 2: top_k (Req 12.2)
         top_k = self._prompt_int(
@@ -216,20 +253,33 @@ class RetrievalStrategyModule:
 
         if strategy == "keyword_bm25":
             from langchain_community.retrievers import BM25Retriever  # noqa: PLC0415
-            return BM25Retriever.from_texts([], k=config.top_k)
+            texts = _extract_corpus_texts(vector_store)
+            if not texts:
+                return vector_store.as_retriever(  # type: ignore[union-attr]
+                    search_kwargs={"k": config.top_k},
+                )
+            return BM25Retriever.from_texts(texts, k=config.top_k)
 
         if strategy == "tfidf":
             from langchain_community.retrievers import TFIDFRetriever  # noqa: PLC0415
-            return TFIDFRetriever.from_texts([], k=config.top_k)
+            texts = _extract_corpus_texts(vector_store)
+            if not texts:
+                return vector_store.as_retriever(  # type: ignore[union-attr]
+                    search_kwargs={"k": config.top_k},
+                )
+            return TFIDFRetriever.from_texts(texts, k=config.top_k)
 
         if strategy == "hybrid":
             from langchain_community.retrievers import BM25Retriever  # noqa: PLC0415
-            from langchain.retrievers import EnsembleRetriever  # noqa: PLC0415
+            from langchain_classic.retrievers import EnsembleRetriever  # noqa: PLC0415
             alpha = config.alpha if config.alpha is not None else 0.5
-            bm25 = BM25Retriever.from_texts([], k=config.top_k)
             dense = vector_store.as_retriever(  # type: ignore[union-attr]
                 search_kwargs={"k": config.top_k}
             )
+            texts = _extract_corpus_texts(vector_store)
+            if not texts:
+                return dense
+            bm25 = BM25Retriever.from_texts(texts, k=config.top_k)
             return EnsembleRetriever(
                 retrievers=[bm25, dense],
                 weights=[1 - alpha, alpha],
@@ -243,7 +293,7 @@ class RetrievalStrategyModule:
             )
 
         if strategy == "ensemble":
-            from langchain.retrievers import EnsembleRetriever  # noqa: PLC0415
+            from langchain_classic.retrievers import EnsembleRetriever  # noqa: PLC0415
             sub_ids = config.ensemble_sub_retrievers or ["dense_vector", "keyword_bm25"]
             weights = config.ensemble_weights or [1.0 / len(sub_ids)] * len(sub_ids)
             sub_retrievers = []
@@ -253,9 +303,9 @@ class RetrievalStrategyModule:
             return EnsembleRetriever(retrievers=sub_retrievers, weights=weights)
 
         if strategy == "parent_child":
-            from langchain.retrievers import ParentDocumentRetriever  # noqa: PLC0415
+            from langchain_classic.retrievers import ParentDocumentRetriever  # noqa: PLC0415
             from langchain_text_splitters import RecursiveCharacterTextSplitter  # noqa: PLC0415
-            from langchain.storage import InMemoryStore  # noqa: PLC0415
+            from langchain_classic.storage import InMemoryStore  # noqa: PLC0415
             return ParentDocumentRetriever(
                 vectorstore=vector_store,  # type: ignore[arg-type]
                 docstore=InMemoryStore(),
@@ -265,8 +315,8 @@ class RetrievalStrategyModule:
             )
 
         if strategy == "multi_vector":
-            from langchain.retrievers.multi_vector import MultiVectorRetriever  # noqa: PLC0415
-            from langchain.storage import InMemoryStore  # noqa: PLC0415
+            from langchain_classic.retrievers.multi_vector import MultiVectorRetriever  # noqa: PLC0415
+            from langchain_classic.storage import InMemoryStore  # noqa: PLC0415
             return MultiVectorRetriever(
                 vectorstore=vector_store,  # type: ignore[arg-type]
                 docstore=InMemoryStore(),
@@ -280,8 +330,8 @@ class RetrievalStrategyModule:
                 return vector_store.as_retriever(  # type: ignore[union-attr]
                     search_kwargs={"k": config.top_k}
                 )
-            from langchain.retrievers.self_query.base import SelfQueryRetriever  # noqa: PLC0415
-            from langchain.chains.query_constructor.base import AttributeInfo  # noqa: PLC0415
+            from langchain_classic.retrievers.self_query.base import SelfQueryRetriever  # noqa: PLC0415
+            from langchain_classic.chains.query_constructor.base import AttributeInfo  # noqa: PLC0415
             attr_infos = [
                 AttributeInfo(
                     name=f.name,
@@ -299,7 +349,7 @@ class RetrievalStrategyModule:
             )
 
         if strategy == "time_weighted":
-            from langchain.retrievers.time_weighted_retriever import (  # noqa: PLC0415
+            from langchain_classic.retrievers.time_weighted_retriever import (  # noqa: PLC0415
                 TimeWeightedVectorStoreRetriever,
             )
             return TimeWeightedVectorStoreRetriever(
@@ -409,14 +459,21 @@ class RetrievalStrategyModule:
             if s.strategy_id not in ("ensemble",)  # can't nest ensemble
         ]
 
-        selected_subs: list[str] = questionary.checkbox(
-            "  Select sub-retrievers (minimum 2):",
-            choices=sub_choices,
-        ).ask()
-
-        if not selected_subs or len(selected_subs) < 2:
-            console.print("[yellow]  Defaulting to dense_vector + keyword_bm25.[/yellow]")  # type: ignore[union-attr]
-            selected_subs = ["dense_vector", "keyword_bm25"]
+        selected_subs: list[str] = []
+        while True:
+            selected_subs = questionary.checkbox(
+                "  Select sub-retrievers (minimum 2):",
+                choices=sub_choices,
+            ).ask()
+            if selected_subs is None:
+                console.print("[yellow]  Please select at least 2 sub-retrievers.[/yellow]")  # type: ignore[union-attr]
+                continue
+            if len(selected_subs) < 2:
+                console.print(  # type: ignore[union-attr]
+                    "[red]  ✗ Ensemble retrieval requires at least 2 sub-retrievers.[/red]"
+                )
+                continue
+            break
 
         # Prompt weights
         weights: list[float] = []

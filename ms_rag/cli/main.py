@@ -40,8 +40,11 @@ def run(load_path: str | None = None) -> None:
 
     # --load: skip setup and jump to query loop
     if load_path:
+        from ms_rag.config.credential_manager import CredentialManager  # noqa: PLC0415
+        from ms_rag.llm.llm_integration import rebuild_session_runtime  # noqa: PLC0415
         from ms_rag.session.session_manager import SessionManager  # noqa: PLC0415
         from ms_rag.utils.exceptions import SessionLoadError  # noqa: PLC0415
+
         manager = SessionManager()
         try:
             config = manager.load(Path(load_path))
@@ -50,11 +53,36 @@ def run(load_path: str | None = None) -> None:
                 f"  RAG Type: {config.rag_type.display_name if config.rag_type else 'unknown'}\n"
                 f"  Providers: {', '.join(config.configured_providers) or 'none'}\n"
             )
-            session = SessionState(config=config, credentials=credential_store)
-            _run_query_loop(session)
+            console.print(  # type: ignore[union-attr]
+                "[bold cyan]  Re-enter credentials to rebuild the live pipeline.[/bold cyan]"
+            )
+            cred_manager = CredentialManager(credential_store=credential_store)
+            while True:
+                for pid in config.configured_providers:
+                    creds = cred_manager.collect_credentials(pid)
+                    cred_manager.store(pid, creds)
+                if cred_manager.display_summary_and_confirm():
+                    break
+                credential_store.clear()
+                console.print("[yellow]  Please re-enter credentials.[/yellow]")
+            runtime = rebuild_session_runtime(config, credential_store)
+            session = SessionState(
+                config=config,
+                credentials=credential_store,
+                **runtime,
+            )
+            eval_framework = None
+            if config.evaluation_enabled:
+                from ms_rag.evaluation.evaluation_framework import EvaluationFramework  # noqa: PLC0415
+                eval_framework = EvaluationFramework(credential_store=credential_store)
+            _run_query_loop(session, eval_framework=eval_framework)
             return
         except SessionLoadError as exc:
             console.print(f"[yellow]  ⚠ {exc} Falling back to interactive setup.[/yellow]\n")
+        except ValueError as exc:
+            console.print(f"[yellow]  ⚠ {exc} Falling back to interactive setup.[/yellow]\n")
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[yellow]  ⚠ Failed to rebuild session: {exc}[/yellow]\n")
 
     # Interactive setup: Steps 2-16
     config = _run_interactive_setup(credential_store, console)
@@ -79,18 +107,33 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
     from ms_rag.query.context_compressor import ContextCompressor  # noqa: PLC0415
     from ms_rag.workflow.system_prompt_configurator import SystemPromptConfigurator  # noqa: PLC0415
     from ms_rag.evaluation.evaluation_framework import EvaluationFramework  # noqa: PLC0415
-    import questionary  # noqa: PLC0415
+    from ms_rag.ui.prompts import (  # noqa: PLC0415
+        get_console,
+        print_error,
+        print_success,
+        print_warning,
+        prompt_document_sources,
+        prompt_select,
+    )
 
+    con = get_console() if console is None else console  # type: ignore[assignment]
     config = PipelineConfig()
 
     # Step 2: Credentials
     cred_manager = CredentialManager(credential_store=credential_store)
-    selected_providers = cred_manager.prompt_providers()
-    for pid in selected_providers:
-        creds = cred_manager.collect_credentials(pid)
-        cred_manager.store(pid, creds)
-    cred_manager.display_summary_and_confirm()
-    config.configured_providers = selected_providers
+    while True:
+        selected_providers = cred_manager.prompt_providers()
+        if not selected_providers:
+            print_warning(con, "Please select at least one LLM provider.")
+            continue
+        for pid in selected_providers:
+            creds = cred_manager.collect_credentials(pid)
+            cred_manager.store(pid, creds)
+        if cred_manager.display_summary_and_confirm():
+            config.configured_providers = selected_providers
+            break
+        credential_store.clear()
+        print_warning(con, "Let's re-configure your providers.")
 
     # Step 3: RAG Type
     rag_selector = RAGTypeSelector()
@@ -116,22 +159,10 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
     db_connector = VectorDBConnector(credential_store=credential_store)
     config.vector_db = db_connector.prompt_and_configure()
 
-    # Connection test
-    while True:
-        result = db_connector.test_connection(config.vector_db)
-        if result.success:
-            break
-        console.print(f"[red]  ✗ Connection failed: {result.error_message}[/red]")  # type: ignore[union-attr]
-        retry = questionary.confirm("  Retry with different credentials?", default=True).ask()
-        if not retry:
-            break
+    # Connection test — must succeed before ingestion (Req 9.4-9.5)
+    config.vector_db = _ensure_vector_db_connection(db_connector, config.vector_db, con)
 
-    # Prompt for document sources
-    sources_raw: str = questionary.text(
-        "  Enter document paths/directories/URLs (comma-separated):",
-        default="./docs",
-    ).ask()
-    config.document_sources = [s.strip() for s in sources_raw.split(",") if s.strip()]
+    config.document_sources = prompt_document_sources(console=con)
 
     # Ingest
     embeddings = vectorization.get_embeddings(config.embedding_model, credential_store)
@@ -182,20 +213,13 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
         config.evaluation_enabled = True
 
     # Build retriever and RAG chain
-    retriever = retrieval_module.get_retriever(config.retrieval, vector_store)
+    from ms_rag.llm.llm_integration import rebuild_session_runtime  # noqa: PLC0415
 
-    from ms_rag.llm.llm_integration import build_rag_chain, build_langgraph_workflow, get_llm  # noqa: PLC0415
-    from ms_rag.workflow.rag_type_selector import LANGGRAPH_TYPES  # noqa: PLC0415
-
-    provider = config.configured_providers[0] if config.configured_providers else "ollama"
-    llm = get_llm(provider, "default", credential_store=credential_store)
-
-    if config.rag_type and config.rag_type.requires_langgraph:
-        rag_chain = build_langgraph_workflow(
-            config.rag_type.rag_type, retriever, llm, config.system_prompt
-        )
-    else:
-        rag_chain = build_rag_chain(retriever, llm, config.system_prompt)
+    runtime = rebuild_session_runtime(config, credential_store)
+    retriever = runtime["retriever"]
+    llm = runtime["llm"]
+    rag_chain = runtime["rag_chain"]
+    vector_store = runtime["vector_store"]
 
     session = SessionState(
         config=config,
@@ -206,18 +230,61 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
         rag_chain=rag_chain,
     )
 
-    _run_query_loop(session)
+    _run_query_loop(session, eval_framework=eval_framework if config.evaluation_enabled else None)
     return config
 
 
-def _run_query_loop(session: SessionState) -> None:
+def _ensure_vector_db_connection(
+    db_connector: object,
+    vector_db_config: object,
+    console: object,
+) -> object:
+    """Test vector DB connection; re-prompt until successful."""
+    import questionary  # noqa: PLC0415
+
+    from ms_rag.ui.prompts import print_error, print_success, prompt_select  # noqa: PLC0415
+
+    config = vector_db_config
+    while True:
+        result = db_connector.test_connection(config)  # type: ignore[union-attr]
+        if result.success:
+            print_success(console, "Vector database connection successful.")  # type: ignore[arg-type]
+            return config
+
+        print_error(
+            console,  # type: ignore[arg-type]
+            f"Connection failed: {result.error_message}",
+        )
+        action = prompt_select(
+            "  Connection failed. What would you like to do?",
+            [
+                questionary.Choice("Re-enter credentials", value="creds"),
+                questionary.Choice("Re-select vector database", value="reselect"),
+            ],
+            console=console,  # type: ignore[arg-type]
+        )
+        if action == "creds":
+            config = db_connector.reprompt_credentials(config)  # type: ignore[union-attr]
+        else:
+            config = db_connector.prompt_and_configure()  # type: ignore[union-attr]
+
+
+def _run_query_loop(session: SessionState, eval_framework: object | None = None) -> None:
     """Run the interactive query loop."""
     from ms_rag.cli.query_loop import QueryLoop  # noqa: PLC0415
     from ms_rag.llm.llm_integration import process_query  # noqa: PLC0415
+    from ms_rag.query.query_enhancer import QueryEnhancer  # noqa: PLC0415
     from ms_rag.session.session_manager import SessionManager  # noqa: PLC0415
 
+    query_enhancer = QueryEnhancer()
+
     def pipeline(query: str, sess: SessionState) -> str:
-        return process_query(query, sess)
+        return process_query(
+            query,
+            sess,
+            query_enhancer=query_enhancer,
+            evaluation_framework=eval_framework,
+        )
 
     loop = QueryLoop(
         query_pipeline=pipeline,

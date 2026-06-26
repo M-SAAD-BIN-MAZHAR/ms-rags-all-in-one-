@@ -17,6 +17,7 @@ from ms_rag.evaluation.evaluation_framework import (
     CREDENTIAL_REQUIRED_EVALUATORS,
     EVALUATOR_IDS,
     EVALUATOR_MAP,
+    EVALUATOR_RUNNERS,
     EVALUATORS,
     EvaluationFramework,
 )
@@ -184,6 +185,84 @@ class TestCICDThresholds:
 
 
 # ---------------------------------------------------------------------------
+# evaluate() — runtime scoring
+# ---------------------------------------------------------------------------
+
+
+class TestEvaluateRuntime:
+    def test_evaluate_returns_empty_without_config(self) -> None:
+        framework = EvaluationFramework()
+        assert framework.evaluate("q", [], "a") == {}
+
+    def test_evaluate_runs_lexical_evaluators(self) -> None:
+        framework = EvaluationFramework()
+        framework._config = EvaluationConfig(evaluators=["ares", "ragbench"])
+        from langchain_core.documents import Document  # noqa: PLC0415
+
+        context = [Document(page_content="Retrieval augmented generation improves answers.")]
+        scores = framework.evaluate(
+            "What is RAG?",
+            context,
+            "Retrieval augmented generation improves answers.",
+        )
+        assert "ares_faithfulness" in scores or "ares_context_recall" in scores
+        assert any(k.startswith("ragbench_") for k in scores)
+
+    def test_evaluate_uses_config_override(self) -> None:
+        framework = EvaluationFramework()
+        config = EvaluationConfig(evaluators=["rageval"])
+        from langchain_core.documents import Document  # noqa: PLC0415
+
+        scores = framework.evaluate(
+            "test",
+            [Document(page_content="hello world")],
+            "hello",
+            config=config,
+        )
+        assert scores
+
+    def test_evaluate_merges_runner_scores(self) -> None:
+        mock_deepeval = MagicMock(return_value={"answer_relevancy": 0.91})
+        framework = EvaluationFramework()
+        framework._config = EvaluationConfig(evaluators=["deepeval"])
+
+        with patch.dict(EVALUATOR_RUNNERS, {"deepeval": mock_deepeval}):
+            scores = framework.evaluate("q", [], "a")
+
+        assert scores["answer_relevancy"] == 0.91
+        mock_deepeval.assert_called_once()
+
+    def test_monitoring_export_runs_last(self) -> None:
+        mock_ares = MagicMock(return_value={"ares_faithfulness": 0.8})
+        mock_export = MagicMock(return_value={"monitoring_export_logged": 1.0})
+        framework = EvaluationFramework()
+        framework._config = EvaluationConfig(
+            evaluators=["ares", "monitoring_export"],
+        )
+
+        with patch.dict(EVALUATOR_RUNNERS, {"ares": mock_ares}), patch(
+            "ms_rag.evaluation.evaluation_framework.run_monitoring_export",
+            mock_export,
+        ):
+            scores = framework.evaluate("q", [], "a")
+
+        mock_export.assert_called_once()
+        assert scores["monitoring_export_logged"] == 1.0
+        assert scores["ares_faithfulness"] == 0.8
+
+    def test_ground_truth_overlap_metric(self) -> None:
+        framework = EvaluationFramework()
+        framework._config = EvaluationConfig(evaluators=["ares"])
+        scores = framework.evaluate(
+            "q",
+            [],
+            "the cat sat on the mat",
+            ground_truth="the cat sat on the mat",
+        )
+        assert scores.get("ground_truth_overlap", 0) >= 0.5
+
+
+# ---------------------------------------------------------------------------
 # configure() — basic flow
 # ---------------------------------------------------------------------------
 
@@ -202,7 +281,7 @@ class TestConfigureFlow:
 
         assert result is None
 
-    def test_empty_selection_returns_none(self) -> None:
+    def test_empty_selection_reprompts(self) -> None:
         framework = EvaluationFramework()
 
         with patch("ms_rag.evaluation.evaluation_framework.questionary") as mock_q, \
@@ -212,13 +291,14 @@ class TestConfigureFlow:
             mock_q.confirm.return_value = mock_confirm
 
             mock_checkbox = MagicMock()
-            mock_checkbox.ask.return_value = []
+            mock_checkbox.ask.side_effect = [[], ["ragas"]]
             mock_q.checkbox.return_value = mock_checkbox
             mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
 
             result = framework.configure()
 
-        assert result is None
+        assert result is not None
+        assert result.evaluators == ["ragas"]
 
     def test_selected_evaluators_stored_in_config(self) -> None:
         framework = EvaluationFramework()

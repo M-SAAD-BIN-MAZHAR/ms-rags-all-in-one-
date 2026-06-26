@@ -17,7 +17,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![LangChain 0.3+](https://img.shields.io/badge/LangChain-0.3%2B-green)](https://langchain.com)
 [![LangGraph 0.2+](https://img.shields.io/badge/LangGraph-0.2%2B-purple)](https://langchain-ai.github.io/langgraph/)
-[![Tests: 358 passing](https://img.shields.io/badge/Tests-358%20passing-brightgreen)](tests/)
+[![Tests: 390 passing](https://img.shields.io/badge/Tests-390%20passing-brightgreen)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 [![Code style: production](https://img.shields.io/badge/code%20style-production-blue)]()
 
@@ -48,7 +48,7 @@ Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generat
 | **Document Loaders** | 30+ LangChain loaders filtered by your document types |
 | **Chunking Strategies** | 11 strategies — Recursive Character, Fixed Size, Semantic, Sentence, Paragraph, Token-based, Markdown/HTML/Code-aware, Agentic, Document-aware |
 | **Embedding Models** | 22+ models — OpenAI, Cohere, HuggingFace (BGE, E5, Instructor, sentence-transformers), Google, Mistral, Ollama/local |
-| **Vector Databases** | 12 databases — ChromaDB, Pinecone, Qdrant, Weaviate, FAISS, Milvus, Redis, PGVector, Elasticsearch, OpenSearch, Azure AI Search, MongoDB Atlas |
+| **Vector Databases** | 12 databases — ChromaDB, Pinecone, Qdrant, Weaviate, FAISS, Milvus, Redis (`langchain-redis`), PGVector, Elasticsearch, OpenSearch, Azure AI Search, MongoDB Atlas |
 | **Query Enhancement** | 7 techniques — Query Rewriting, Query Expansion, HyDE, Multi-Query, Step-Back, Sub-question Decomposition, RAG-Fusion |
 | **Retrieval Strategies** | 10 strategies — Dense Vector, BM25, TF-IDF, Hybrid, MMR, Ensemble, Parent-Child, Multi-Vector, Self-Query, Time-weighted |
 | **Rerankers** | 6 — Cross-Encoder, Cohere, BGE, LLM-based, ColBERT, FlashRank |
@@ -125,10 +125,11 @@ ms-rag
 
 That's it. **No manual extra installs needed.** The `[production]` extra includes:
 - All 12 LLM providers
-- All 12 vector databases
-- All 12 evaluation frameworks (RAGAS, DeepEval, TruLens, LangSmith, Langfuse, etc.)
+- All 12 vector databases (Redis via `langchain-redis`, not deprecated `langchain-community`)
+- All 12 evaluation frameworks with **live runtime scoring** (RAGAS, DeepEval, TruLens, LangSmith, Langfuse, etc.)
 - All rerankers (FlashRank, Cohere)
 - All document loaders (PDF, DOCX, CSV, HTML, YouTube, images, etc.)
+- Aligned `grpcio` pins for Weaviate compatibility (`grpcio>=1.59.5,<1.80.0`)
 
 ### Minimal Install (core only)
 
@@ -153,9 +154,11 @@ ms-rag
 # Or using Python directly
 python -m ms_rag
 
-# Resume a previously saved session (skips to query loop)
+# Resume a previously saved session (re-prompts credentials, rebuilds runtime)
 ms-rag --load session.json
 ```
+
+Saved sessions rebuild the live vector store connection, retriever stack, LLM, and RAG chain via `rebuild_session_runtime()`. Your vector DB data must still exist on disk or at the configured endpoint.
 
 ---
 
@@ -208,7 +211,10 @@ Type natural language questions. Available commands:
 |---------|--------|
 | `/config` | Display full pipeline configuration summary |
 | `/save` | Save session to JSON for later resumption |
+| `/help` | List available query-loop commands |
 | `/exit` or `/quit` | Exit with confirmation prompt |
+
+Empty Enter in the query loop re-prompts instead of exiting. Required workflow inputs (providers, document sources, vector DB connection, etc.) loop until valid.
 
 ---
 
@@ -221,7 +227,7 @@ Save config to file path: my_session.json
 ✓ Session saved to my_session.json
 ```
 
-Resume it later (skips all setup steps):
+Resume it later (re-enters credentials and rebuilds the live pipeline):
 ```bash
 ms-rag --load my_session.json
 ```
@@ -295,7 +301,8 @@ MS-RAG-ALL-IN-ONE-/
 │   ├── codegen/
 │   │   └── code_generator.py         # pipeline.py + requirements.txt generator
 │   ├── evaluation/
-│   │   └── evaluation_framework.py   # 12 evaluation frameworks
+│   │   ├── evaluation_framework.py   # 12 evaluation frameworks + live scoring
+│   │   └── evaluator_runners.py      # RAGAS, DeepEval, LangSmith, Langfuse, etc.
 │   ├── ingestion/
 │   │   ├── chunking_engine.py        # 11 chunking strategies
 │   │   ├── document_type_selector.py # 18 document types
@@ -314,8 +321,11 @@ MS-RAG-ALL-IN-ONE-/
 │   ├── session/
 │   │   └── session_manager.py        # /save + --load
 │   ├── ui/
-│   │   └── banner.py                 # ASCII banner
+│   │   ├── banner.py                 # ASCII banner
+│   │   └── prompts.py                # Shared re-prompt helpers (required inputs)
 │   ├── utils/
+│   │   ├── credentials.py            # Shared credential + model resolution
+│   │   ├── metadata.py               # ChromaDB metadata sanitization
 │   │   ├── exceptions.py             # Custom exception hierarchy
 │   │   ├── retry.py                  # Exponential backoff + Retry/Skip/Abort
 │   │   └── validation.py             # Centralised range validation
@@ -343,13 +353,15 @@ MS-RAG-ALL-IN-ONE-/
 |-------|---------|-------|
 | Terminal UI | `rich>=13.0`, `questionary>=2.0` | Panels, tables, progress bars, interactive prompts |
 | CLI | `click>=8.1` | `--load` flag, help generation |
-| LangChain | `langchain>=0.3`, `langchain-core`, `langchain-community` | Loaders, splitters, chains, retrievers |
+| LangChain | `langchain>=0.3`, `langchain-classic`, `langchain-core`, `langchain-community` | Loaders, splitters, chains, retrievers |
 | LangGraph | `langgraph>=0.2` | Agentic RAG: Self-RAG, CRAG, Adaptive RAG |
+| Redis vectors | `langchain-redis>=0.2` | ⚠️ NOT deprecated `langchain_community.vectorstores.Redis` |
 | HuggingFace | `langchain-huggingface>=0.1` | ⚠️ NOT deprecated `langchain-community` |
 | Ollama | `langchain-ollama>=0.2` | ⚠️ NOT deprecated `langchain-community` |
 | TruLens | `trulens-core`, `trulens-apps-langchain` | ⚠️ NOT deprecated `trulens_eval` |
+| gRPC | `grpcio>=1.59.5,<1.80.0` | Pinned for `weaviate-client` compatibility |
 | Credential encryption | `cryptography>=41.0` | Fernet symmetric encryption + PBKDF2 |
-| Testing | `pytest>=8.0`, `hypothesis>=6.100` | 358 tests, property-based |
+| Testing | `pytest>=8.0`, `hypothesis>=6.100` | 390 tests, property-based |
 
 ---
 
@@ -365,11 +377,30 @@ pytest tests/property/ -v
 # Unit tests only
 pytest tests/unit/ -v
 
+# Integration tests (includes rebuild_session_runtime)
+pytest tests/integration/ -v
+
+# LangChain import audit (AST-based, no false positives)
+python scripts/audit_imports.py
+
 # With coverage
 pytest tests/ --cov=ms_rag --cov-report=html
 ```
 
-**Expected result: 358 passed, 1 skipped, 0 failed**
+---
+
+## Evaluation Runtime
+
+When evaluation is enabled in Step 16, metrics are computed **live after each query**:
+
+| Evaluator | Runtime behaviour |
+|-----------|-------------------|
+| RAGAS / DeepEval / TruLens | Full framework when installed; lexical fallback otherwise |
+| LangSmith / Langfuse | Logs trace/run when credentials are configured |
+| ARES / RAGBench / RAGEval | Lexical grounding scores (context recall, faithfulness) |
+| CI/CD Gate | Checks thresholds against aggregated metrics via `check_cicd_thresholds()` |
+| LangGraph Trace | Appends to `MS_RAG_TRACE_LOG` (default: `./ms_rag_traces.jsonl`) |
+| Monitoring Export | Appends metrics to `MS_RAG_METRICS_EXPORT` (default: `./ms_rag_metrics.jsonl`) |
 
 ---
 
@@ -386,7 +417,9 @@ from trulens_eval import TruChain
 # ✅ CURRENT — what MS_RAG uses
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import ChatOllama
+from langchain_redis import RedisVectorStore
 from trulens.apps.langchain import TruChain
+from langchain_classic.retrievers import EnsembleRetriever
 ```
 
 ---
@@ -399,7 +432,12 @@ from trulens.apps.langchain import TruChain
 4. Commit your changes: `git commit -m "feat: add my feature"`
 5. Push and open a Pull Request
 
-Please ensure all 358 tests still pass before submitting.
+Please ensure all tests still pass before submitting:
+
+```bash
+pytest tests/ -v
+python scripts/audit_imports.py
+```
 
 ---
 

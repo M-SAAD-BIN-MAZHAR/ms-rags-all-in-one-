@@ -33,6 +33,7 @@ from ms_rag.models import (
     VectorDBConfig,
 )
 from ms_rag.utils.exceptions import IngestionError
+from ms_rag.utils.metadata import sanitize_documents
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +224,7 @@ class IngestionOrchestrator:
 
                 # Chunk
                 chunks = splitter.split_documents(docs)
+                sanitize_documents(chunks)
 
                 # Store (with retry)
                 def _store(c: list = chunks, vs: object = vector_store) -> None:
@@ -327,22 +329,12 @@ class IngestionOrchestrator:
                 from langchain_community.document_loaders import PyPDFLoader  # noqa: PLC0415
                 return PyPDFLoader(source).load()
 
-        if loader_class_name == "UnstructuredPDFLoader":
-            from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
-            return UnstructuredLoader(source).load()
-
         if loader_class_name == "PDFPlumberLoader":
             from langchain_community.document_loaders import PDFPlumberLoader  # noqa: PLC0415
             return PDFPlumberLoader(source).load()
 
         # ── DOCX loaders ─────────────────────────────────────────────
         if loader_class_name == "UnstructuredWordDocumentLoader":
-            from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
-            return UnstructuredLoader(source).load()
-
-        # ── DOCX loaders ─────────────────────────────────────────────
-        if loader_class_name == "UnstructuredWordDocumentLoader":
-            # Try unstructured first, fall back to docx2txt
             try:
                 from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
                 return UnstructuredLoader(source).load()

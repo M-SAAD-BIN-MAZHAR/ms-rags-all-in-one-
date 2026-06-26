@@ -33,6 +33,7 @@ except ImportError:
 
 from ms_rag.models import VectorDBConfig, IngestionResult
 from ms_rag.utils.exceptions import ConnectionError as MSRAGConnectionError
+from ms_rag.utils.metadata import sanitize_documents
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +194,11 @@ class VectorDBConnector:
 
         Requirement 9.1-9.3.
         """
-        console = Console()
-        console.print("\n[bold cyan]Step 9 — Select Vector Database[/bold cyan]\n")
+        import questionary  # noqa: PLC0415
+        from ms_rag.ui.prompts import get_console, print_step, prompt_checkbox  # noqa: PLC0415
+
+        console = get_console()
+        print_step(console, 9, "Select Vector Database")
 
         choices = [
             questionary.Choice(
@@ -204,10 +208,9 @@ class VectorDBConnector:
             for db in VECTOR_DBS
         ]
 
-        db_type: str = questionary.select(
-            "Select vector database:",
-            choices=choices,
-        ).ask()
+        from ms_rag.ui.prompts import prompt_select, prompt_text  # noqa: PLC0415
+
+        db_type = prompt_select("Select vector database:", choices, console=console)
 
         db_info = VECTOR_DB_MAP[db_type]
         connection_params: dict[str, str] = {}
@@ -229,11 +232,12 @@ class VectorDBConnector:
                 connection_params[field_name] = value
 
         # Prompt for collection name
-        collection: str = questionary.text(
+        collection_name = prompt_text(
             f"  Collection / index name (default: {db_info.default_collection}):",
             default=db_info.default_collection,
-        ).ask()
-        collection_name = (collection or db_info.default_collection).strip()
+            required=True,
+            console=console,
+        )
 
         config = VectorDBConfig(
             db_type=db_type,
@@ -244,7 +248,41 @@ class VectorDBConnector:
         # Show summary (Req 9.3)
         self._display_config_summary(config, db_info, console)
 
+        from ms_rag.ui.prompts import prompt_required_confirm  # noqa: PLC0415
+
+        prompt_required_confirm("Proceed with these vector DB settings?", console=console)
+
         return config
+
+    def reprompt_credentials(self, config: VectorDBConfig) -> VectorDBConfig:
+        """Re-prompt required and optional credentials for an existing vector DB config."""
+        console = Console()
+        db_info = VECTOR_DB_MAP[config.db_type]
+        connection_params = dict(config.connection_params)
+
+        if db_info.credential_fields:
+            console.print(
+                f"\n  [bold white]Re-enter credentials for {db_info.display_name}:[/bold white]"
+            )
+            for field_name in db_info.credential_fields:
+                value = self._prompt_credential(field_name, required=True, console=console)
+                connection_params[field_name] = value
+                if self._credential_store is not None:
+                    self._credential_store.set(config.db_type, field_name, value)  # type: ignore[union-attr]
+
+        for field_name in db_info.optional_fields:
+            value = self._prompt_credential(field_name, required=False, console=console)
+            if value:
+                connection_params[field_name] = value
+
+        updated = VectorDBConfig(
+            db_type=config.db_type,
+            connection_params=connection_params,
+            collection_name=config.collection_name,
+            dimension=config.dimension,
+        )
+        self._display_config_summary(updated, db_info, console)
+        return updated
 
     def test_connection(self, config: VectorDBConfig) -> ConnectionResult:
         """Attempt a lightweight connection to the vector DB.
@@ -395,11 +433,15 @@ class VectorDBConnector:
             )
 
         if db_type == "redis":
-            from langchain_community.vectorstores import Redis  # noqa: PLC0415
-            return Redis(
-                redis_url=params.get("REDIS_URL", "redis://localhost:6379"),
+            from langchain_redis import RedisConfig, RedisVectorStore  # noqa: PLC0415
+
+            redis_config = RedisConfig(
                 index_name=params.get("REDIS_INDEX_NAME", config.collection_name),
-                embedding=embeddings,  # type: ignore[arg-type]
+                redis_url=params.get("REDIS_URL", "redis://localhost:6379"),
+            )
+            return RedisVectorStore(
+                embeddings=embeddings,  # type: ignore[arg-type]
+                config=redis_config,
             )
 
         raise ValueError(f"Unsupported vector DB type: {db_type!r}")
@@ -451,6 +493,7 @@ class VectorDBConnector:
 
             for i in range(0, total, batch_size):
                 batch = docs[i: i + batch_size]
+                sanitize_documents(batch)
                 vector_store.add_documents(batch)  # type: ignore[union-attr]
                 stored += len(batch)
                 progress.update(task, completed=stored)
