@@ -172,7 +172,7 @@ class EvaluationFramework:
             EvaluationConfig if enabled, None if user declines.
         """
         console = Console()
-        console.print("\n[bold cyan]Step 16 — Evaluation Framework[/bold cyan]\n")
+        console.print("\n[bold cyan]Step 15 — Evaluation Framework[/bold cyan]\n")
 
         wants_evaluation: bool = questionary.confirm(
             "  Do you want to configure evaluation?",

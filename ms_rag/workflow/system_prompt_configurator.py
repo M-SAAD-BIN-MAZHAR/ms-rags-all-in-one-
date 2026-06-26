@@ -81,7 +81,7 @@ class SystemPromptConfigurator:
             explicitly cleared it, which is permitted).
         """
         console = Console()
-        console.print("\n[bold cyan]Step 15 — System Prompt Configuration[/bold cyan]\n")
+        console.print("\n[bold cyan]Step 14 — System Prompt Configuration[/bold cyan]\n")
 
         # Req 15.1: Display default in a labelled panel
         self._display_prompt_panel(DEFAULT_SYSTEM_PROMPT, console, title="Default System Prompt")

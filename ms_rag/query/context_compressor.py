@@ -100,7 +100,7 @@ class ContextCompressor:
         console = Console()
         has_llm = bool(configured_providers)
 
-        console.print("\n[bold cyan]Step 14 — Context Compression[/bold cyan]\n")
+        console.print("\n[bold cyan]Step 13 — Context Compression[/bold cyan]\n")
 
         wants_compression: bool = questionary.confirm(
             "  Do you want to enable context compression?",

@@ -95,7 +95,7 @@ class QueryEnhancer:
         """
         console = Console()
 
-        console.print("\n[bold cyan]Step 11 — Query Enhancement[/bold cyan]\n")
+        console.print("\n[bold cyan]Step 10 — Query Enhancement[/bold cyan]\n")
 
         wants_enhancement: bool = questionary.confirm(
             "  Do you want to enable query enhancement techniques?",

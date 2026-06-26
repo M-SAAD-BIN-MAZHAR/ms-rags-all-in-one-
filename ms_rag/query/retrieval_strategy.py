@@ -155,7 +155,7 @@ class RetrievalStrategyModule:
         Requirement 12.1-12.7.
         """
         console = Console()
-        console.print("\n[bold cyan]Step 12 — Retrieval Strategy[/bold cyan]\n")
+        console.print("\n[bold cyan]Step 11 — Retrieval Strategy[/bold cyan]\n")
 
         # Step 1: strategy selection
         choices = [

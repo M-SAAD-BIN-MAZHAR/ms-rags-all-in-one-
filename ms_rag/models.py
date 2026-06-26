@@ -172,25 +172,25 @@ class PipelineConfig:
     # Document sources (file paths, directories, URLs)
     document_sources: list[str] = field(default_factory=list)
 
-    # Step 11 — Query Enhancement
+    # Step 10 — Query Enhancement
     query_enhancement: list[str] = field(default_factory=list)
     hyde_llm_provider: str | None = None  # which provider to use for HyDE
 
-    # Step 12 — Retrieval
+    # Step 11 — Retrieval
     retrieval: RetrievalConfig | None = None
 
-    # Step 13 — Reranking
+    # Step 12 — Reranking
     reranking: RerankingConfig | None = None
     reranking_enabled: bool = False
 
-    # Step 14 — Context Compression
+    # Step 13 — Context Compression
     compression: CompressionConfig | None = None
     compression_enabled: bool = False
 
-    # Step 15 — System Prompt
+    # Step 14 — System Prompt
     system_prompt: str = ""
 
-    # Step 16 — Evaluation
+    # Step 15 — Evaluation
     evaluation: EvaluationConfig | None = None
     evaluation_enabled: bool = False
 

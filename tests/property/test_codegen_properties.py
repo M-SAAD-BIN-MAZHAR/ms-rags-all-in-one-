@@ -268,3 +268,38 @@ def test_generated_qdrant_query_mode_connects_to_existing_collection() -> None:
     assert "QdrantVectorStore.from_documents(" in code
     assert "client = QdrantClient(url=url, api_key=api_key)" in code
     assert 'collection_name="qdrant_test"' in code
+
+
+@pytest.mark.parametrize(
+    ("db_type", "expected_snippets"),
+    [
+        ("chroma", ["from langchain_chroma import Chroma", "vector_store.add_documents(chunks)"]),
+        ("pinecone", ["from langchain_pinecone import PineconeVectorStore", "vector_store.add_documents(chunks)"]),
+        ("weaviate", ["from langchain_weaviate import WeaviateVectorStore", "vector_store.add_documents(chunks)"]),
+        ("pgvector", ["from langchain_postgres import PGVector", "vector_store.add_documents(chunks)"]),
+        ("milvus", ["from langchain_milvus import Milvus", "vector_store.add_documents(chunks)"]),
+        ("elasticsearch", ["from langchain_elasticsearch import ElasticsearchStore", "vector_store.add_documents(chunks)"]),
+        ("redis", ["from langchain_redis import RedisConfig, RedisVectorStore", "vector_store.add_documents(chunks)"]),
+        ("opensearch", ["from langchain_community.vectorstores import OpenSearchVectorSearch", "vector_store.add_documents(chunks)"]),
+        ("azure_ai_search", ["from langchain_community.vectorstores import AzureSearch", "vector_store.add_documents(chunks)"]),
+        ("mongodb_atlas", ["from langchain_mongodb import MongoDBAtlasVectorSearch", "vector_store.add_documents(chunks)"]),
+    ],
+)
+def test_generated_vector_db_pipelines_import_and_ingest_supported_backends(
+    db_type: str,
+    expected_snippets: list[str],
+) -> None:
+    """Generated pipelines must import and ingest into the selected vector DB."""
+    config = _make_config()
+    config.vector_db = VectorDBConfig(
+        db_type=db_type,
+        connection_params={},
+        collection_name=f"{db_type}_test",
+    )
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    for snippet in expected_snippets:
+        assert snippet in code

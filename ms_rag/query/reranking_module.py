@@ -140,7 +140,7 @@ class RerankingModule:
             RerankingConfig if enabled, None if user declines.
         """
         console = Console()
-        console.print("\n[bold cyan]Step 13 — Reranking[/bold cyan]\n")
+        console.print("\n[bold cyan]Step 12 — Reranking[/bold cyan]\n")
 
         wants_reranking: bool = questionary.confirm(
             "  Do you want to enable reranking?",

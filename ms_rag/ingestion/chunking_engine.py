@@ -85,14 +85,13 @@ STRATEGY_DESCRIPTIONS: dict[str, ChunkingStrategyInfo] = {
         strategy_id="sentence",
         display_name="Sentence-Based Splitter",
         description=(
-            "Splits text at sentence boundaries using a sentence tokenizer, then "
-            "groups sentences into chunks that fit within the token limit. "
+            "Splits text around sentence-style boundaries, then groups sentences "
+            "into chunks that fit within the configured size. "
             "Best for documents where preserving full sentences is critical, such "
             "as legal or medical texts."
         ),
         default_chunk_size=256,
         default_overlap=32,
-        requires_tokenizer=True,
     ),
     "paragraph": ChunkingStrategyInfo(
         strategy_id="paragraph",
@@ -253,11 +252,11 @@ class ChunkingEngine:
             )
 
         if strategy == "sentence":
-            from langchain_text_splitters import SentenceTransformersTokenTextSplitter  # noqa: PLC0415
-            tokenizer = config.tokenizer or "sentence-transformers/all-MiniLM-L6-v2"
-            return SentenceTransformersTokenTextSplitter(
+            from langchain_text_splitters import RecursiveCharacterTextSplitter  # noqa: PLC0415
+            return RecursiveCharacterTextSplitter(
+                chunk_size=config.chunk_size,
                 chunk_overlap=config.chunk_overlap,
-                model_name=tokenizer,
+                separators=[". ", "? ", "! ", "\n\n", "\n", " ", ""],
             )
 
         if strategy == "paragraph":

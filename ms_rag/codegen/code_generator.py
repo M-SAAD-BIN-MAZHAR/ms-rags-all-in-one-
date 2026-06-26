@@ -320,6 +320,9 @@ load_dotenv()
                 lines.append("from langchain_pinecone import PineconeVectorStore")
             elif db == "qdrant":
                 lines.append("from langchain_qdrant import QdrantVectorStore")
+            elif db == "weaviate":
+                lines.append("from langchain_weaviate import WeaviateVectorStore")
+                lines.append("import weaviate")
             elif db == "pgvector":
                 lines.append("from langchain_postgres import PGVector")
             elif db == "milvus":
@@ -328,6 +331,13 @@ load_dotenv()
                 lines.append("from langchain_elasticsearch import ElasticsearchStore")
             elif db == "redis":
                 lines.append("from langchain_redis import RedisConfig, RedisVectorStore")
+            elif db == "opensearch":
+                lines.append("from langchain_community.vectorstores import OpenSearchVectorSearch")
+            elif db == "azure_ai_search":
+                lines.append("from langchain_community.vectorstores import AzureSearch")
+            elif db == "mongodb_atlas":
+                lines.append("from langchain_mongodb import MongoDBAtlasVectorSearch")
+                lines.append("from pymongo import MongoClient")
 
         # LLM imports
         for pid in config.configured_providers:
@@ -494,6 +504,50 @@ def init_vector_store(chunks: list = None):
         embedding=embeddings,
     )'''
 
+        if db_type == "weaviate":
+            return f'''# ─── Embedding + Vector Store ─────────────────────────────────
+def init_vector_store(chunks: list = None):
+    """Initialise embeddings and Weaviate vector store. Ingest chunks if provided."""
+    embeddings = {emb_init}
+    url = os.getenv("WEAVIATE_URL", "http://localhost:8080")
+    host = url.replace("https://", "").replace("http://", "").split(":")[0]
+    port = int(url.rsplit(":", 1)[-1]) if ":" in url.replace("https://", "").replace("http://", "") else 8080
+    api_key = os.getenv("WEAVIATE_API_KEY") or None
+    client = weaviate.connect_to_custom(
+        http_host=host,
+        http_port=port,
+        http_secure=url.startswith("https://"),
+        grpc_host=host,
+        grpc_port=int(os.getenv("WEAVIATE_GRPC_PORT", "50051")),
+        grpc_secure=url.startswith("https://"),
+        auth_credentials=weaviate.auth.AuthApiKey(api_key) if api_key else None,
+    )
+    vector_store = WeaviateVectorStore(
+        client=client,
+        index_name="{collection}",
+        text_key="text",
+        embedding=embeddings,
+    )
+    if chunks:
+        vector_store.add_documents(chunks)
+    return vector_store'''
+
+        if db_type == "mongodb_atlas":
+            return f'''# ─── Embedding + Vector Store ─────────────────────────────────
+def init_vector_store(chunks: list = None):
+    """Initialise embeddings and MongoDB Atlas vector store. Ingest chunks if provided."""
+    embeddings = {emb_init}
+    client = MongoClient(os.getenv("MONGODB_ATLAS_CLUSTER_URI", ""))
+    db = client[os.getenv("MONGODB_ATLAS_DB_NAME", "ms_rag_db")]
+    collection_obj = db[os.getenv("MONGODB_ATLAS_COLLECTION_NAME", "{collection}")]
+    vector_store = MongoDBAtlasVectorSearch(
+        collection=collection_obj,
+        embedding=embeddings,
+    )
+    if chunks:
+        vector_store.add_documents(chunks)
+    return vector_store'''
+
         store_init = {
             "chroma": f'Chroma(collection_name="{collection}", embedding_function=embeddings, persist_directory="./chroma_db")',
             "pinecone": f'PineconeVectorStore(index_name="{collection}", embedding=embeddings)',
@@ -505,16 +559,26 @@ def init_vector_store(chunks: list = None):
                 f'index_name=os.getenv("REDIS_INDEX_NAME", "{collection}"), '
                 f'redis_url=os.getenv("REDIS_URL", "redis://localhost:6379")))'
             ),
+            "opensearch": (
+                f'OpenSearchVectorSearch(index_name="{collection}", embedding_function=embeddings, '
+                f'opensearch_url=os.getenv("OPENSEARCH_URL", "http://localhost:9200"), '
+                f'http_auth=(os.getenv("OPENSEARCH_USERNAME", "admin"), os.getenv("OPENSEARCH_PASSWORD", "admin")))'
+            ),
+            "azure_ai_search": (
+                f'AzureSearch(azure_search_endpoint=os.getenv("AZURE_SEARCH_ENDPOINT", ""), '
+                f'azure_search_key=os.getenv("AZURE_SEARCH_KEY", ""), '
+                f'index_name=os.getenv("AZURE_SEARCH_INDEX_NAME", "{collection}"), '
+                f'embedding_function=embeddings)'
+            ),
         }.get(db_type, f'Chroma(collection_name="{collection}", embedding_function=embeddings)')
 
         return f'''# ─── Embedding + Vector Store ─────────────────────────────────
 def init_vector_store(chunks: list = None):
     """Initialise embeddings and vector store. Ingest chunks if provided."""
     embeddings = {emb_init}
+    vector_store = {store_init}
     if chunks:
-        vector_store = {store_init.replace("from_documents(chunks, embeddings)", "from_documents(chunks, embeddings)")}
-    else:
-        vector_store = {store_init}
+        vector_store.add_documents(chunks)
     return vector_store'''
 
     def _render_retriever_function(self, config: PipelineConfig) -> str:

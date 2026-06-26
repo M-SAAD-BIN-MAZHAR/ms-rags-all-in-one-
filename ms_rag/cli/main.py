@@ -229,17 +229,17 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
         failed_documents=len(ingestion_result.failed_documents),
     )
 
-    # Step 11: Query Enhancement (configured before query, applied at query time)
+    # Step 10: Query Enhancement (configured before query, applied at query time)
     with telemetry.span("setup.query_enhancement"):
         query_enhancer = QueryEnhancer()
         config.query_enhancement = query_enhancer.configure(config.configured_providers)
 
-    # Step 12: Retrieval Strategy
+    # Step 11: Retrieval Strategy
     with telemetry.span("setup.retrieval"):
         retrieval_module = RetrievalStrategyModule()
         config.retrieval = retrieval_module.configure()
 
-    # Step 13: Reranking
+    # Step 12: Reranking
     with telemetry.span("setup.reranking"):
         reranking_module = RerankingModule(credential_store=credential_store)
         reranking_config = reranking_module.configure(config.retrieval.top_k)
@@ -247,7 +247,7 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
             config.reranking = reranking_config
             config.reranking_enabled = True
 
-    # Step 14: Context Compression
+    # Step 13: Context Compression
     with telemetry.span("setup.compression"):
         compressor = ContextCompressor()
         compression_config = compressor.configure(config.configured_providers)
@@ -255,12 +255,12 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
             config.compression = compression_config
             config.compression_enabled = True
 
-    # Step 15: System Prompt
+    # Step 14: System Prompt
     with telemetry.span("setup.system_prompt"):
         prompt_configurator = SystemPromptConfigurator()
         config.system_prompt = prompt_configurator.configure()
 
-    # Step 16: Evaluation
+    # Step 15: Evaluation
     with telemetry.span("setup.evaluation"):
         eval_framework = EvaluationFramework(credential_store=credential_store)
         eval_config = eval_framework.configure()
@@ -268,7 +268,7 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
             config.evaluation = eval_config
             config.evaluation_enabled = True
 
-    # Build retriever and RAG chain from the vector store populated above.
+    # Step 16: Build retriever/RAG chain, then enter the live query loop.
     from ms_rag.llm.llm_integration import build_session_runtime_from_vector_store  # noqa: PLC0415
 
     with telemetry.span("setup.runtime"):
