@@ -12,7 +12,11 @@ from __future__ import annotations
 from typing import Any
 
 from ms_rag.models import PipelineConfig
-from ms_rag.utils.credentials import resolve_credential, resolve_model_id
+from ms_rag.utils.credentials import (
+    resolve_credential,
+    resolve_model_id,
+    resolve_ollama_connection,
+)
 from ms_rag.utils.telemetry import TelemetryReporter
 from ms_rag.workflow.rag_type_selector import LANGGRAPH_TYPES
 
@@ -174,9 +178,11 @@ def get_llm(
     if provider == "ollama":
         # Use langchain-ollama (NOT deprecated langchain-community)
         from langchain_ollama import ChatOllama  # noqa: PLC0415
+        base_url, client_kwargs = resolve_ollama_connection(credential_store)
         return ChatOllama(
             model=resolved_model,
-            base_url=_env("OLLAMA_BASE_URL") or "http://localhost:11434",
+            base_url=base_url,
+            client_kwargs=client_kwargs,
             **kwargs,
         )
 

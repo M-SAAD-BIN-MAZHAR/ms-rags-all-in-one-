@@ -1,0 +1,32 @@
+{
+  "cleanUrls": true,
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    { "source": "/", "destination": "/docs/index.html" },
+    { "source": "/getting-started", "destination": "/docs/getting-started.html" },
+    { "source": "/getting-started.html", "destination": "/docs/getting-started.html" },
+    { "source": "/rag-types", "destination": "/docs/rag-types.html" },
+    { "source": "/rag-types.html", "destination": "/docs/rag-types.html" },
+    { "source": "/pipeline", "destination": "/docs/pipeline.html" },
+    { "source": "/pipeline.html", "destination": "/docs/pipeline.html" },
+    { "source": "/databases", "destination": "/docs/databases.html" },
+    { "source": "/databases.html", "destination": "/docs/databases.html" },
+    { "source": "/recommendations", "destination": "/docs/recommendations.html" },
+    { "source": "/recommendations.html", "destination": "/docs/recommendations.html" },
+    { "source": "/production", "destination": "/docs/production.html" },
+    { "source": "/production.html", "destination": "/docs/production.html" },
+    { "source": "/robots.txt", "destination": "/docs/robots.txt" },
+    { "source": "/sitemap.xml", "destination": "/docs/sitemap.xml" },
+    { "source": "/assets/(.*)", "destination": "/docs/assets/$1" }
+  ]
+}

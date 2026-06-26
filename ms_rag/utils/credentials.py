@@ -8,6 +8,7 @@ and can search across all configured providers when a field name is unique.
 from __future__ import annotations
 
 import os
+from typing import Any
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -78,3 +79,20 @@ def resolve_model_id(
             return ollama_model
 
     return DEFAULT_LLM_MODELS.get(provider, model_id)
+
+
+def resolve_ollama_connection(
+    credential_store: object | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Resolve Ollama base URL and optional auth headers for local or cloud use."""
+    api_key = resolve_credential("OLLAMA_API_KEY", credential_store, "ollama")
+    base_url = resolve_credential("OLLAMA_BASE_URL", credential_store, "ollama")
+
+    if not base_url:
+        base_url = "https://ollama.com" if api_key else "http://localhost:11434"
+
+    client_kwargs: dict[str, Any] = {}
+    if api_key:
+        client_kwargs["headers"] = {"Authorization": f"Bearer {api_key}"}
+
+    return base_url, client_kwargs

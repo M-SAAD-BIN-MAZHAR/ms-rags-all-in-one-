@@ -50,9 +50,15 @@ faiss_indexes/
 # Runtime telemetry / evaluation artifacts
 .deepeval/
 ms_rag_metrics.jsonl
+docs_server*.log
 
 # Personal files
 Resume/
 
 # Kiro internal (keep specs visible but not workspace settings)
 .kiro/settings/
+
+docs_server.err.log
+docs_server.out.log
+
+docs

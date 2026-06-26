@@ -17,7 +17,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![LangChain 0.3+](https://img.shields.io/badge/LangChain-0.3%2B-green)](https://langchain.com)
 [![LangGraph 0.2+](https://img.shields.io/badge/LangGraph-0.2%2B-purple)](https://langchain-ai.github.io/langgraph/)
-[![Tests: 390 passing](https://img.shields.io/badge/Tests-390%20passing-brightgreen)](tests/)
+[![Tests: 423 passing](https://img.shields.io/badge/Tests-423%20passing-brightgreen)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 [![Code style: production](https://img.shields.io/badge/code%20style-production-blue)]()
 
@@ -44,11 +44,11 @@ Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generat
 | Category | What's included |
 |----------|----------------|
 | **RAG Architectures** | 15 types — Naive, Advanced, Modular, Agentic, Self-RAG, CRAG, GraphRAG, HyDE, Multi-Query, RAG-Fusion, Step-Back, Parent-Child, Adaptive, Contextual Compression |
-| **LLM Providers** | 12 providers — OpenAI, Anthropic, Cohere, HuggingFace, Google Gemini, Mistral AI, Groq, Together AI, Replicate, Azure OpenAI, AWS Bedrock, Ollama (local) |
+| **LLM Providers** | 12 providers — OpenAI, Anthropic, Cohere, HuggingFace, Google Gemini, Mistral AI, Groq, Together AI, Replicate, Azure OpenAI, AWS Bedrock, Ollama (local or cloud) |
 | **Document Types** | 18 types — PDF, DOCX, CSV, Excel, PPTX, HTML, Markdown, JSON, XML, Web URLs, YouTube transcripts, images/OCR, source code, SQL, MongoDB, ePub, RTF, plain text |
 | **Document Loaders** | 30+ LangChain loaders filtered by your document types |
 | **Chunking Strategies** | 11 strategies — Recursive Character, Fixed Size, Semantic, Sentence, Paragraph, Token-based, Markdown/HTML/Code-aware, Agentic, Document-aware |
-| **Embedding Models** | 22+ models — OpenAI, Cohere, HuggingFace (BGE, E5, Instructor, sentence-transformers), Google, Mistral, Ollama/local |
+| **Embedding Models** | 25+ models — OpenAI, Cohere, HuggingFace local/downloaded, HuggingFace hosted token-only, Google, Mistral, Ollama local or cloud |
 | **Vector Databases** | 12 databases — ChromaDB, Pinecone, Qdrant, Weaviate, FAISS, Milvus, Redis (`langchain-redis`), PGVector, Elasticsearch, OpenSearch, Azure AI Search, MongoDB Atlas |
 | **Query Enhancement** | 7 techniques — Query Rewriting, Query Expansion, HyDE, Multi-Query, Step-Back, Sub-question Decomposition, RAG-Fusion |
 | **Retrieval Strategies** | 10 strategies — Dense Vector, BM25, TF-IDF, Hybrid, MMR, Ensemble, Parent-Child, Multi-Vector, Self-Query, Time-weighted |
@@ -93,7 +93,7 @@ Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generat
 
 - **Python 3.11+**
 - **Git**
-- At least one LLM provider API key (e.g. OpenAI) **or** [Ollama](https://ollama.ai) running locally
+- At least one LLM provider API key (e.g. OpenAI) **or** [Ollama](https://ollama.ai) running locally or via Ollama Cloud credentials
 
 ---
 
@@ -163,6 +163,26 @@ At startup, the CLI also asks whether you want to enable OpenTelemetry tracing f
 
 ---
 
+## Deployable Documentation
+
+This repository includes a public, multi-page static documentation site in `docs/`.
+It is designed for Vercel and covers the MS_RAG value proposition, setup, every
+RAG type, loaders/extractors, chunking strategies, embedding choices, vector
+databases, retrieval, reranking, compression, evaluation, observability,
+generated code, production recommendations, and deployment notes.
+
+```bash
+# Local preview from the repo root
+python -m http.server 3000
+```
+
+Then open `http://localhost:3000/docs/index.html`. The root `vercel.json` rewrites
+Vercel traffic to the matching static docs pages, clean URLs, sitemap, robots file,
+and assets, so importing this repository into Vercel with the `Other` preset is
+enough to deploy the docs.
+
+---
+
 ## Usage Guide
 
 ### Step-by-Step Workflow
@@ -185,7 +205,7 @@ Supported providers:
   9. Replicate (REPLICATE_API_TOKEN)
  10. Azure OpenAI (AZURE_OPENAI_API_KEY, ENDPOINT, API_VERSION)
  11. AWS Bedrock (AWS_ACCESS_KEY_ID, SECRET_ACCESS_KEY, REGION)
- 12. Ollama / Local (OLLAMA_BASE_URL, OLLAMA_MODEL_NAME)
+ 12. Ollama / Local or Cloud (OLLAMA_BASE_URL, OLLAMA_MODEL_NAME, optional OLLAMA_API_KEY)
 ```
 
 **Step 3 — RAG Architecture**
@@ -280,6 +300,8 @@ COHERE_API_KEY=...
 
 # Embedding / Local
 OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL_NAME=llama3
+OLLAMA_API_KEY=
 
 # Vector Database
 PINECONE_API_KEY=...
@@ -370,7 +392,7 @@ MS-RAG-ALL-IN-ONE-/
 | LangChain | `langchain>=0.3`, `langchain-classic`, `langchain-core`, `langchain-community` | Loaders, splitters, chains, retrievers |
 | LangGraph | `langgraph>=0.2` | Agentic RAG: Self-RAG, CRAG, Adaptive RAG |
 | Redis vectors | `langchain-redis>=0.2` | ⚠️ NOT deprecated `langchain_community.vectorstores.Redis` |
-| HuggingFace | `langchain-huggingface>=0.1` | ⚠️ NOT deprecated `langchain-community` |
+| HuggingFace | `langchain-huggingface>=0.1` | Local `HuggingFaceEmbeddings` and hosted token-only `HuggingFaceEndpointEmbeddings`; ⚠️ NOT deprecated `langchain-community` |
 | Ollama | `langchain-ollama>=0.2` | ⚠️ NOT deprecated `langchain-community` |
 | TruLens | `trulens-core`, `trulens-apps-langchain` | ⚠️ NOT deprecated `trulens_eval` |
 | gRPC | `grpcio>=1.59.5,<1.80.0` | Pinned for `weaviate-client` compatibility |
@@ -430,11 +452,16 @@ from trulens_eval import TruChain
 
 # ✅ CURRENT — what MS_RAG uses
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEndpointEmbeddings
 from langchain_ollama import ChatOllama
 from langchain_redis import RedisVectorStore
 from trulens.apps.langchain import TruChain
 from langchain_classic.retrievers import EnsembleRetriever
 ```
+
+HuggingFace embeddings are intentionally split into two choices in the terminal:
+local models download/cache and run on the user's machine, while hosted HuggingFace
+endpoint embeddings use `HUGGINGFACEHUB_API_TOKEN` and do not download the model locally.
 
 ---
 

@@ -270,6 +270,9 @@ class TestIsSecretField:
     def test_url_is_not_secret(self) -> None:
         assert _is_secret_field("OLLAMA_BASE_URL") is False
 
+    def test_ollama_api_key_is_secret(self) -> None:
+        assert _is_secret_field("OLLAMA_API_KEY") is True
+
     def test_region_is_not_secret(self) -> None:
         assert _is_secret_field("AWS_REGION") is False
 
@@ -305,6 +308,9 @@ class TestProviderFieldsCompleteness:
     def test_ollama_has_model_name_field(self) -> None:
         """Requirement 2.5: Ollama must prompt for model name."""
         assert "OLLAMA_MODEL_NAME" in PROVIDER_FIELDS["ollama"]
+
+    def test_ollama_has_optional_api_key_field(self) -> None:
+        assert "OLLAMA_API_KEY" in PROVIDER_FIELDS["ollama"]
 
 
 class TestCredentialManagerStore:

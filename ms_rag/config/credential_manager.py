@@ -56,7 +56,7 @@ PROVIDER_OPTIONAL_FIELDS: dict[str, list[str]] = {
     "openai": ["OPENAI_ORG_ID"],
     "azure_openai": ["AZURE_OPENAI_API_VERSION"],
     "aws_bedrock": ["AWS_REGION"],
-    "ollama": ["OLLAMA_BASE_URL"],
+    "ollama": ["OLLAMA_BASE_URL", "OLLAMA_API_KEY"],
 }
 
 # All fields (required + optional) — used for coverage tests and summaries
@@ -77,7 +77,7 @@ PROVIDER_DISPLAY_NAMES: dict[str, str] = {
     "replicate": "Replicate",
     "azure_openai": "Azure OpenAI",
     "aws_bedrock": "AWS Bedrock",
-    "ollama": "Ollama (Local)",
+    "ollama": "Ollama (Local or Cloud)",
 }
 
 # Fields that should be masked during display (passwords / secret keys)

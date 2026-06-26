@@ -48,7 +48,8 @@ _PROVIDER_REQUIREMENTS: dict[str, list[str]] = {
     "openai":        ["langchain-openai>=0.2.0"],
     "anthropic":     ["langchain-anthropic>=0.3.0"],
     "cohere":        ["langchain-cohere>=0.3.0"],
-    "huggingface":   ["langchain-huggingface>=0.1.0", "sentence-transformers>=3.0.0"],
+    "huggingface":   ["langchain-huggingface>=0.1.0"],
+    "huggingface_endpoint": ["langchain-huggingface>=0.1.0"],
     "google_gemini": ["langchain-google-genai>=2.0.0"],
     "mistral":       ["langchain-mistralai>=0.2.0"],
     "groq":          ["langchain-groq>=0.2.0"],
@@ -187,6 +188,8 @@ class CodeGenerator:
         # Embedding model provider
         if config.embedding_model:
             reqs.update(_PROVIDER_REQUIREMENTS.get(config.embedding_model.provider, []))
+            if config.embedding_model.provider in ("huggingface", "local"):
+                reqs.add("sentence-transformers>=3.0.0")
 
         # Vector DB
         if config.vector_db:
@@ -302,6 +305,8 @@ load_dotenv()
                 lines.append("from langchain_cohere import CohereEmbeddings")
             elif p in ("huggingface", "local"):
                 lines.append("from langchain_huggingface import HuggingFaceEmbeddings")
+            elif p == "huggingface_endpoint":
+                lines.append("from langchain_huggingface import HuggingFaceEndpointEmbeddings")
             elif p == "google_gemini":
                 lines.append("from langchain_google_genai import GoogleGenerativeAIEmbeddings")
             elif p == "mistral":
@@ -372,6 +377,24 @@ load_dotenv()
             from ms_rag.config.credential_manager import PROVIDER_FIELDS  # noqa: PLC0415
             for field in PROVIDER_FIELDS.get(pid, []):
                 lines.append(f'{field} = os.getenv("{field}")')
+        if config.embedding_model and config.embedding_model.provider == "ollama" and "ollama" not in config.configured_providers:
+            from ms_rag.config.credential_manager import PROVIDER_FIELDS  # noqa: PLC0415
+            for field in PROVIDER_FIELDS.get("ollama", []):
+                if f'{field} = os.getenv("{field}")' not in lines:
+                    lines.append(f'{field} = os.getenv("{field}")')
+
+        uses_ollama = "ollama" in config.configured_providers or (
+            config.embedding_model is not None and config.embedding_model.provider == "ollama"
+        )
+        if uses_ollama:
+            lines.extend([
+                "",
+                "def _ollama_base_url():",
+                '    return OLLAMA_BASE_URL or ("https://ollama.com" if OLLAMA_API_KEY else "http://localhost:11434")',
+                "",
+                "def _ollama_client_kwargs():",
+                '    return {"headers": {"Authorization": f"Bearer {OLLAMA_API_KEY}"}} if OLLAMA_API_KEY else {}',
+            ])
         if config.vector_db and config.vector_db.connection_params:
             lines.append("")
             lines.append("# Vector DB credentials")
@@ -445,9 +468,14 @@ def create_chunks(documents: list) -> list:
             "openai": f'OpenAIEmbeddings(model="{emb_model}")',
             "cohere": f'CohereEmbeddings(model="{emb_model}")',
             "huggingface": f'HuggingFaceEmbeddings(model_name="{emb_model}")',
+            "huggingface_endpoint": (
+                "HuggingFaceEndpointEmbeddings("
+                f'model="{emb_model.removeprefix("hf-endpoint:")}", '
+                'huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))'
+            ),
             "local": f'HuggingFaceEmbeddings(model_name="{emb_model}")',
             "google_gemini": f'GoogleGenerativeAIEmbeddings(model="{emb_model}")',
-            "ollama": f'OllamaEmbeddings(model="{emb_model}")',
+            "ollama": f'OllamaEmbeddings(model="{emb_model}", base_url=_ollama_base_url(), client_kwargs=_ollama_client_kwargs())',
             "mistral": f'MistralAIEmbeddings(model="{emb_model}")',
         }.get(emb_provider, f'OpenAIEmbeddings(model="{emb_model}")')
 
@@ -706,7 +734,7 @@ def compress_context(retriever, embeddings):
             "google_gemini": 'ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=GOOGLE_API_KEY)',
             "mistral": 'ChatMistralAI(model="mistral-large-latest", api_key=MISTRAL_API_KEY)',
             "groq": 'ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=GROQ_API_KEY)',
-            "ollama": 'ChatOllama(model=os.getenv("OLLAMA_MODEL_NAME", "llama3"), base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))',
+            "ollama": 'ChatOllama(model=os.getenv("OLLAMA_MODEL_NAME", "llama3"), base_url=_ollama_base_url(), client_kwargs=_ollama_client_kwargs())',
         }.get(provider, 'ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY)')
 
         return f'''# ─── RAG Chain (LCEL) ─────────────────────────────────────────
@@ -741,7 +769,7 @@ def build_rag_chain(retriever):
         llm_init = {
             "openai": 'ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY)',
             "anthropic": 'ChatAnthropic(model="claude-3-5-sonnet-20241022", api_key=ANTHROPIC_API_KEY)',
-            "ollama": 'ChatOllama(model=os.getenv("OLLAMA_MODEL_NAME", "llama3"), base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))',
+            "ollama": 'ChatOllama(model=os.getenv("OLLAMA_MODEL_NAME", "llama3"), base_url=_ollama_base_url(), client_kwargs=_ollama_client_kwargs())',
         }.get(provider, 'ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY)')
 
         return f'''# ─── LangGraph Workflow ({rag_type}) ───────────────────────────

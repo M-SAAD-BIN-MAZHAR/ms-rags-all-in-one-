@@ -94,6 +94,19 @@ class TestGetLLMFactory:
         # Must NOT use deprecated community ollama
         assert "langchain_community.llms" not in source or "Ollama" not in source.split("langchain_community.llms")[1][:50] if "langchain_community.llms" in source else True
 
+    def test_ollama_cloud_uses_auth_headers_when_api_key_present(self) -> None:
+        store = CredentialStore()
+        store.set("ollama", "OLLAMA_MODEL_NAME", "gpt-oss:120b")
+        store.set("ollama", "OLLAMA_API_KEY", "ollama-token")
+        with patch("langchain_ollama.ChatOllama") as mock_cls:
+            get_llm("ollama", "default", credential_store=store)
+
+        mock_cls.assert_called_once_with(
+            model="gpt-oss:120b",
+            base_url="https://ollama.com",
+            client_kwargs={"headers": {"Authorization": "Bearer ollama-token"}},
+        )
+
 
 # ---------------------------------------------------------------------------
 # build_rag_chain (Req 17.2)

@@ -25,7 +25,7 @@ except ImportError:
     Table = None  # type: ignore[assignment]
 
 from ms_rag.models import EmbeddingModelConfig
-from ms_rag.utils.credentials import resolve_credential
+from ms_rag.utils.credentials import resolve_credential, resolve_ollama_connection
 
 
 # ---------------------------------------------------------------------------
@@ -34,6 +34,8 @@ from ms_rag.utils.credentials import resolve_credential
 
 # Providers that are always available regardless of credential config
 _LOCAL_PROVIDERS: frozenset[str] = frozenset({"local", "ollama", "huggingface"})
+_HOSTED_HF_PROVIDER = "huggingface_endpoint"
+_HOSTED_HF_PREFIX = "hf-endpoint:"
 
 
 @dataclass(frozen=True)
@@ -202,6 +204,28 @@ EMBEDDING_MODELS: list[EmbeddingModelInfo] = [
         is_local=True,
         description="Largest Instructor model — best task-specific quality",
     ),
+    # ── HuggingFace hosted embeddings (token/API, no local model download) ──
+    EmbeddingModelInfo(
+        provider=_HOSTED_HF_PROVIDER,
+        model_id=f"{_HOSTED_HF_PREFIX}sentence-transformers/all-MiniLM-L6-v2",
+        display_name="HF Inference API: all-MiniLM-L6-v2 (hosted)",
+        dimensions=384,
+        description="Hosted HuggingFace embedding endpoint; requires token, no local model download",
+    ),
+    EmbeddingModelInfo(
+        provider=_HOSTED_HF_PROVIDER,
+        model_id=f"{_HOSTED_HF_PREFIX}sentence-transformers/all-mpnet-base-v2",
+        display_name="HF Inference API: all-mpnet-base-v2 (hosted)",
+        dimensions=768,
+        description="Hosted HuggingFace embedding endpoint; stronger quality, no local model download",
+    ),
+    EmbeddingModelInfo(
+        provider=_HOSTED_HF_PROVIDER,
+        model_id=f"{_HOSTED_HF_PREFIX}sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        display_name="HF Inference API: multilingual MiniLM (hosted)",
+        dimensions=384,
+        description="Hosted multilingual HuggingFace embeddings; requires token, no local model download",
+    ),
     # ── Google Gemini ─────────────────────────────────────────────────────
     EmbeddingModelInfo(
         provider="google_gemini",
@@ -263,8 +287,17 @@ def get_displayable_models(configured_providers: list[str]) -> list[EmbeddingMod
     provider_set = set(configured_providers)
     return [
         m for m in EMBEDDING_MODELS
-        if m.provider in provider_set or m.provider in _LOCAL_PROVIDERS
+        if (
+            m.provider in provider_set
+            or m.provider in _LOCAL_PROVIDERS
+            or (m.provider == _HOSTED_HF_PROVIDER and "huggingface" in provider_set)
+        )
     ]
+
+
+def _hf_endpoint_model_id(model_id: str) -> str:
+    """Return the HuggingFace repo id for a hosted endpoint model selection."""
+    return model_id.removeprefix(_HOSTED_HF_PREFIX)
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +431,7 @@ class VectorizationModule:
             openai        → langchain_openai.OpenAIEmbeddings
             cohere        → langchain_cohere.CohereEmbeddings
             huggingface   → langchain_huggingface.HuggingFaceEmbeddings
+            huggingface_endpoint → langchain_huggingface.HuggingFaceEndpointEmbeddings
             google_gemini → langchain_google_genai.GoogleGenerativeAIEmbeddings
             mistral       → langchain_mistralai.MistralAIEmbeddings
             ollama        → langchain_ollama.OllamaEmbeddings
@@ -455,6 +489,19 @@ class VectorizationModule:
                 model_name=config.local_path or model_id,
             )
 
+        if provider == _HOSTED_HF_PROVIDER:
+            from langchain_huggingface import HuggingFaceEndpointEmbeddings  # noqa: PLC0415
+
+            hf_token = _env("HUGGINGFACEHUB_API_TOKEN", "huggingface")
+            if not hf_token:
+                raise ValueError(
+                    "HUGGINGFACEHUB_API_TOKEN is required for hosted HuggingFace embeddings."
+                )
+            return HuggingFaceEndpointEmbeddings(
+                model=_hf_endpoint_model_id(model_id),
+                huggingfacehub_api_token=hf_token,
+            )
+
         if provider == "google_gemini":
             from langchain_google_genai import GoogleGenerativeAIEmbeddings  # noqa: PLC0415
             return GoogleGenerativeAIEmbeddings(
@@ -472,13 +519,15 @@ class VectorizationModule:
         if provider == "ollama":
             # Use langchain-ollama (NOT deprecated langchain-community)
             from langchain_ollama import OllamaEmbeddings  # noqa: PLC0415
+            base_url, client_kwargs = resolve_ollama_connection(credential_store)
             return OllamaEmbeddings(
                 model=config.local_path or model_id,
-                base_url=_env("OLLAMA_BASE_URL", "ollama") or "http://localhost:11434",
+                base_url=base_url,
+                client_kwargs=client_kwargs,
             )
 
         raise ValueError(
             f"Unsupported embedding provider: {provider!r}. "
-            f"Supported: openai, cohere, huggingface, local, "
+            f"Supported: openai, cohere, huggingface, huggingface_endpoint, local, "
             f"google_gemini, mistral, ollama"
         )

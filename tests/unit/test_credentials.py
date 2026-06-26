@@ -7,6 +7,7 @@ from ms_rag.utils.credentials import (
     DEFAULT_LLM_MODELS,
     resolve_credential,
     resolve_model_id,
+    resolve_ollama_connection,
 )
 
 
@@ -42,3 +43,29 @@ class TestResolveModelId:
         store = CredentialStore()
         store.set("ollama", "OLLAMA_MODEL_NAME", "llama3.2")
         assert resolve_model_id("ollama", "default", store) == "llama3.2"
+
+
+class TestResolveOllamaConnection:
+    def test_local_defaults_without_api_key(self) -> None:
+        base_url, client_kwargs = resolve_ollama_connection()
+        assert base_url == "http://localhost:11434"
+        assert client_kwargs == {}
+
+    def test_cloud_defaults_when_api_key_exists(self) -> None:
+        store = CredentialStore()
+        store.set("ollama", "OLLAMA_API_KEY", "ollama-token")
+        base_url, client_kwargs = resolve_ollama_connection(store)
+        assert base_url == "https://ollama.com"
+        assert client_kwargs == {
+            "headers": {"Authorization": "Bearer ollama-token"},
+        }
+
+    def test_store_base_url_overrides_default(self) -> None:
+        store = CredentialStore()
+        store.set("ollama", "OLLAMA_API_KEY", "ollama-token")
+        store.set("ollama", "OLLAMA_BASE_URL", "https://ollama.com/v1")
+        base_url, client_kwargs = resolve_ollama_connection(store)
+        assert base_url == "https://ollama.com/v1"
+        assert client_kwargs == {
+            "headers": {"Authorization": "Bearer ollama-token"},
+        }

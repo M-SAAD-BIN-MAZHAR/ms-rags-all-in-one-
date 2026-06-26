@@ -55,7 +55,11 @@ def test_embedding_model_provider_filtering(providers: frozenset[str]) -> None:
     provider_set = set(provider_list)
     expected = {
         m.model_id for m in EMBEDDING_MODELS
-        if m.provider in provider_set or m.provider in _LOCAL_PROVIDERS
+        if (
+            m.provider in provider_set
+            or m.provider in _LOCAL_PROVIDERS
+            or (m.provider == "huggingface_endpoint" and "huggingface" in provider_set)
+        )
     }
 
     actual = {m.model_id for m in displayable}
@@ -108,6 +112,20 @@ def test_openai_models_not_shown_without_credentials() -> None:
     # None of the OpenAI-specific models should appear
     overlap = displayable_ids & openai_model_ids
     assert not overlap, f"OpenAI models shown without credentials: {overlap}"
+
+
+def test_huggingface_endpoint_models_require_huggingface_credentials() -> None:
+    """Hosted HuggingFace embeddings should appear only after HF credentials are configured."""
+    without_credentials = {m.model_id for m in get_displayable_models([])}
+    with_credentials = {m.model_id for m in get_displayable_models(["huggingface"])}
+    hosted_ids = {
+        m.model_id for m in EMBEDDING_MODELS
+        if m.provider == "huggingface_endpoint"
+    }
+
+    assert hosted_ids
+    assert not (hosted_ids & without_credentials)
+    assert hosted_ids.issubset(with_credentials)
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +251,13 @@ class TestEmbeddingModelCatalogue:
                 f"HuggingFace model {m.model_id!r} should be flagged is_local=True"
             )
 
+    def test_huggingface_endpoint_models_are_hosted(self) -> None:
+        hosted = [m for m in EMBEDDING_MODELS if m.provider == "huggingface_endpoint"]
+        assert hosted
+        for m in hosted:
+            assert m.is_local is False
+            assert m.model_id.startswith("hf-endpoint:")
+
     def test_no_duplicate_model_ids_per_provider(self) -> None:
         from collections import Counter
         counts = Counter(m.model_id for m in EMBEDDING_MODELS)
@@ -255,8 +280,8 @@ class TestGetEmbeddingsDispatch:
     def test_known_providers_do_not_raise_value_error(self) -> None:
         """Known providers raise ImportError (package missing) not ValueError."""
         module = VectorizationModule()
-        known_providers = ["openai", "cohere", "huggingface", "local",
-                           "google_gemini", "mistral", "ollama"]
+        known_providers = ["openai", "cohere", "huggingface", "huggingface_endpoint",
+                           "local", "google_gemini", "mistral", "ollama"]
         for provider in known_providers:
             config = EmbeddingModelConfig(provider=provider, model_id="test-model")
             try:
@@ -267,3 +292,52 @@ class TestGetEmbeddingsDispatch:
                         pytest.fail(
                             f"Provider {provider!r} raised ValueError unexpectedly: {exc}"
                         )
+
+    def test_huggingface_endpoint_requires_token(self) -> None:
+        module = VectorizationModule()
+        config = EmbeddingModelConfig(
+            provider="huggingface_endpoint",
+            model_id="hf-endpoint:sentence-transformers/all-MiniLM-L6-v2",
+        )
+        with patch("ms_rag.ingestion.vectorization_module.resolve_credential", return_value=None):
+            with pytest.raises(ValueError, match="HUGGINGFACEHUB_API_TOKEN"):
+                module.get_embeddings(config)
+
+    def test_huggingface_endpoint_uses_hosted_embedding_class(self) -> None:
+        module = VectorizationModule()
+        config = EmbeddingModelConfig(
+            provider="huggingface_endpoint",
+            model_id="hf-endpoint:sentence-transformers/all-MiniLM-L6-v2",
+        )
+        with patch("ms_rag.ingestion.vectorization_module.resolve_credential", return_value="hf_token"), \
+             patch("langchain_huggingface.HuggingFaceEndpointEmbeddings") as mock_endpoint:
+            module.get_embeddings(config)
+
+        mock_endpoint.assert_called_once_with(
+            model="sentence-transformers/all-MiniLM-L6-v2",
+            huggingfacehub_api_token="hf_token",
+        )
+
+    def test_ollama_embeddings_use_cloud_headers_when_api_key_present(self) -> None:
+        module = VectorizationModule()
+        store = MagicMock()
+        store.get.side_effect = lambda provider, field: {
+            ("ollama", "OLLAMA_API_KEY"): "ollama-token",
+            ("ollama", "OLLAMA_BASE_URL"): None,
+        }.get((provider, field))
+        store.all_providers.return_value = ["ollama"]
+
+        config = EmbeddingModelConfig(
+            provider="ollama",
+            model_id="gpt-oss:120b",
+            local_path="gpt-oss:120b",
+        )
+
+        with patch("langchain_ollama.OllamaEmbeddings") as mock_embeddings:
+            module.get_embeddings(config, credential_store=store)
+
+        mock_embeddings.assert_called_once_with(
+            model="gpt-oss:120b",
+            base_url="https://ollama.com",
+            client_kwargs={"headers": {"Authorization": "Bearer ollama-token"}},
+        )

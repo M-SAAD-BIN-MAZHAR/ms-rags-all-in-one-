@@ -270,6 +270,43 @@ def test_generated_qdrant_query_mode_connects_to_existing_collection() -> None:
     assert 'collection_name="qdrant_test"' in code
 
 
+def test_generated_huggingface_endpoint_embedding_uses_token_only_hosted_class() -> None:
+    """Hosted HuggingFace embeddings must not generate local sentence-transformers wiring."""
+    config = _make_config(providers=["huggingface"])
+    config.embedding_model = EmbeddingModelConfig(
+        provider="huggingface_endpoint",
+        model_id="hf-endpoint:sentence-transformers/all-MiniLM-L6-v2",
+    )
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert "from langchain_huggingface import HuggingFaceEndpointEmbeddings" in code
+    assert 'model="sentence-transformers/all-MiniLM-L6-v2"' in code
+    assert 'huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN")' in code
+    assert "sentence-transformers>=3.0.0" not in result.requirements_txt
+
+
+def test_generated_ollama_pipeline_supports_cloud_headers() -> None:
+    """Generated Ollama pipelines must support bearer-token cloud auth and local fallback."""
+    config = _make_config(providers=["ollama"])
+    config.embedding_model = EmbeddingModelConfig(
+        provider="ollama",
+        model_id="gpt-oss:120b",
+        local_path="gpt-oss:120b",
+    )
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert 'OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")' in code
+    assert 'return OLLAMA_BASE_URL or ("https://ollama.com" if OLLAMA_API_KEY else "http://localhost:11434")' in code
+    assert 'return {"headers": {"Authorization": f"Bearer {OLLAMA_API_KEY}"}} if OLLAMA_API_KEY else {}' in code
+    assert 'client_kwargs=_ollama_client_kwargs()' in code
+
+
 @pytest.mark.parametrize(
     ("db_type", "expected_snippets"),
     [

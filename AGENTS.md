@@ -62,6 +62,10 @@ RuntimeError: FAISS store has no documents yet.
 
 **Embedding/vector DB compatibility:** Step 8 now explains that embedding dimensions must match the vector DB collection/index. Step 9 carries the selected embedding dimension into `VectorDBConfig.dimension` and displays it in the vector DB summary. If users change embedding models, guide them to create a fresh collection/index or re-ingest.
 
+**HuggingFace embedding modes:** HuggingFace embeddings are split into local/downloaded models (`provider="huggingface"`) and hosted token-only endpoint models (`provider="huggingface_endpoint"`). Hosted selections use `HuggingFaceEndpointEmbeddings` with `HUGGINGFACEHUB_API_TOKEN` and model IDs prefixed with `hf-endpoint:` so they do not collide with local model IDs.
+
+**Ollama local/cloud support:** Ollama remains a single provider, but it now supports both local and cloud execution. If `OLLAMA_API_KEY` is present and no explicit `OLLAMA_BASE_URL` is supplied, the runtime and generated code default to `https://ollama.com`; otherwise they fall back to local `http://localhost:11434`. Both chat and embedding paths pass bearer auth headers when needed.
+
 **Recovery path:** Embedding/vector-store/ingestion setup failures now show likely causes and offer retry, change embedding model, change vector DB settings, or abort. Runtime build failures are wrapped with a clearer production-facing message.
 
 **Terminal feedback:** Query mode now shows a Rich status spinner while context retrieval and answer generation are running.
@@ -71,6 +75,8 @@ RuntimeError: FAISS store has no documents yet.
 **OpenTelemetry:** Optional OpenTelemetry tracing now wraps the main workflow phases and is enabled through a startup terminal prompt in the CLI. Env vars are still supported as a fallback for non-interactive runs, and the usual knobs are `OTEL_SERVICE_NAME`, `OTEL_ENVIRONMENT`, `OTEL_EXPORTER_OTLP_ENDPOINT`, and `OTEL_EXPORTER_OTLP_HEADERS`. It is safe to leave off in local runs.
 
 **Smoke tests:** `tests/smoke/test_vector_db_smoke.py` contains opt-in live backend checks for Chroma, FAISS, and Qdrant. They only run when `MS_RAG_SMOKE_VECTOR_DBS` names the target backend and the required connection settings are present.
+
+**Deployable docs:** `docs/` is a public, multi-page static, Vercel-ready documentation site for users. It covers the product pitch, setup, all RAG types, loaders/extractors, chunking, embeddings, vector databases, retrieval, reranking, compression, evaluation, observability, generated code, recommendations, production readiness, and docs deployment. Root `vercel.json` rewrites clean routes such as `/rag-types` and `/pipeline` to the matching docs pages and includes sitemap/robots routes.
 
 **Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\property\test_vectorization_properties.py tests\unit\test_vectordb_connector.py tests\property\test_query_loop_properties.py -q` passed with 66 tests.
 
@@ -110,6 +116,8 @@ RuntimeError: FAISS store has no documents yet.
 ```
 RAG_framework/
 ├── AGENTS.md                          ← this file
+├── vercel.json                         ← static docs deployment config
+├── docs/                               ← deployable user documentation site
 ├── pyproject.toml
 ├── README.md
 ├── ms_rag/
@@ -199,6 +207,7 @@ These were discovered during a web search audit. **Do NOT use the deprecated ver
 ```
 ❌ from langchain_community.embeddings import HuggingFaceEmbeddings
 ✅ from langchain_huggingface import HuggingFaceEmbeddings
+✅ from langchain_huggingface import HuggingFaceEndpointEmbeddings  # hosted, token-only
 
 ❌ from langchain_community.embeddings import OllamaEmbeddings
 ✅ from langchain_ollama import OllamaEmbeddings
@@ -308,7 +317,7 @@ Step 16 → Runtime build + LIVE query loop (/exit confirm, /config structured, 
 
 ## Last Updated
 
-**Last Updated**: June 2026  
+**Last Updated**: June 27, 2026  
 **Completed by**: Kiro  
-**Status**: ✅ FULLY IMPLEMENTED — 358 tests passing, all 24 tasks complete  
+**Status**: ✅ FULLY IMPLEMENTED — 423 tests passing, all 24 tasks complete  
 **Next action**: Install full dependencies (`pip install -e ".[dev,pinecone,qdrant,ragas,deepeval,langsmith]"`) and run `ms-rag`
