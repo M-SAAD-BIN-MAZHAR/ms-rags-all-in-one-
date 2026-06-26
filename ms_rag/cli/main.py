@@ -134,7 +134,7 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
     config.document_sources = [s.strip() for s in sources_raw.split(",") if s.strip()]
 
     # Ingest
-    embeddings = vectorization.get_embeddings(config.embedding_model)
+    embeddings = vectorization.get_embeddings(config.embedding_model, credential_store)
     vector_store = db_connector.get_vector_store(config.vector_db, embeddings)
 
     orchestrator = IngestionOrchestrator()

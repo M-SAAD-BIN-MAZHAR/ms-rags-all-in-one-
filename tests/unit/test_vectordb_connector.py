@@ -181,16 +181,19 @@ class TestGetVectorStoreDispatch:
             connector.get_vector_store(config, MagicMock())
 
     def test_known_db_types_dont_raise_value_error(self) -> None:
-        """Known DB types must NOT raise 'Unsupported vector DB type' ValueError."""
+        """Known DB types raise ImportError (package missing) not ValueError."""
         connector = VectorDBConnector()
         for db_type in VECTOR_DB_IDS:
             config = _make_config(db_type)
             try:
                 connector.get_vector_store(config, MagicMock())
-            except Exception as exc:
-                # Only our own dispatch error is a real failure
-                if isinstance(exc, ValueError) and "Unsupported vector DB type" in str(exc):
-                    pytest.fail(f"DB type {db_type!r} raised ValueError: {exc}")
+            except (ImportError, Exception) as exc:
+                # ImportError = package missing (OK), any other = connection error (OK)
+                if isinstance(exc, ValueError):
+                    if "Unsupported vector DB type" in str(exc):
+                        pytest.fail(
+                            f"DB type {db_type!r} raised ValueError unexpectedly: {exc}"
+                        )
 
 
 class TestIngestDocuments:

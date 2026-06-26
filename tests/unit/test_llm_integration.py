@@ -39,7 +39,7 @@ class TestGetLLMFactory:
             get_llm("nonexistent_provider", "some-model")
 
     def test_known_providers_dont_raise_value_error(self) -> None:
-        """Known providers must NOT raise 'Unsupported LLM provider' ValueError."""
+        """Known providers raise ImportError (missing package) not ValueError."""
         known = [
             "openai", "anthropic", "cohere", "huggingface", "google_gemini",
             "mistral", "groq", "together_ai", "replicate",
@@ -48,10 +48,15 @@ class TestGetLLMFactory:
         for provider in known:
             try:
                 get_llm(provider, "test-model")
-            except Exception as exc:
-                # Only our own "Unsupported" ValueError is a real failure
-                if isinstance(exc, ValueError) and "Unsupported LLM provider" in str(exc):
-                    pytest.fail(f"Provider {provider!r} raised ValueError: {exc}")
+            except ImportError:
+                pass  # package not installed — dispatch was correct
+            except ValueError as exc:
+                if "Unsupported LLM provider" in str(exc):
+                    pytest.fail(
+                        f"Provider {provider!r} raised ValueError: {exc}"
+                    )
+            except Exception:
+                pass  # auth error etc. — dispatch was correct
 
     def test_openai_called_with_correct_class(self) -> None:
         with patch("ms_rag.llm.llm_integration.ChatOpenAI", create=True) as mock_cls:

@@ -10,12 +10,10 @@ Requirement 8:
 - Prompt for local model path/name for Ollama/local models (8.4)
 
 Deprecation note (from audit):
-    HuggingFace embeddings: use langchain-huggingface, NOT langchain-community.
-    Ollama embeddings:      use langchain-ollama, NOT langchain-community.
 """
-
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 try:
@@ -339,7 +337,11 @@ class VectorizationModule:
 
         return config
 
-    def get_embeddings(self, config: EmbeddingModelConfig) -> object:
+    def get_embeddings(
+        self,
+        config: EmbeddingModelConfig,
+        credential_store: object | None = None,
+    ) -> object:
         """Return the appropriate LangChain Embeddings instance for *config*.
 
         Package routing (current as of 2025):
@@ -352,7 +354,8 @@ class VectorizationModule:
             local         → langchain_huggingface.HuggingFaceEmbeddings
 
         Args:
-            config: The selected embedding model configuration.
+            config:           The selected embedding model configuration.
+            credential_store: Optional CredentialStore for API key lookup.
 
         Returns:
             A LangChain Embeddings instance.
@@ -364,13 +367,26 @@ class VectorizationModule:
         provider = config.provider
         model_id = config.model_id
 
+        def _env(field: str) -> str | None:
+            if credential_store is not None:
+                val = credential_store.get(provider, field)  # type: ignore[union-attr]
+                if val:
+                    return val
+            return os.getenv(field)
+
         if provider == "openai":
             from langchain_openai import OpenAIEmbeddings  # noqa: PLC0415
-            return OpenAIEmbeddings(model=model_id)
+            return OpenAIEmbeddings(
+                model=model_id,
+                api_key=_env("OPENAI_API_KEY"),  # type: ignore[arg-type]
+            )
 
         if provider == "cohere":
             from langchain_cohere import CohereEmbeddings  # noqa: PLC0415
-            return CohereEmbeddings(model=model_id)
+            return CohereEmbeddings(
+                model=model_id,
+                cohere_api_key=_env("COHERE_API_KEY"),  # type: ignore[arg-type]
+            )
 
         if provider in ("huggingface", "local"):
             # Use langchain-huggingface (NOT deprecated langchain-community)
@@ -381,17 +397,24 @@ class VectorizationModule:
 
         if provider == "google_gemini":
             from langchain_google_genai import GoogleGenerativeAIEmbeddings  # noqa: PLC0415
-            return GoogleGenerativeAIEmbeddings(model=model_id)
+            return GoogleGenerativeAIEmbeddings(
+                model=model_id,
+                google_api_key=_env("GOOGLE_API_KEY"),  # type: ignore[arg-type]
+            )
 
         if provider == "mistral":
             from langchain_mistralai import MistralAIEmbeddings  # noqa: PLC0415
-            return MistralAIEmbeddings(model=model_id)
+            return MistralAIEmbeddings(
+                model=model_id,
+                api_key=_env("MISTRAL_API_KEY"),  # type: ignore[arg-type]
+            )
 
         if provider == "ollama":
             # Use langchain-ollama (NOT deprecated langchain-community)
             from langchain_ollama import OllamaEmbeddings  # noqa: PLC0415
             return OllamaEmbeddings(
-                model=config.local_path or model_id
+                model=config.local_path or model_id,
+                base_url=_env("OLLAMA_BASE_URL"),
             )
 
         raise ValueError(
