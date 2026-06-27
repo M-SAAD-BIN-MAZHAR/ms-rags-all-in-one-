@@ -19,13 +19,14 @@ from ms_rag.config.credential_manager import PROVIDER_IDS
 from ms_rag.ingestion.vectorization_module import (
     EMBEDDING_MODELS,
     _LOCAL_PROVIDERS,
+    _prepare_local_huggingface_download,
     EmbeddingModelInfo,
     VectorizationModule,
     get_displayable_models,
     get_embedding_dimension,
     get_embedding_model_info,
 )
-from ms_rag.models import EmbeddingModelConfig
+from ms_rag.models import CredentialStore, EmbeddingModelConfig
 
 
 # ---------------------------------------------------------------------------
@@ -44,27 +45,17 @@ from ms_rag.models import EmbeddingModelConfig
 def test_embedding_model_provider_filtering(providers: frozenset[str]) -> None:
     """Feature: ms-rag, Property 13: Embedding Model Provider Filtering.
 
-    Displayed models must be exactly those whose provider is in the
-    configured set OR whose provider is in _LOCAL_PROVIDERS.
-    No models from unconfigured non-local providers should appear.
+    Displayed models must include every embedding provider. Credentials are
+    requested only after the user selects a hosted/API embedding model.
     """
     provider_list = list(providers)
     displayable = get_displayable_models(provider_list)
 
-    # Build expected set
-    provider_set = set(provider_list)
-    expected = {
-        m.model_id for m in EMBEDDING_MODELS
-        if (
-            m.provider in provider_set
-            or m.provider in _LOCAL_PROVIDERS
-            or (m.provider == "huggingface_endpoint" and "huggingface" in provider_set)
-        )
-    }
+    expected = {m.model_id for m in EMBEDDING_MODELS}
 
     actual = {m.model_id for m in displayable}
     assert actual == expected, (
-        f"For providers {provider_set}:\n"
+        f"For providers {set(provider_list)}:\n"
         f"  Expected: {sorted(expected)}\n"
         f"  Actual:   {sorted(actual)}\n"
         f"  Extra:    {sorted(actual - expected)}\n"
@@ -80,9 +71,9 @@ def test_local_models_always_available_with_empty_providers() -> None:
     assert local_model_ids.issubset(shown_ids)
 
 
-def test_openai_models_shown_when_openai_configured() -> None:
+def test_openai_models_shown_even_when_openai_not_chat_provider() -> None:
     openai_models = {m.model_id for m in EMBEDDING_MODELS if m.provider == "openai"}
-    displayable_ids = {m.model_id for m in get_displayable_models(["openai"])}
+    displayable_ids = {m.model_id for m in get_displayable_models(["mistral"])}
     assert openai_models.issubset(displayable_ids)
 
 
@@ -105,27 +96,29 @@ def test_unknown_embedding_dimension_returns_none() -> None:
     assert get_embedding_dimension(config) is None
 
 
-def test_openai_models_not_shown_without_credentials() -> None:
-    """OpenAI models must NOT appear when openai is not in configured_providers."""
+def test_hosted_embedding_models_are_visible_without_chat_provider_credentials() -> None:
+    """Hosted embedding models appear first, then Step 8 asks for credentials if selected."""
     displayable_ids = {m.model_id for m in get_displayable_models([])}
-    openai_model_ids = {m.model_id for m in EMBEDDING_MODELS if m.provider == "openai"}
-    # None of the OpenAI-specific models should appear
-    overlap = displayable_ids & openai_model_ids
-    assert not overlap, f"OpenAI models shown without credentials: {overlap}"
+    hosted_model_ids = {
+        m.model_id
+        for m in EMBEDDING_MODELS
+        if m.provider in {"openai", "cohere", "huggingface_endpoint", "google_gemini", "mistral"}
+    }
+    assert hosted_model_ids.issubset(displayable_ids)
 
 
-def test_huggingface_endpoint_models_require_huggingface_credentials() -> None:
-    """Hosted HuggingFace embeddings should appear only after HF credentials are configured."""
-    without_credentials = {m.model_id for m in get_displayable_models([])}
-    with_credentials = {m.model_id for m in get_displayable_models(["huggingface"])}
+def test_huggingface_endpoint_models_available_for_embedding_only_token_flow() -> None:
+    """Hosted HuggingFace embeddings should be selectable even with a different chat provider."""
+    with_no_chat_hf = {m.model_id for m in get_displayable_models([])}
+    with_hf_chat = {m.model_id for m in get_displayable_models(["huggingface"])}
     hosted_ids = {
         m.model_id for m in EMBEDDING_MODELS
         if m.provider == "huggingface_endpoint"
     }
 
     assert hosted_ids
-    assert not (hosted_ids & without_credentials)
-    assert hosted_ids.issubset(with_credentials)
+    assert hosted_ids.issubset(with_no_chat_hf)
+    assert hosted_ids.issubset(with_hf_chat)
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +182,156 @@ def test_ollama_user_specified_prompts_for_model_name() -> None:
     assert result.provider == "ollama"
     assert result.model_id == "nomic-embed-text"
     assert result.local_path == "nomic-embed-text"
+
+
+def test_hosted_huggingface_embedding_prompts_for_token_when_missing() -> None:
+    """Hosted HF embeddings selected after another chat provider must request a token."""
+    module = VectorizationModule()
+    store = CredentialStore()
+    hosted_model = next(m for m in EMBEDDING_MODELS if m.provider == "huggingface_endpoint")
+
+    with patch("ms_rag.ingestion.vectorization_module.questionary") as mock_q, \
+         patch("ms_rag.ingestion.vectorization_module.Console"), \
+         patch("ms_rag.ui.prompts.prompt_text", return_value="hf_test_token") as mock_prompt:
+        mock_select = MagicMock()
+        mock_select.ask.return_value = hosted_model.model_id
+        mock_q.select.return_value = mock_select
+        mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
+
+        result = module.display_and_select(
+            configured_providers=["openai", "huggingface"],
+            credential_store=store,
+        )
+
+    assert result.provider == "huggingface_endpoint"
+    assert store.get("huggingface", "HUGGINGFACEHUB_API_TOKEN") == "hf_test_token"
+    mock_prompt.assert_called_once()
+
+
+def test_hosted_huggingface_embedding_does_not_reprompt_when_token_exists() -> None:
+    module = VectorizationModule()
+    store = CredentialStore()
+    store.set("huggingface", "HUGGINGFACEHUB_API_TOKEN", "hf_existing")
+    hosted_model = next(m for m in EMBEDDING_MODELS if m.provider == "huggingface_endpoint")
+
+    with patch("ms_rag.ingestion.vectorization_module.questionary") as mock_q, \
+         patch("ms_rag.ingestion.vectorization_module.Console"), \
+         patch("ms_rag.ui.prompts.prompt_text") as mock_prompt:
+        mock_select = MagicMock()
+        mock_select.ask.return_value = hosted_model.model_id
+        mock_q.select.return_value = mock_select
+        mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
+
+        module.display_and_select(
+            configured_providers=["openai", "huggingface"],
+            credential_store=store,
+        )
+
+    mock_prompt.assert_not_called()
+
+
+def test_openai_embedding_prompts_for_key_when_chat_provider_is_mistral() -> None:
+    module = VectorizationModule()
+    store = CredentialStore()
+    openai_model = next(m for m in EMBEDDING_MODELS if m.provider == "openai")
+
+    with patch.dict("os.environ", {"OPENAI_API_KEY": ""}), \
+         patch("ms_rag.ingestion.vectorization_module.questionary") as mock_q, \
+         patch("ms_rag.ingestion.vectorization_module.Console"), \
+         patch("ms_rag.ui.prompts.prompt_text", return_value="sk_test") as mock_prompt:
+        mock_select = MagicMock()
+        mock_select.ask.return_value = openai_model.model_id
+        mock_q.select.return_value = mock_select
+        mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
+
+        result = module.display_and_select(
+            configured_providers=["mistral"],
+            credential_store=store,
+        )
+
+    assert result.provider == "openai"
+    assert store.get("openai", "OPENAI_API_KEY") == "sk_test"
+    mock_prompt.assert_called_once()
+
+
+def test_local_huggingface_embedding_offers_optional_token_when_missing() -> None:
+    module = VectorizationModule()
+    store = CredentialStore()
+    local_model = next(m for m in EMBEDDING_MODELS if m.provider == "huggingface")
+
+    with patch("ms_rag.ingestion.vectorization_module.questionary") as mock_q, \
+         patch("ms_rag.ingestion.vectorization_module.Console"), \
+         patch("ms_rag.ui.prompts.prompt_text", return_value="hf_optional") as mock_prompt, \
+         patch("ms_rag.ui.prompts.prompt_confirm", return_value=False):
+        mock_select = MagicMock()
+        mock_select.ask.return_value = local_model.model_id
+        mock_q.select.return_value = mock_select
+        mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
+
+        result = module.display_and_select(
+            configured_providers=["mistral"],
+            credential_store=store,
+        )
+
+    assert result.provider == "huggingface"
+    assert store.get("huggingface", "HUGGINGFACEHUB_API_TOKEN") == "hf_optional"
+    mock_prompt.assert_called_once()
+
+
+def test_local_huggingface_with_token_can_switch_to_hosted_equivalent() -> None:
+    module = VectorizationModule()
+    store = CredentialStore()
+    local_model = next(
+        m
+        for m in EMBEDDING_MODELS
+        if m.provider == "huggingface" and m.model_id == "sentence-transformers/all-mpnet-base-v2"
+    )
+
+    with patch("ms_rag.ingestion.vectorization_module.questionary") as mock_q, \
+         patch("ms_rag.ingestion.vectorization_module.Console"), \
+         patch("ms_rag.ui.prompts.prompt_text", return_value="hf_optional"), \
+         patch("ms_rag.ui.prompts.prompt_confirm", return_value=True):
+        mock_select = MagicMock()
+        mock_select.ask.return_value = local_model.model_id
+        mock_q.select.return_value = mock_select
+        mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
+
+        result = module.display_and_select(
+            configured_providers=["mistral"],
+            credential_store=store,
+        )
+
+    assert result.provider == "huggingface_endpoint"
+    assert result.model_id == "hf-endpoint:sentence-transformers/all-mpnet-base-v2"
+
+
+def test_local_huggingface_download_disables_xet_and_exports_token() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "HF_HUB_DISABLE_XET": "",
+            "HF_HUB_DISABLE_SYMLINKS_WARNING": "",
+            "HF_TOKEN": "",
+            "HUGGING_FACE_HUB_TOKEN": "",
+        },
+        clear=False,
+    ):
+        import os
+
+        for key in [
+            "HF_HUB_DISABLE_XET",
+            "HF_HUB_DISABLE_SYMLINKS_WARNING",
+            "HF_TOKEN",
+            "HUGGING_FACE_HUB_TOKEN",
+        ]:
+            os.environ.pop(key, None)
+
+        _prepare_local_huggingface_download("hf_test")
+
+        assert os.environ["HF_HUB_DISABLE_XET"] == "1"
+        assert os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] == "1"
+        assert os.environ["HF_TOKEN"] == "hf_test"
+        assert os.environ["HUGGING_FACE_HUB_TOKEN"] == "hf_test"
 
 
 # ---------------------------------------------------------------------------

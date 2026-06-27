@@ -296,12 +296,35 @@ def test_generated_huggingface_endpoint_embedding_uses_token_only_hosted_class()
     assert "sentence-transformers>=3.0.0" not in result.requirements_txt
 
 
+def test_generated_local_huggingface_embedding_disables_xet_download_path() -> None:
+    """Local HuggingFace generated pipelines should avoid hf-xet download incompatibilities."""
+    config = _make_config(providers=["mistral"])
+    config.llm_model = LLMModelConfig(provider="mistral", model_id="mistral-large-latest")
+    config.embedding_model = EmbeddingModelConfig(
+        provider="huggingface",
+        model_id="sentence-transformers/all-mpnet-base-v2",
+    )
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert "def _local_huggingface_embeddings(model_name: str):" in code
+    assert 'os.environ.setdefault("HF_HUB_DISABLE_XET", "1")' in code
+    assert 'HUGGINGFACEHUB_API_TOKEN = os.getenv("HUGGINGFACEHUB_API_TOKEN")' in code
+    assert 'embeddings = _local_huggingface_embeddings("sentence-transformers/all-mpnet-base-v2")' in code
+
+
 def test_generated_huggingface_llm_does_not_fall_back_to_openai() -> None:
     """A HuggingFace-only run must generate a HuggingFace answer model, not OpenAI."""
     config = _make_config(providers=["huggingface"])
     config.llm_model = LLMModelConfig(
         provider="huggingface",
         model_id="meta-llama/Meta-Llama-3-8B-Instruct",
+    )
+    config.embedding_model = EmbeddingModelConfig(
+        provider="huggingface_endpoint",
+        model_id="hf-endpoint:sentence-transformers/all-MiniLM-L6-v2",
     )
 
     result = CodeGenerator().generate(config)

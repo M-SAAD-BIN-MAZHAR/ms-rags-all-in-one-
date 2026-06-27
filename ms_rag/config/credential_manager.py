@@ -69,7 +69,7 @@ PROVIDER_DISPLAY_NAMES: dict[str, str] = {
     "openai": "OpenAI",
     "anthropic": "Anthropic (Claude)",
     "cohere": "Cohere",
-    "huggingface": "HuggingFace Inference API",
+    "huggingface": "Hosted HuggingFace Inference API",
     "google_gemini": "Google Gemini",
     "mistral": "Mistral AI",
     "together_ai": "Together AI",
@@ -77,7 +77,7 @@ PROVIDER_DISPLAY_NAMES: dict[str, str] = {
     "replicate": "Replicate",
     "azure_openai": "Azure OpenAI",
     "aws_bedrock": "AWS Bedrock",
-    "ollama": "Ollama (Chat: Local or Cloud)",
+    "ollama": "Ollama (Chat: local or hosted cloud/API key)",
 }
 
 # Fields that should be masked during display (passwords / secret keys)

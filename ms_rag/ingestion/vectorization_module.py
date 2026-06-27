@@ -14,6 +14,7 @@ Deprecation note (from audit):
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 
 try:
     import questionary
@@ -208,21 +209,21 @@ EMBEDDING_MODELS: list[EmbeddingModelInfo] = [
     EmbeddingModelInfo(
         provider=_HOSTED_HF_PROVIDER,
         model_id=f"{_HOSTED_HF_PREFIX}sentence-transformers/all-MiniLM-L6-v2",
-        display_name="HF Inference API: all-MiniLM-L6-v2 (hosted)",
+        display_name="Hosted HuggingFace Inference API: all-MiniLM-L6-v2",
         dimensions=384,
         description="Hosted HuggingFace embedding endpoint; requires token, no local model download",
     ),
     EmbeddingModelInfo(
         provider=_HOSTED_HF_PROVIDER,
         model_id=f"{_HOSTED_HF_PREFIX}sentence-transformers/all-mpnet-base-v2",
-        display_name="HF Inference API: all-mpnet-base-v2 (hosted)",
+        display_name="Hosted HuggingFace Inference API: all-mpnet-base-v2",
         dimensions=768,
         description="Hosted HuggingFace embedding endpoint; stronger quality, no local model download",
     ),
     EmbeddingModelInfo(
         provider=_HOSTED_HF_PROVIDER,
         model_id=f"{_HOSTED_HF_PREFIX}sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-        display_name="HF Inference API: multilingual MiniLM (hosted)",
+        display_name="Hosted HuggingFace Inference API: multilingual MiniLM",
         dimensions=384,
         description="Hosted multilingual HuggingFace embeddings; requires token, no local model download",
     ),
@@ -246,7 +247,7 @@ EMBEDDING_MODELS: list[EmbeddingModelInfo] = [
     EmbeddingModelInfo(
         provider="ollama",
         model_id="__user_specified__",
-        display_name="Ollama (local — enter model name)",
+        display_name="Ollama embeddings (local/self-hosted only — enter model name)",
         dimensions=0,
         is_local=True,
         description="Any local/self-hosted Ollama embedding model (Ollama Cloud chat only; embeddings are not supported there)",
@@ -274,30 +275,73 @@ def get_embedding_dimension(config: EmbeddingModelConfig | None) -> int | None:
 
 
 def get_displayable_models(configured_providers: list[str]) -> list[EmbeddingModelInfo]:
-    """Return models whose provider is configured, plus all local/Ollama/HF models.
+    """Return all embedding models visible in Step 8.
 
-    Requirement 8.1: filtered by configured providers + always-available local options.
+    Chat providers and embedding providers are intentionally independent.
+    If the selected embedding provider needs credentials that were not entered
+    in Step 2, Step 8 prompts for them before ingestion starts.
 
     Args:
-        configured_providers: Provider IDs that the user has credentials for.
+        configured_providers: Provider IDs selected for chat. Kept for API
+            compatibility and future ranking/grouping behavior.
 
     Returns:
-        Filtered list of EmbeddingModelInfo instances.
+        Full list of EmbeddingModelInfo instances.
     """
-    provider_set = set(configured_providers)
-    return [
-        m for m in EMBEDDING_MODELS
-        if (
-            m.provider in provider_set
-            or m.provider in _LOCAL_PROVIDERS
-            or (m.provider == _HOSTED_HF_PROVIDER and "huggingface" in provider_set)
-        )
-    ]
+    return list(EMBEDDING_MODELS)
 
 
 def _hf_endpoint_model_id(model_id: str) -> str:
     """Return the HuggingFace repo id for a hosted endpoint model selection."""
     return model_id.removeprefix(_HOSTED_HF_PREFIX)
+
+
+def _credential_provider_for_embedding(provider: str) -> str:
+    """Map embedding provider IDs to CredentialStore provider IDs."""
+    if provider == _HOSTED_HF_PROVIDER:
+        return "huggingface"
+    return provider
+
+
+def _embedding_required_fields(provider: str) -> list[str]:
+    """Return required credential fields for hosted embedding providers."""
+    return {
+        "openai": ["OPENAI_API_KEY"],
+        "cohere": ["COHERE_API_KEY"],
+        _HOSTED_HF_PROVIDER: ["HUGGINGFACEHUB_API_TOKEN"],
+        "google_gemini": ["GOOGLE_API_KEY"],
+        "mistral": ["MISTRAL_API_KEY"],
+    }.get(provider, [])
+
+
+def _embedding_optional_fields(provider: str) -> list[str]:
+    """Return optional credential fields that improve local embedding setup."""
+    return {
+        "huggingface": ["HUGGINGFACEHUB_API_TOKEN"],
+        "local": ["HUGGINGFACEHUB_API_TOKEN"],
+    }.get(provider, [])
+
+
+def _hosted_hf_equivalent(model_id: str) -> EmbeddingModelInfo | None:
+    """Return the hosted HF catalogue entry for a local HF model when available."""
+    hosted_id = f"{_HOSTED_HF_PREFIX}{model_id}"
+    return next(
+        (
+            model
+            for model in EMBEDDING_MODELS
+            if model.provider == _HOSTED_HF_PROVIDER and model.model_id == hosted_id
+        ),
+        None,
+    )
+
+
+def _prepare_local_huggingface_download(hf_token: str | None) -> None:
+    """Make local HuggingFace model downloads reliable on Windows/older stacks."""
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    if hf_token:
+        os.environ.setdefault("HF_TOKEN", hf_token)
+        os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", hf_token)
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +362,7 @@ class VectorizationModule:
     def display_and_select(
         self,
         configured_providers: list[str],
+        credential_store: object | None = None,
     ) -> EmbeddingModelConfig:
         """Show filtered model list and return selected EmbeddingModelConfig.
 
@@ -326,6 +371,8 @@ class VectorizationModule:
 
         Args:
             configured_providers: Provider IDs with credentials available.
+            credential_store: Optional CredentialStore used to collect embedding-only
+                credentials when the embedding provider was not selected for chat.
 
         Returns:
             EmbeddingModelConfig with provider, model_id, and optional local_path.
@@ -400,6 +447,16 @@ class VectorizationModule:
                 break
 
         provider = selected_info.provider if selected_info else "huggingface"
+        if selected_info is not None:
+            self._ensure_embedding_credentials(selected_info, credential_store, console)
+            selected_info = self._maybe_switch_local_hf_to_hosted(
+                selected_info,
+                credential_store,
+                console,
+            )
+            if selected_info.model_id != "__user_specified__":
+                selected_id = selected_info.model_id
+            provider = selected_info.provider
 
         config = EmbeddingModelConfig(
             provider=provider,
@@ -423,6 +480,96 @@ class VectorizationModule:
             )
 
         return config
+
+    def _maybe_switch_local_hf_to_hosted(
+        self,
+        selected_info: EmbeddingModelInfo,
+        credential_store: object | None,
+        console: object,
+    ) -> EmbeddingModelInfo:
+        """Offer hosted HF when a user selected local HF but supplied a token."""
+        if selected_info.provider not in {"huggingface", "local"}:
+            return selected_info
+        hosted = _hosted_hf_equivalent(selected_info.model_id)
+        if hosted is None:
+            return selected_info
+        token = resolve_credential("HUGGINGFACEHUB_API_TOKEN", credential_store, "huggingface")
+        if not token:
+            console.print(
+                "[yellow]  Note: this local HuggingFace option downloads model weights. "
+                "Choose a 'Hosted HuggingFace Inference API' option if you want token-only embeddings.[/yellow]"
+            )
+            return selected_info
+
+        from ms_rag.ui.prompts import prompt_confirm  # noqa: PLC0415
+
+        console.print(
+            "[yellow]  You selected a local HuggingFace embedding model. "
+            "The token only authenticates the download; it does not make this hosted.[/yellow]"
+        )
+        use_hosted = prompt_confirm(
+            f"  Use {hosted.display_name} instead to avoid local model download?",
+            default=True,
+            console=console,
+        )
+        if use_hosted:
+            console.print(
+                f"[green]  ✓ Switched to {hosted.display_name}[/green]"
+            )
+            return hosted
+        return selected_info
+
+    def _ensure_embedding_credentials(
+        self,
+        selected_info: EmbeddingModelInfo,
+        credential_store: object | None,
+        console: object,
+    ) -> None:
+        """Prompt for credentials required by the selected embedding provider."""
+        if credential_store is None:
+            return
+        required_fields = _embedding_required_fields(selected_info.provider)
+        optional_fields = _embedding_optional_fields(selected_info.provider)
+        if not required_fields and not optional_fields:
+            return
+
+        from ms_rag.config.credential_manager import _is_secret_field  # noqa: PLC0415
+        from ms_rag.ui.prompts import prompt_text  # noqa: PLC0415
+
+        provider_id = _credential_provider_for_embedding(selected_info.provider)
+        missing_fields = [
+            field
+            for field in required_fields
+            if not resolve_credential(field, credential_store, provider_id)
+        ]
+        optional_missing = [
+            field
+            for field in optional_fields
+            if not resolve_credential(field, credential_store, provider_id)
+        ]
+        if not missing_fields and not optional_missing:
+            return
+
+        console.print(
+            f"\n[bold cyan]Credentials for {selected_info.display_name}:[/bold cyan]"
+        )
+        for field in missing_fields:
+            value = prompt_text(
+                f"  {field}:",
+                secret=_is_secret_field(field),
+                required=True,
+                console=console,
+            )
+            credential_store.set(provider_id, field, str(value).strip())  # type: ignore[union-attr]
+        for field in optional_missing:
+            value = prompt_text(
+                f"  {field} (optional, press Enter to skip):",
+                secret=_is_secret_field(field),
+                required=False,
+                console=console,
+            )
+            if str(value).strip():
+                credential_store.set(provider_id, field, str(value).strip())  # type: ignore[union-attr]
 
     def get_embeddings(
         self,
@@ -484,6 +631,7 @@ class VectorizationModule:
             # Use langchain-huggingface (NOT deprecated langchain-community)
             from langchain_huggingface import HuggingFaceEmbeddings  # noqa: PLC0415
             hf_token = _env("HUGGINGFACEHUB_API_TOKEN", "huggingface")
+            _prepare_local_huggingface_download(hf_token)
             if hf_token:
                 return HuggingFaceEmbeddings(
                     model_name=config.local_path or model_id,

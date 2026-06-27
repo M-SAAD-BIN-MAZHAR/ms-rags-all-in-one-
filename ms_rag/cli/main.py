@@ -236,7 +236,10 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
     # Step 8: Embedding Model
     with telemetry.span("setup.embedding"):
         vectorization = VectorizationModule()
-        config.embedding_model = vectorization.display_and_select(config.configured_providers)
+        config.embedding_model = vectorization.display_and_select(
+            config.configured_providers,
+            credential_store=credential_store,
+        )
         telemetry.record_event(
             "embedding.selected",
             "Embedding model selected",
@@ -543,7 +546,10 @@ def _run_ingestion_with_recovery(
             if action == "retry":
                 continue
             if action == "embedding":
-                config.embedding_model = vectorization.display_and_select(config.configured_providers)  # type: ignore[union-attr]
+                config.embedding_model = vectorization.display_and_select(  # type: ignore[union-attr]
+                    config.configured_providers,
+                    credential_store=credential_store,
+                )
                 config.vector_db = db_connector.prompt_and_configure(config.embedding_model)  # type: ignore[union-attr]
                 config.vector_db = _ensure_vector_db_connection(
                     db_connector,

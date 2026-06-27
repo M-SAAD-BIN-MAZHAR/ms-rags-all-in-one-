@@ -394,9 +394,13 @@ ADVANCED_CHUNK_DOCUMENTS = []
 
     def _render_credentials(self, config: PipelineConfig) -> str:
         lines = ["# ─── Credentials (via environment variables) ─────────────────"]
+        embedding_provider = config.embedding_model.provider if config.embedding_model else ""
+        if embedding_provider in {"huggingface_endpoint", "local"}:
+            embedding_provider = "huggingface"
         credential_providers = list(dict.fromkeys(
             list(config.configured_providers)
             + ([config.llm_model.provider] if config.llm_model else [])
+            + ([embedding_provider] if embedding_provider else [])
         ))
         for pid in credential_providers:
             from ms_rag.config.credential_manager import PROVIDER_FIELDS  # noqa: PLC0415
@@ -439,6 +443,25 @@ ADVANCED_CHUNK_DOCUMENTS = []
                 '    if OLLAMA_API_KEY and (usage == "chat" or not _is_ollama_cloud_url(base_url)):',
                 '        return {"headers": {"Authorization": f"Bearer {OLLAMA_API_KEY}"}}',
                 "    return {}",
+            ])
+        uses_local_huggingface = (
+            config.embedding_model is not None
+            and config.embedding_model.provider in {"huggingface", "local"}
+        )
+        if uses_local_huggingface:
+            lines.extend([
+                "",
+                "def _local_huggingface_embeddings(model_name: str):",
+                '    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")',
+                '    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")',
+                "    if HUGGINGFACEHUB_API_TOKEN:",
+                '        os.environ.setdefault("HF_TOKEN", HUGGINGFACEHUB_API_TOKEN)',
+                '        os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", HUGGINGFACEHUB_API_TOKEN)',
+                "        return HuggingFaceEmbeddings(",
+                "            model_name=model_name,",
+                '            model_kwargs={"token": HUGGINGFACEHUB_API_TOKEN},',
+                "        )",
+                "    return HuggingFaceEmbeddings(model_name=model_name)",
             ])
         if config.vector_db and config.vector_db.connection_params:
             lines.append("")
@@ -541,13 +564,13 @@ def create_chunks(documents: list) -> list:
         emb_init = {
             "openai": f'OpenAIEmbeddings(model="{emb_model}")',
             "cohere": f'CohereEmbeddings(model="{emb_model}")',
-            "huggingface": f'HuggingFaceEmbeddings(model_name="{emb_model}")',
+            "huggingface": f'_local_huggingface_embeddings("{emb_model}")',
             "huggingface_endpoint": (
                 "HuggingFaceEndpointEmbeddings("
                 f'model="{emb_model.removeprefix("hf-endpoint:")}", '
                 'huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))'
             ),
-            "local": f'HuggingFaceEmbeddings(model_name="{emb_model}")',
+            "local": f'_local_huggingface_embeddings("{emb_model}")',
             "google_gemini": f'GoogleGenerativeAIEmbeddings(model="{emb_model}")',
             "ollama": f'OllamaEmbeddings(model="{emb_model}", base_url=_ollama_base_url(usage="embedding"), client_kwargs=_ollama_client_kwargs(usage="embedding"))',
             "mistral": f'MistralAIEmbeddings(model="{emb_model}")',
