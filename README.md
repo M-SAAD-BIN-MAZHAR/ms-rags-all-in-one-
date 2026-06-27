@@ -17,7 +17,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![LangChain 0.3+](https://img.shields.io/badge/LangChain-0.3%2B-green)](https://langchain.com)
 [![LangGraph 0.2+](https://img.shields.io/badge/LangGraph-0.2%2B-purple)](https://langchain-ai.github.io/langgraph/)
-[![Tests: 423 passing](https://img.shields.io/badge/Tests-423%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-passing-brightgreen)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 [![Code style: production](https://img.shields.io/badge/code%20style-production-blue)]()
 

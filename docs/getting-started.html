@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Getting Started - MS_RAG Docs</title>
+    <link rel="stylesheet" href="assets/styles.css">
+  </head>
+  <body>
+    <div class="site">
+      <aside class="sidebar">
+        <a class="brand" href="index.html"><strong>MS_RAG</strong><span>Production RAG framework builder</span></a>
+        <div class="nav-title">Start</div>
+        <a href="index.html">Overview</a>
+        <a class="active" href="getting-started.html">Getting started</a>
+        <a href="recommendations.html">Recommendations</a>
+        <div class="nav-title">Core Concepts</div>
+        <a href="rag-types.html">RAG types</a>
+        <a href="pipeline.html">Pipeline components</a>
+        <a href="databases.html">Vector databases</a>
+        <div class="nav-title">Production</div>
+        <a href="production.html">Production readiness</a><a href="resources.html">Official resources</a>
+        <div class="nav-title">Project</div><a href="https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-" rel="noopener">GitHub repository</a>
+      </aside>
+      <div class="content">
+        <div class="mobile-bar"><strong>MS_RAG Docs</strong><button type="button" data-mobile-toggle>Menu</button></div>
+        <header class="page-header">
+          <p class="eyebrow">Start</p>
+          <h1>Getting Started</h1>
+          <p>Install MS_RAG, run the terminal workflow, and understand what the CLI asks before it changes anything.</p>
+        </header>
+        <main>
+          <section>
+            <h2>Install</h2>
+            <pre><code>git clone https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-.git
+cd MS-RAG-ALL-IN-ONE-
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+
+# Linux or macOS
+source .venv/bin/activate
+
+pip install -e ".[production]"</code></pre>
+            <p>Use <code>.[production]</code> when you want all providers, vector databases, evaluators, rerankers, and loaders available.</p>
+          </section>
+
+          <section>
+            <h2>Run The CLI</h2>
+            <pre><code>ms-rag
+
+# Resume a saved session
+ms-rag --load session.json</code></pre>
+            <p>When loading a saved session, MS_RAG asks for credentials again because secrets are never stored inside the pipeline config JSON.</p>
+          </section>
+
+          <section>
+            <h2>First Successful Pipeline Tutorial</h2>
+            <p class="lead">
+              This path is intentionally conservative. It helps a user get one working
+              RAG system before adding advanced retrieval, reranking, or evaluation.
+            </p>
+            <ol class="steps">
+              <li>Select one LLM provider. <a href="https://openai.com/api/" rel="noopener">OpenAI</a>, <a href="https://ollama.com/" rel="noopener">Ollama Cloud</a>, or local <a href="https://ollama.com/" rel="noopener">Ollama</a> are good first choices.</li>
+              <li>Choose <strong>Naive RAG</strong> or <strong>Advanced RAG</strong>. Use Naive if you are learning, Advanced if you already know quality matters.</li>
+              <li>Select one document type first, such as PDF, Markdown, or plain text.</li>
+              <li>Use the recommended default loader. For PDF, start with PyPDFLoader unless tables or layout are complex.</li>
+              <li>Choose Recursive Character chunking with the default size and overlap.</li>
+              <li>Choose <a href="https://openai.com/api/" rel="noopener">OpenAI</a> <code>text-embedding-3-small</code> or a hosted <a href="https://huggingface.co/" rel="noopener">Hugging Face</a> endpoint if you do not want local model downloads.</li>
+              <li>Use <a href="https://www.trychroma.com/" rel="noopener">ChromaDB</a> for local testing or <a href="https://qdrant.tech/" rel="noopener">Qdrant</a>/<a href="https://www.pinecone.io/" rel="noopener">Pinecone</a> for a production-like managed backend.</li>
+              <li>Approve ingestion only after checking embedding dimension, DB, collection name, and document sources.</li>
+              <li>Use Dense Vector retrieval first. Add Hybrid or reranking only if the retrieved chunks are weak.</li>
+              <li>Ask 5-10 real user questions in the live query loop before generating code.</li>
+            </ol>
+          </section>
+
+          <section>
+            <h2>Query Loop Commands</h2>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Command</th><th>Behavior</th></tr></thead>
+                <tbody>
+                  <tr><td><code>/config</code></td><td>Show the full pipeline configuration summary.</td></tr>
+                  <tr><td><code>/save</code></td><td>Save the session config JSON for later resumption.</td></tr>
+                  <tr><td><code>/help</code></td><td>Show available query-loop commands.</td></tr>
+                  <tr><td><code>/exit</code> or <code>/quit</code></td><td>Ask for confirmation before ending the query loop.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section>
+            <h2>The 16-Step Workflow</h2>
+            <ol class="steps">
+              <li><strong>Banner and tracing prompt.</strong> Optional OpenTelemetry can be enabled from the terminal.</li>
+              <li><strong>LLM credentials.</strong> Select providers and confirm the credential summary.</li>
+              <li><strong>RAG type.</strong> Choose exactly one architecture.</li>
+              <li><strong>Document types.</strong> Select PDFs, DOCX, CSV, URLs, code, SQL, MongoDB, and more.</li>
+              <li><strong>Loaders.</strong> Choose extractors filtered by document type.</li>
+              <li><strong>Chunking strategy.</strong> Pick how documents are split.</li>
+              <li><strong>Chunking parameters.</strong> Configure size, overlap, tokenizer, separators, or language.</li>
+              <li><strong>Embedding model.</strong> Choose local, hosted, or provider-native embeddings.</li>
+              <li><strong>Vector DB and ingestion.</strong> Configure storage, test connection, approve ingestion.</li>
+              <li><strong>Query enhancement.</strong> Add rewriting, expansion, HyDE, multi-query, step-back, decomposition, or fusion.</li>
+              <li><strong>Retrieval.</strong> Choose dense, BM25, TF-IDF, hybrid, MMR, ensemble, parent-child, multi-vector, self-query, or time-weighted.</li>
+              <li><strong>Reranking.</strong> Optionally rerank chunks.</li>
+              <li><strong>Compression.</strong> Optionally reduce noisy context.</li>
+              <li><strong>System prompt.</strong> Confirm grounded answer instructions.</li>
+              <li><strong>Evaluation.</strong> Configure quality checks and monitoring.</li>
+              <li><strong>Live query loop.</strong> Query, save sessions, then generate standalone code.</li>
+            </ol>
+          </section>
+
+          <section>
+            <h2>User Permission Points</h2>
+            <div class="grid">
+              <div class="card"><h3>Credentials</h3><p>The user confirms selected providers before setup continues.</p></div>
+              <div class="card"><h3>Vector DB</h3><p>The user confirms DB settings before connection testing and ingestion.</p></div>
+              <div class="card"><h3>Ingestion</h3><p>The user reviews embeddings, dimensions, sources, DB, and collection before vectors are written.</p></div>
+              <div class="card"><h3>Generated code</h3><p>The user confirms the output directory before <code>pipeline.py</code> and <code>requirements.txt</code> are written.</p></div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Environment Variables</h2>
+            <p>
+              Only set variables for the providers and databases you actually choose.
+              MS_RAG asks before using credentials and the generated pipeline reads
+              secrets from the environment instead of storing secret values in code.
+            </p>
+            <pre><code>OPENAI_API_KEY=sk-...
+HUGGINGFACEHUB_API_TOKEN=hf_...
+OLLAMA_MODEL_NAME=gpt-oss:120b
+OLLAMA_API_KEY=
+OLLAMA_BASE_URL=
+CHROMA_PERSIST_DIRECTORY=./chroma_db
+FAISS_INDEX_PATH=./faiss_indexes/default
+QDRANT_URL=http://localhost:6333
+PINECONE_API_KEY=...</code></pre>
+          </section>
+
+          <section>
+            <h2>Generated Output</h2>
+            <p>After the live query loop, MS_RAG can save a standalone app:</p>
+            <pre><code>ms_rag_output/
+  pipeline.py
+  requirements.txt</code></pre>
+            <p>The generated pipeline supports ingestion, one-shot query, and interactive query mode.</p>
+            <pre><code>python pipeline.py --ingest --sources ./docs/
+python pipeline.py --query "What does this document say?"
+python pipeline.py</code></pre>
+          </section>
+
+          <div class="next-actions">
+            <a class="button primary" href="rag-types.html">Next: RAG types</a>
+            <a class="button" href="index.html">Back to overview</a>
+            <a class="button" href="resources.html">Official resources</a>
+          </div>
+        </main>
+      </div>
+    </div>
+    <script src="assets/app.js"></script>
+  </body>
+</html>
+

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>/</loc></url>
+  <url><loc>/getting-started</loc></url>
+  <url><loc>/rag-types</loc></url>
+  <url><loc>/pipeline</loc></url>
+  <url><loc>/databases</loc></url>
+  <url><loc>/recommendations</loc></url>
+  <url><loc>/production</loc></url>
+  <url><loc>/resources</loc></url>
+</urlset>
