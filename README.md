@@ -144,6 +144,87 @@ pip install -e ".[pinecone,qdrant,ragas,langsmith,rerankers]"
 
 ---
 
+## Docker Usage
+
+MS\_RAG can also run inside a Docker container. This is useful when users want a
+repeatable CLI environment without installing Python dependencies directly on
+their machine.
+
+### Build The Image
+
+The default image installs the full `production` extra, including provider
+packages, vector database integrations, rerankers, evaluators, OpenTelemetry,
+document loaders, OCR/PDF tooling, and local embedding support.
+
+```bash
+docker build -t ms-rag:1.0.0 .
+```
+
+To build a smaller image with only the core dependencies:
+
+```bash
+docker build --build-arg INSTALL_EXTRAS= -t ms-rag:core .
+```
+
+For a custom feature set, pass any optional-extra group from `pyproject.toml`:
+
+```bash
+docker build --build-arg INSTALL_EXTRAS=pinecone,qdrant,ragas,rerankers,telemetry -t ms-rag:custom .
+```
+
+### Run Interactively
+
+Mount a local workspace so documents, saved sessions, FAISS indexes, Chroma data,
+generated pipelines, and other outputs stay on your machine instead of inside the
+temporary container filesystem.
+
+```bash
+docker run --rm -it \
+  --env-file .env \
+  -v "%cd%:/workspace" \
+  ms-rag:1.0.0
+```
+
+Linux/macOS:
+
+```bash
+docker run --rm -it \
+  --env-file .env \
+  -v "$PWD:/workspace" \
+  ms-rag:1.0.0
+```
+
+Windows PowerShell:
+
+```powershell
+docker run --rm -it `
+  --env-file .env `
+  -v "${PWD}:/workspace" `
+  ms-rag:1.0.0
+```
+
+### Resume A Saved Session
+
+```bash
+docker run --rm -it \
+  --env-file .env \
+  -v "$PWD:/workspace" \
+  ms-rag:1.0.0 --load session.json
+```
+
+### Docker Notes
+
+- Do not bake API keys into the image. Use `--env-file .env`, Docker secrets, or
+  your deployment platform's secret manager.
+- The image runs as a non-root `msrag` user.
+- `/workspace` is the working directory for user documents and generated output.
+- Local HuggingFace and sentence-transformer caches are stored under
+  `/workspace/.cache` when mounted.
+- Ollama local on the host may need a reachable base URL from inside Docker, for
+  example `OLLAMA_BASE_URL=http://host.docker.internal:11434` on Docker Desktop.
+
+---
+
 ## Quick Start
 
 ```bash

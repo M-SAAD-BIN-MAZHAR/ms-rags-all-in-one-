@@ -25,6 +25,8 @@
     { "source": "/recommendations.html", "destination": "/docs/recommendations.html" },
     { "source": "/production", "destination": "/docs/production.html" },
     { "source": "/production.html", "destination": "/docs/production.html" },
+    { "source": "/resources", "destination": "/docs/resources.html" },
+    { "source": "/resources.html", "destination": "/docs/resources.html" },
     { "source": "/robots.txt", "destination": "/docs/robots.txt" },
     { "source": "/sitemap.xml", "destination": "/docs/sitemap.xml" },
     { "source": "/assets/(.*)", "destination": "/docs/assets/$1" }

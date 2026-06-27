@@ -35,6 +35,8 @@ Thumbs.db
 # Secrets / credentials
 *.env
 .env
+.env.*
+!.env.example
 credentials.json
 *.encrypted
 
@@ -43,22 +45,47 @@ ms_rag_output/
 pipeline.py
 generated/
 
-# Runtime ChromaDB data
+# Runtime vector database / model cache data
 chroma_db/
 faiss_indexes/
+qdrant_storage/
+milvus_data/
+redis_data/
+postgres_data/
+opensearch_data/
+elasticsearch_data/
+qdrant_storage/**
+milvus_data/**
+redis_data/**
+postgres_data/**
+opensearch_data/**
+elasticsearch_data/**
+.cache/
+.hf_cache/
+model_cache/
+sentence-transformers/
 
 # Runtime telemetry / evaluation artifacts
 .deepeval/
 ms_rag_metrics.jsonl
+ms_rag_traces.jsonl
 docs_server*.log
+*.log
+
+# Docker local-only files
+.docker/
+docker-data/
+docker-data/**
+docker-compose.override.yml
+compose.override.yml
+
+# Local docs preview artifacts
+docs_server.err.log
+docs_server.out.log
 
 # Personal files
 Resume/
 
 # Kiro internal (keep specs visible but not workspace settings)
 .kiro/settings/
-
-docs_server.err.log
-docs_server.out.log
-
 docs

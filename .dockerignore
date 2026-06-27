@@ -1,0 +1,49 @@
+# Git and local agent metadata
+.git/
+.agents/
+.codex/
+
+# Python environments and packaging output
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+build/
+dist/
+
+# Test and coverage artifacts
+.pytest_cache/
+.hypothesis/
+htmlcov/
+.coverage
+coverage.xml
+
+# Runtime/generated data
+chroma_db/
+faiss_indexes/
+generated/
+ms_rag_output/
+pipeline.py
+ms_rag_metrics.jsonl
+ms_rag_traces.jsonl
+docs_server*.log
+
+# Secrets and local config
+.env
+*.env
+credentials.json
+*.encrypted
+
+# Personal/local files
+Resume/
+.DS_Store
+Thumbs.db
+
+# Docs are deployed separately via docs_site and are not needed in the CLI image
+docs/
+docs_site/
