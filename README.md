@@ -150,26 +150,68 @@ MS\_RAG can also run inside a Docker container. This is useful when users want a
 repeatable CLI environment without installing Python dependencies directly on
 their machine.
 
+### Which Docker Build Should I Use?
+
+| Command | What it installs | Recommended for |
+|---------|------------------|-----------------|
+| `docker build -t ms-rag:1.0.0 .` | Core MS\_RAG package and required base dependencies | Fast local testing, basic CLI walkthroughs, lightweight images |
+| `docker build --build-arg INSTALL_EXTRAS=production -t ms-rag:production .` | Core MS\_RAG plus all optional providers, vector DB clients, evaluators, rerankers, telemetry, and loader dependencies | Production-style usage and full feature testing |
+| `docker build --build-arg INSTALL_EXTRAS=pinecone,qdrant,ragas,rerankers,telemetry -t ms-rag:custom .` | Only the optional extras you name | Smaller images for teams that support a fixed stack |
+
+If you want **all dependencies**, use the production build argument:
+
+```bash
+docker build --build-arg INSTALL_EXTRAS=production -t ms-rag:production .
+```
+
+The plain `ms-rag:1.0.0` image is intentionally smaller. It is valid, but it does
+not install every optional integration.
+
 ### Build The Image
 
-The default image installs the full `production` extra, including provider
-packages, vector database integrations, rerankers, evaluators, OpenTelemetry,
-document loaders, OCR/PDF tooling, and local embedding support.
+The default image installs the core MS\_RAG package. This keeps Docker builds
+faster and avoids pulling every optional evaluator/reranker package unless the
+user asks for them.
 
 ```bash
 docker build -t ms-rag:1.0.0 .
 ```
 
-To build a smaller image with only the core dependencies:
+To build the full production image with every optional provider, vector
+database, evaluator, reranker, OpenTelemetry exporter, document loader, OCR/PDF
+tool, and local embedding dependency:
 
 ```bash
-docker build --build-arg INSTALL_EXTRAS= -t ms-rag:core .
+docker build --build-arg INSTALL_EXTRAS=production -t ms-rag:production .
 ```
 
 For a custom feature set, pass any optional-extra group from `pyproject.toml`:
 
 ```bash
 docker build --build-arg INSTALL_EXTRAS=pinecone,qdrant,ragas,rerankers,telemetry -t ms-rag:custom .
+```
+
+If Docker fails while resolving or downloading from `files.pythonhosted.org`, it
+is a Docker network/DNS issue rather than an MS\_RAG code error. Retry the build
+after Docker networking is healthy, or pass your internal package index:
+
+```bash
+docker build --build-arg PIP_INDEX_URL=https://pypi.org/simple -t ms-rag:1.0.0 .
+```
+
+### Local Equivalent
+
+If you are not using Docker and want to install every supported dependency into a
+Python virtual environment, run:
+
+```bash
+pip install -e ".[production]"
+```
+
+For development and testing tools only:
+
+```bash
+pip install -e ".[dev]"
 ```
 
 ### Run Interactively

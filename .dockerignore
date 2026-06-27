@@ -36,6 +36,8 @@ docs_server*.log
 # Secrets and local config
 .env
 *.env
+.env.*
+!.env.example
 credentials.json
 *.encrypted
 

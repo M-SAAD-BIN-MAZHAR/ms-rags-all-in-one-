@@ -2,18 +2,24 @@
 
 FROM python:3.11-slim AS runtime
 
-ARG INSTALL_EXTRAS=production
+ARG INSTALL_EXTRAS=
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_EXTRA_INDEX_URL=
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
     HF_HOME=/workspace/.cache/huggingface \
     SENTENCE_TRANSFORMERS_HOME=/workspace/.cache/sentence-transformers
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
+        ca-certificates \
         curl \
         git \
         default-jre-headless \
@@ -29,12 +35,20 @@ WORKDIR /app
 COPY pyproject.toml README.md requirements.txt ./
 COPY ms_rag ./ms_rag
 
-RUN python -m pip install --upgrade pip setuptools wheel \
-    && if [ -n "$INSTALL_EXTRAS" ]; then \
-        python -m pip install -e ".[${INSTALL_EXTRAS}]"; \
-    else \
-        python -m pip install -e .; \
-    fi
+RUN if [ -n "$PIP_EXTRA_INDEX_URL" ]; then \
+        python -m pip config set global.extra-index-url "$PIP_EXTRA_INDEX_URL"; \
+    fi \
+    && python -m pip install --upgrade --retries 10 --timeout 120 pip setuptools wheel \
+    && for attempt in 1 2 3; do \
+        if [ -n "$INSTALL_EXTRAS" ]; then \
+            python -m pip install --prefer-binary --retries 10 --timeout 120 -e ".[${INSTALL_EXTRAS}]"; \
+        else \
+            python -m pip install --prefer-binary --retries 10 --timeout 120 -e .; \
+        fi && break; \
+        if [ "$attempt" = "3" ]; then exit 1; fi; \
+        echo "pip install failed; retrying in $((attempt * 10)) seconds..."; \
+        sleep $((attempt * 10)); \
+    done
 
 RUN useradd --create-home --shell /bin/bash msrag \
     && mkdir -p /workspace \
