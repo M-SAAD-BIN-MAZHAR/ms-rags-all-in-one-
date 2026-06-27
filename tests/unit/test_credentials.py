@@ -31,8 +31,21 @@ class TestResolveModelId:
     def test_default_openai_uses_catalog_model(self) -> None:
         assert resolve_model_id("openai", "default") == DEFAULT_LLM_MODELS["openai"]
 
+    def test_default_cohere_does_not_use_removed_alias(self) -> None:
+        assert resolve_model_id("cohere", "default") == "command-a-03-2025"
+        assert DEFAULT_LLM_MODELS["cohere"] != "command-r-plus"
+
     def test_explicit_model_id_preserved(self) -> None:
         assert resolve_model_id("openai", "gpt-4o-mini") == "gpt-4o-mini"
+
+    def test_removed_cohere_alias_fails_early(self) -> None:
+        try:
+            resolve_model_id("cohere", "command-r-plus")
+        except ValueError as exc:
+            assert "removed" in str(exc)
+            assert "command-a-03-2025" in str(exc)
+        else:
+            raise AssertionError("Expected removed Cohere model to fail early")
 
     def test_azure_default_uses_deployment_from_store(self) -> None:
         store = CredentialStore()
@@ -65,7 +78,27 @@ class TestResolveOllamaConnection:
         store.set("ollama", "OLLAMA_API_KEY", "ollama-token")
         store.set("ollama", "OLLAMA_BASE_URL", "https://ollama.com/v1")
         base_url, client_kwargs = resolve_ollama_connection(store)
-        assert base_url == "https://ollama.com/v1"
+        assert base_url == "https://ollama.com"
         assert client_kwargs == {
             "headers": {"Authorization": "Bearer ollama-token"},
         }
+
+    def test_embeddings_default_to_local_even_with_api_key(self) -> None:
+        store = CredentialStore()
+        store.set("ollama", "OLLAMA_API_KEY", "ollama-token")
+        base_url, client_kwargs = resolve_ollama_connection(store, usage="embedding")
+        assert base_url == "http://localhost:11434"
+        assert client_kwargs == {
+            "headers": {"Authorization": "Bearer ollama-token"},
+        }
+
+    def test_embeddings_reject_ollama_cloud_base_url(self) -> None:
+        store = CredentialStore()
+        store.set("ollama", "OLLAMA_API_KEY", "ollama-token")
+        store.set("ollama", "OLLAMA_BASE_URL", "https://ollama.com/v1")
+        try:
+            resolve_ollama_connection(store, usage="embedding")
+        except ValueError as exc:
+            assert "chat models only" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for Ollama Cloud embeddings")

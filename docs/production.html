@@ -91,7 +91,7 @@
                 <tbody>
                   <tr><td>Retrieval quality</td><td>Evaluation dataset, RAGAS/DeepEval metrics, manual review of hard queries.</td><td>Passing unit tests does not prove answer quality.</td></tr>
                   <tr><td>Vector DB</td><td>Live smoke test with the exact database and credentials.</td><td>Connection settings, dimensions, and indexes fail differently per backend.</td></tr>
-                  <tr><td>Observability</td><td>Structured logs, OpenTelemetry traces, query success/failure events.</td><td>Users need to debug ingestion, latency, retrieval, and provider failures.</td></tr>
+                  <tr><td>Observability</td><td>Structured logs, visible runtime notices, OpenTelemetry traces, query success/failure events.</td><td>Users need to debug ingestion, latency, retrieval, fallback behavior, and provider failures.</td></tr>
                   <tr><td>Security</td><td>Secrets in environment variables or secret managers, never in generated code.</td><td>Generated apps are meant to be committed and deployed safely.</td></tr>
                   <tr><td>Operations</td><td>Backups, index naming, re-ingestion plan, model-change plan.</td><td>Embedding model changes require deliberate index lifecycle management.</td></tr>
                 </tbody>

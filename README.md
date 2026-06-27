@@ -44,11 +44,11 @@ Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generat
 | Category | What's included |
 |----------|----------------|
 | **RAG Architectures** | 15 types — Naive, Advanced, Modular, Agentic, Self-RAG, CRAG, GraphRAG, HyDE, Multi-Query, RAG-Fusion, Step-Back, Parent-Child, Adaptive, Contextual Compression |
-| **LLM Providers** | 12 providers — OpenAI, Anthropic, Cohere, HuggingFace, Google Gemini, Mistral AI, Groq, Together AI, Replicate, Azure OpenAI, AWS Bedrock, Ollama (local or cloud) |
+| **LLM Providers** | 12 providers — OpenAI, Anthropic, Cohere, HuggingFace, Google Gemini, Mistral AI, Groq, Together AI, Replicate, Azure OpenAI, AWS Bedrock, Ollama (chat: local or cloud) |
 | **Document Types** | 18 types — PDF, DOCX, CSV, Excel, PPTX, HTML, Markdown, JSON, XML, Web URLs, YouTube transcripts, images/OCR, source code, SQL, MongoDB, ePub, RTF, plain text |
 | **Document Loaders** | 30+ LangChain loaders filtered by your document types |
 | **Chunking Strategies** | 11 strategies — Recursive Character, Fixed Size, Semantic, Sentence, Paragraph, Token-based, Markdown/HTML/Code-aware, Agentic, Document-aware |
-| **Embedding Models** | 25+ models — OpenAI, Cohere, HuggingFace local/downloaded, HuggingFace hosted token-only, Google, Mistral, Ollama local or cloud |
+| **Embedding Models** | 25+ models — OpenAI, Cohere, HuggingFace local/downloaded, HuggingFace hosted token-only, Google, Mistral, Ollama local/self-hosted |
 | **Vector Databases** | 12 databases — ChromaDB, Pinecone, Qdrant, Weaviate, FAISS, Milvus, Redis (`langchain-redis`), PGVector, Elasticsearch, OpenSearch, Azure AI Search, MongoDB Atlas |
 | **Query Enhancement** | 7 techniques — Query Rewriting, Query Expansion, HyDE, Multi-Query, Step-Back, Sub-question Decomposition, RAG-Fusion |
 | **Retrieval Strategies** | 10 strategies — Dense Vector, BM25, TF-IDF, Hybrid, MMR, Ensemble, Parent-Child, Multi-Vector, Self-Query, Time-weighted |
@@ -93,7 +93,7 @@ Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generat
 
 - **Python 3.11+**
 - **Git**
-- At least one LLM provider API key (e.g. OpenAI) **or** [Ollama](https://ollama.ai) running locally or via Ollama Cloud credentials
+- At least one LLM provider API key (e.g. OpenAI) **or** [Ollama](https://ollama.ai) running locally or via Ollama Cloud credentials for chat use
 
 ---
 
@@ -372,7 +372,7 @@ Supported providers:
   9. Replicate (REPLICATE_API_TOKEN)
  10. Azure OpenAI (AZURE_OPENAI_API_KEY, ENDPOINT, API_VERSION)
  11. AWS Bedrock (AWS_ACCESS_KEY_ID, SECRET_ACCESS_KEY, REGION)
- 12. Ollama / Local or Cloud (OLLAMA_BASE_URL, OLLAMA_MODEL_NAME, optional OLLAMA_API_KEY)
+ 12. Ollama / Chat Local or Cloud (OLLAMA_BASE_URL, OLLAMA_MODEL_NAME, optional OLLAMA_API_KEY)
 ```
 
 **Step 3 — RAG Architecture**
@@ -397,6 +397,33 @@ After selecting your vector DB and entering credentials, MS\_RAG runs a connecti
 
 **Step 10–15 — Query Pipeline Configuration**
 Query enhancement, retrieval, reranking, compression, system prompt, and evaluation are configured before the live runtime starts.
+
+**Advanced retrieval guardrails**
+When you choose Parent-Child, Multi-Vector, Time-Weighted, or an Ensemble containing them, MS_RAG shows the required runtime state before continuing and asks for confirmation.
+
+| Strategy | Required state/model | Production behavior |
+|----------|----------------------|---------------------|
+| Parent-Child | Parent documents + child chunk IDs | Retrieves precise child chunks, then returns larger parent context. Runtime build fails clearly if parent state is missing. |
+| Multi-Vector | Selected embedding model + chunk documents + local FAISS representation index | Builds a separate in-memory representation index and returns original chunks. It does not write synthetic vectors into your production vector DB. |
+| Time-Weighted | `ms_rag_ingested_at` timestamp metadata | Blends semantic relevance with recency. Runtime fails clearly if timestamp metadata is missing. |
+
+For saved sessions, keep original document sources available so MS_RAG can rebuild advanced retrieval state during `--load`.
+
+**Persistent keyword stores for cloud vector DBs**
+Cloud vector DBs such as Pinecone, Qdrant, Weaviate, Milvus, and MongoDB Atlas are primarily vector stores. When you select Hybrid, BM25, TF-IDF, or an Ensemble containing keyword retrieval, MS_RAG now asks where to persist raw chunk text for keyword search:
+
+| Keyword store | Use when |
+|----------------|----------|
+| SQLite | Single-server/local production, easiest default |
+| PostgreSQL | Production app server with managed Postgres |
+| Elasticsearch | Managed full-text search / enterprise hybrid search |
+| OpenSearch | AWS/OpenSearch production search |
+| Memory only | Development/testing only |
+
+At runtime, the dense side can use Pinecone while the keyword side loads chunk text from the selected keyword store. If credentials are needed, MS_RAG prompts for them, tests the connection, and stores only sanitized env-var markers in saved session JSON.
+
+**Runtime notices and logs**
+MS_RAG renders fallback/degradation warnings as visible terminal notices and also emits structured JSON logs with fields such as `event`, `component`, `reason`, and `action`. If a feature has to degrade, the terminal tells you what happened and what to check instead of hiding it.
 
 **Step 16 — Live Query Loop**
 Once the runtime is built, you can type natural language questions. Available commands:

@@ -16,6 +16,7 @@ Requirement 12:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import warnings
 
 try:
@@ -99,11 +100,37 @@ STRATEGY_IDS: list[str] = [s.strategy_id for s in STRATEGIES]
 STRATEGY_MAP: dict[str, StrategyInfo] = {s.strategy_id: s for s in STRATEGIES}
 
 DATA_TYPES: list[str] = ["string", "integer", "float", "date"]
+ADVANCED_STATE_STRATEGIES = {"parent_child", "multi_vector", "time_weighted"}
+ADVANCED_REQUIREMENTS: dict[str, str] = {
+    "parent_child": (
+        "Needs parent documents plus child chunk IDs. MS_RAG creates this during ingestion "
+        "and rebuilds it from original sources when loading a saved session."
+    ),
+    "multi_vector": (
+        "Needs chunk documents, the selected embedding model, and a local FAISS representation "
+        "index built at runtime. This does not write synthetic vectors into your production DB."
+    ),
+    "time_weighted": (
+        "Needs ingestion timestamps on chunks. MS_RAG adds ms_rag_ingested_at metadata during ingestion."
+    ),
+}
 
 
-def _extract_corpus_texts(vector_store: object) -> list[str]:
+def _extract_corpus_texts(
+    vector_store: object,
+    corpus_texts: list[str] | None = None,
+) -> list[str]:
     """Extract indexed document texts from a vector store for keyword retrievers."""
+    if corpus_texts:
+        return [text for text in corpus_texts if isinstance(text, str) and text.strip()]
+
     texts: list[str] = []
+    cached = getattr(vector_store, "_ms_rag_keyword_corpus", None)
+    if isinstance(cached, list):
+        texts.extend(text for text in cached if isinstance(text, str) and text.strip())
+
+    if texts:
+        return texts
 
     get_fn = getattr(vector_store, "get", None)
     if callable(get_fn):
@@ -125,6 +152,16 @@ def _extract_corpus_texts(vector_store: object) -> list[str]:
             )
 
     if not texts:
+        docstore = getattr(vector_store, "docstore", None)
+        raw_docs = getattr(docstore, "_dict", None)
+        if isinstance(raw_docs, dict):
+            for doc in raw_docs.values():
+                if isinstance(doc, str) and doc.strip():
+                    texts.append(doc)
+                elif hasattr(doc, "page_content") and isinstance(doc.page_content, str) and doc.page_content.strip():
+                    texts.append(doc.page_content)
+
+    if not texts:
         collection = getattr(vector_store, "_collection", None)
         if collection is not None and hasattr(collection, "get"):
             try:
@@ -139,6 +176,28 @@ def _extract_corpus_texts(vector_store: object) -> list[str]:
                 )
 
     return texts
+
+
+def _compact_multivector_text(content: str, metadata: dict) -> str:
+    """Create a short representation text for multi-vector retrieval."""
+    source = metadata.get("source", "")
+    first_lines = " ".join(line.strip() for line in content.splitlines()[:3] if line.strip())
+    snippet = first_lines or content.strip()
+    snippet = snippet[:700]
+    return f"Source: {source}\nSummary representation: {snippet}".strip()
+
+
+def _recency_score(raw_timestamp: object) -> float:
+    """Convert an ISO timestamp into a 0..1 recency score."""
+    if not isinstance(raw_timestamp, str) or not raw_timestamp.strip():
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    age_seconds = max((datetime.now(parsed.tzinfo) - parsed).total_seconds(), 0.0)
+    one_day = 24 * 60 * 60
+    return 1.0 / (1.0 + (age_seconds / one_day))
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +222,7 @@ class RetrievalStrategyModule:
         """
         console = Console()
         console.print("\n[bold cyan]Step 11 — Retrieval Strategy[/bold cyan]\n")
+        self._display_strategy_guidance(console)
 
         # Step 1: strategy selection
         choices = [
@@ -224,6 +284,8 @@ class RetrievalStrategyModule:
             ensemble_sub_retrievers=ensemble_sub_retrievers,
         )
 
+        self._confirm_advanced_requirements(config, console)
+
         console.print(
             f"[green]  ✓ Retrieval: [bold]{STRATEGY_MAP[strategy_id].display_name}[/bold] "
             f"| top_k={top_k}[/green]"
@@ -235,6 +297,9 @@ class RetrievalStrategyModule:
         config: RetrievalConfig,
         vector_store: object,
         llm: object | None = None,
+        corpus_texts: list[str] | None = None,
+        embeddings: object | None = None,
+        strict_advanced: bool = False,
     ) -> object:
         """Return the appropriate LangChain BaseRetriever for *config*.
 
@@ -253,35 +318,28 @@ class RetrievalStrategyModule:
         strategy = config.strategy
 
         if strategy == "dense_vector":
-            return vector_store.as_retriever(  # type: ignore[union-attr]
-                search_type="similarity",
-                search_kwargs={"k": config.top_k},
-            )
+            return self._dense_fallback(vector_store, config.top_k)
 
         if strategy == "keyword_bm25":
             from langchain_community.retrievers import BM25Retriever  # noqa: PLC0415
-            texts = _extract_corpus_texts(vector_store)
+            texts = _extract_corpus_texts(vector_store, corpus_texts)
             if not texts:
                 warnings.warn(
                     "BM25 retrieval selected but no corpus texts were available; falling back to dense vector retrieval.",
                     stacklevel=2,
                 )
-                return vector_store.as_retriever(  # type: ignore[union-attr]
-                    search_kwargs={"k": config.top_k},
-                )
+                return self._dense_fallback(vector_store, config.top_k)
             return BM25Retriever.from_texts(texts, k=config.top_k)
 
         if strategy == "tfidf":
             from langchain_community.retrievers import TFIDFRetriever  # noqa: PLC0415
-            texts = _extract_corpus_texts(vector_store)
+            texts = _extract_corpus_texts(vector_store, corpus_texts)
             if not texts:
                 warnings.warn(
                     "TF-IDF retrieval selected but no corpus texts were available; falling back to dense vector retrieval.",
                     stacklevel=2,
                 )
-                return vector_store.as_retriever(  # type: ignore[union-attr]
-                    search_kwargs={"k": config.top_k},
-                )
+                return self._dense_fallback(vector_store, config.top_k)
             return TFIDFRetriever.from_texts(texts, k=config.top_k)
 
         if strategy == "hybrid":
@@ -291,7 +349,7 @@ class RetrievalStrategyModule:
             dense = vector_store.as_retriever(  # type: ignore[union-attr]
                 search_kwargs={"k": config.top_k}
             )
-            texts = _extract_corpus_texts(vector_store)
+            texts = _extract_corpus_texts(vector_store, corpus_texts)
             if not texts:
                 warnings.warn(
                     "Hybrid retrieval selected but no keyword corpus texts were available; using dense vector retrieval only.",
@@ -318,30 +376,23 @@ class RetrievalStrategyModule:
             sub_retrievers = []
             for sub_id in sub_ids:
                 sub_cfg = RetrievalConfig(strategy=sub_id, top_k=config.top_k)
-                sub_retrievers.append(self.get_retriever(sub_cfg, vector_store, llm))
+                sub_retrievers.append(
+                    self.get_retriever(
+                        sub_cfg,
+                        vector_store,
+                        llm,
+                        corpus_texts=corpus_texts,
+                        embeddings=embeddings,
+                        strict_advanced=strict_advanced,
+                    )
+                )
             return EnsembleRetriever(retrievers=sub_retrievers, weights=weights)
 
         if strategy == "parent_child":
-            from langchain_classic.retrievers import ParentDocumentRetriever  # noqa: PLC0415
-            from langchain_text_splitters import RecursiveCharacterTextSplitter  # noqa: PLC0415
-            from langchain_classic.storage import InMemoryStore  # noqa: PLC0415
-            return ParentDocumentRetriever(
-                vectorstore=vector_store,  # type: ignore[arg-type]
-                docstore=InMemoryStore(),
-                child_splitter=RecursiveCharacterTextSplitter(chunk_size=400),
-                parent_splitter=RecursiveCharacterTextSplitter(chunk_size=2000),
-                search_kwargs={"k": config.top_k},
-            )
+            return self._parent_child_retriever(vector_store, config.top_k, strict=strict_advanced)
 
         if strategy == "multi_vector":
-            from langchain_classic.retrievers.multi_vector import MultiVectorRetriever  # noqa: PLC0415
-            from langchain_classic.storage import InMemoryStore  # noqa: PLC0415
-            return MultiVectorRetriever(
-                vectorstore=vector_store,  # type: ignore[arg-type]
-                docstore=InMemoryStore(),
-                id_key="doc_id",
-                search_kwargs={"k": config.top_k},
-            )
+            return self._multi_vector_retriever(vector_store, config.top_k, embeddings, strict=strict_advanced)
 
         if strategy == "self_query":
             if llm is None:
@@ -349,9 +400,7 @@ class RetrievalStrategyModule:
                     "Self-Query retrieval selected but no LLM is available; falling back to dense vector retrieval.",
                     stacklevel=2,
                 )
-                return vector_store.as_retriever(  # type: ignore[union-attr]
-                    search_kwargs={"k": config.top_k}
-                )
+                return self._dense_fallback(vector_store, config.top_k)
             from langchain_classic.retrievers.self_query.base import SelfQueryRetriever  # noqa: PLC0415
             from langchain_classic.chains.query_constructor.base import AttributeInfo  # noqa: PLC0415
             attr_infos = [
@@ -371,18 +420,218 @@ class RetrievalStrategyModule:
             )
 
         if strategy == "time_weighted":
-            from langchain_classic.retrievers.time_weighted_retriever import (  # noqa: PLC0415
-                TimeWeightedVectorStoreRetriever,
-            )
-            return TimeWeightedVectorStoreRetriever(
-                vectorstore=vector_store,  # type: ignore[arg-type]
-                decay_rate=0.01,
-                k=config.top_k,
-            )
+            return self._time_weighted_retriever(vector_store, config.top_k, strict=strict_advanced)
 
         raise ValueError(
             f"Unsupported retrieval strategy: {strategy!r}. "
             f"Supported: {STRATEGY_IDS}"
+        )
+
+    @staticmethod
+    def _dense_fallback(vector_store: object, top_k: int) -> object:
+        """Return a standard dense retriever as the universal safe fallback."""
+        return vector_store.as_retriever(  # type: ignore[union-attr]
+            search_type="similarity",
+            search_kwargs={"k": top_k},
+        )
+
+    def _parent_child_retriever(self, vector_store: object, top_k: int, *, strict: bool = False) -> object:
+        """Retrieve child chunks by vector search, then return parent documents."""
+        parent_documents = getattr(vector_store, "_ms_rag_parent_documents", None)
+        if not isinstance(parent_documents, dict) or not parent_documents:
+            message = (
+                "Parent-Child retrieval selected but parent document state is unavailable. "
+                "Re-ingest documents or load the session with original document sources available."
+            )
+            if strict:
+                raise RuntimeError(message)
+            warnings.warn(
+                f"{message} Falling back to dense vector retrieval.",
+                stacklevel=2,
+            )
+            return self._dense_fallback(vector_store, top_k)
+
+        dense = vector_store.as_retriever(search_kwargs={"k": top_k})  # type: ignore[union-attr]
+
+        def retrieve(query: str) -> list:
+            child_docs = dense.invoke(query)
+            results: list = []
+            seen_parent_ids: set[str] = set()
+            for child in child_docs:
+                parent_id = getattr(child, "metadata", {}).get("ms_rag_parent_id")
+                parent_doc = parent_documents.get(parent_id)
+                if parent_id and parent_doc is not None and parent_id not in seen_parent_ids:
+                    results.append(parent_doc)
+                    seen_parent_ids.add(parent_id)
+                elif parent_id not in seen_parent_ids:
+                    results.append(child)
+                    if parent_id:
+                        seen_parent_ids.add(parent_id)
+            return results[:top_k]
+
+        from langchain_core.runnables import RunnableLambda  # noqa: PLC0415
+        return RunnableLambda(retrieve)
+
+    def _multi_vector_retriever(
+        self,
+        vector_store: object,
+        top_k: int,
+        embeddings: object | None,
+        *,
+        strict: bool = False,
+    ) -> object:
+        """Search synthetic summary/title vectors and return original chunks."""
+        chunk_documents = getattr(vector_store, "_ms_rag_chunk_documents", None)
+        if not isinstance(chunk_documents, list) or not chunk_documents:
+            message = (
+                "Multi-Vector retrieval selected but source chunk state is unavailable. "
+                "Re-ingest documents or load the session with original document sources available."
+            )
+            if strict:
+                raise RuntimeError(message)
+            warnings.warn(
+                f"{message} Falling back to dense vector retrieval.",
+                stacklevel=2,
+            )
+            return self._dense_fallback(vector_store, top_k)
+        if embeddings is None:
+            message = (
+                "Multi-Vector retrieval selected but embeddings are unavailable for the representation index."
+            )
+            if strict:
+                raise RuntimeError(message)
+            warnings.warn(
+                f"{message} Falling back to dense vector retrieval.",
+                stacklevel=2,
+            )
+            return self._dense_fallback(vector_store, top_k)
+
+        try:
+            from langchain_core.documents import Document  # noqa: PLC0415
+            from langchain_community.vectorstores import FAISS  # noqa: PLC0415
+        except ImportError as exc:
+            message = (
+                "Multi-Vector retrieval needs langchain-community and FAISS for its local representation index."
+            )
+            if strict:
+                raise RuntimeError(f"{message} Missing dependency: {exc}") from exc
+            warnings.warn(
+                f"{message} Falling back to dense vector retrieval: {exc}",
+                stacklevel=2,
+            )
+            return self._dense_fallback(vector_store, top_k)
+
+        source_documents: dict[str, object] = {}
+        representation_docs: list = []
+        for doc in chunk_documents:
+            content = getattr(doc, "page_content", "")
+            if not isinstance(content, str) or not content.strip():
+                continue
+            metadata = dict(getattr(doc, "metadata", {}) or {})
+            source_id = metadata.get("ms_rag_multi_vector_source_id") or metadata.get("ms_rag_child_id")
+            if not source_id:
+                continue
+            source_documents[source_id] = doc
+            compact_text = _compact_multivector_text(content, metadata)
+            representation_docs.append(
+                Document(
+                    page_content=compact_text,
+                    metadata={"ms_rag_multi_vector_source_id": source_id},
+                )
+            )
+
+        if not representation_docs:
+            message = (
+                "Multi-Vector retrieval could not build representation documents from the ingested chunks."
+            )
+            if strict:
+                raise RuntimeError(message)
+            warnings.warn(
+                f"{message} Falling back to dense vector retrieval.",
+                stacklevel=2,
+            )
+            return self._dense_fallback(vector_store, top_k)
+
+        representation_store = FAISS.from_documents(representation_docs, embeddings)
+        representation_retriever = representation_store.as_retriever(search_kwargs={"k": max(top_k * 2, top_k)})
+
+        def retrieve(query: str) -> list:
+            hits = representation_retriever.invoke(query)
+            results: list = []
+            seen_source_ids: set[str] = set()
+            for hit in hits:
+                source_id = getattr(hit, "metadata", {}).get("ms_rag_multi_vector_source_id")
+                source_doc = source_documents.get(source_id)
+                if source_id and source_doc is not None and source_id not in seen_source_ids:
+                    results.append(source_doc)
+                    seen_source_ids.add(source_id)
+                if len(results) >= top_k:
+                    break
+            return results
+
+        from langchain_core.runnables import RunnableLambda  # noqa: PLC0415
+        return RunnableLambda(retrieve)
+
+    def _time_weighted_retriever(self, vector_store: object, top_k: int, *, strict: bool = False) -> object:
+        """Blend dense rank with ingestion recency metadata."""
+        dense = vector_store.as_retriever(search_kwargs={"k": max(top_k * 4, top_k)})  # type: ignore[union-attr]
+
+        def retrieve(query: str) -> list:
+            docs = dense.invoke(query)
+            if not docs:
+                return []
+            if strict and not any(getattr(doc, "metadata", {}).get("ms_rag_ingested_at") for doc in docs):
+                raise RuntimeError(
+                    "Time-Weighted retrieval selected but retrieved documents do not contain "
+                    "ms_rag_ingested_at metadata. Re-ingest documents before using this strategy."
+                )
+            scored = []
+            for rank, doc in enumerate(docs):
+                dense_score = 1.0 / (rank + 1)
+                recency_score = _recency_score(getattr(doc, "metadata", {}).get("ms_rag_ingested_at"))
+                scored.append((0.4 * dense_score + 0.6 * recency_score, rank, doc))
+            scored.sort(key=lambda item: (-item[0], item[1]))
+            return [doc for _, _, doc in scored[:top_k]]
+
+        from langchain_core.runnables import RunnableLambda  # noqa: PLC0415
+        return RunnableLambda(retrieve)
+
+    def _display_strategy_guidance(self, console: object) -> None:
+        """Show model/state requirements before strategy selection."""
+        try:
+            from rich.table import Table  # noqa: PLC0415
+        except ImportError:
+            return
+        table = Table(title="Retrieval Model and State Requirements", border_style="cyan")
+        table.add_column("Strategy", style="bold white")
+        table.add_column("Needs", style="green")
+        table.add_column("Best use", style="cyan")
+        table.add_row("Dense / MMR", "Selected embedding model + vector DB", "General semantic retrieval baseline")
+        table.add_row("BM25 / TF-IDF / Hybrid", "Chunk text corpus", "Exact terms, IDs, names, and mixed semantic/keyword search")
+        table.add_row("Parent-Child", "Parent docs + child IDs", "Long PDFs, reports, legal/policy docs where larger context matters")
+        table.add_row("Multi-Vector", "Selected embedding model + local FAISS representation index", "When summaries/titles retrieve better than raw chunks")
+        table.add_row("Time-Weighted", "Chunk timestamps", "Freshness-sensitive docs, changelogs, support tickets, recent policies")
+        table.add_row("Self-Query", "Generation LLM + metadata fields", "Questions that need metadata filters such as date, author, source, department")
+        console.print(table)  # type: ignore[union-attr]
+
+    def _confirm_advanced_requirements(self, config: RetrievalConfig, console: object) -> None:
+        """Explain and confirm advanced retrieval requirements."""
+        selected = {config.strategy}
+        if config.strategy == "ensemble":
+            selected.update(config.ensemble_sub_retrievers or [])
+        advanced_selected = sorted(selected & ADVANCED_STATE_STRATEGIES)
+        if not advanced_selected:
+            return
+        from ms_rag.ui.prompts import prompt_required_confirm  # noqa: PLC0415
+        console.print("\n[bold yellow]Advanced retrieval requirements[/bold yellow]")  # type: ignore[union-attr]
+        for strategy_id in advanced_selected:
+            console.print(  # type: ignore[union-attr]
+                f"  [cyan]{STRATEGY_MAP[strategy_id].display_name}[/cyan]: "
+                f"{ADVANCED_REQUIREMENTS[strategy_id]}"
+            )
+        prompt_required_confirm(
+            "Use these advanced retrieval requirements for this pipeline?",
+            console=console,
         )
 
     # ------------------------------------------------------------------

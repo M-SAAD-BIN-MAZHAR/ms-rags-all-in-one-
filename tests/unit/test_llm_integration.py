@@ -107,6 +107,34 @@ class TestGetLLMFactory:
             client_kwargs={"headers": {"Authorization": "Bearer ollama-token"}},
         )
 
+    def test_huggingface_uses_chat_wrapper_with_conversational_task(self) -> None:
+        store = CredentialStore()
+        store.set("huggingface", "HUGGINGFACEHUB_API_TOKEN", "hf-test-token")
+
+        endpoint_instance = MagicMock(name="hf_endpoint")
+        chat_instance = MagicMock(name="chat_hf")
+
+        with (
+            patch("langchain_huggingface.HuggingFaceEndpoint", return_value=endpoint_instance) as mock_endpoint,
+            patch("langchain_huggingface.ChatHuggingFace", return_value=chat_instance) as mock_chat,
+        ):
+            result = get_llm(
+                "huggingface",
+                "meta-llama/Meta-Llama-3-8B-Instruct",
+                credential_store=store,
+            )
+
+        assert result is chat_instance
+        mock_endpoint.assert_called_once_with(
+            repo_id="meta-llama/Meta-Llama-3-8B-Instruct",
+            huggingfacehub_api_token="hf-test-token",
+            task="conversational",
+        )
+        mock_chat.assert_called_once_with(
+            llm=endpoint_instance,
+            model_id="meta-llama/Meta-Llama-3-8B-Instruct",
+        )
+
 
 # ---------------------------------------------------------------------------
 # build_rag_chain (Req 17.2)

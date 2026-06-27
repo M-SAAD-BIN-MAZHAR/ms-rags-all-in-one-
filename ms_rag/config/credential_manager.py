@@ -77,7 +77,7 @@ PROVIDER_DISPLAY_NAMES: dict[str, str] = {
     "replicate": "Replicate",
     "azure_openai": "Azure OpenAI",
     "aws_bedrock": "AWS Bedrock",
-    "ollama": "Ollama (Local or Cloud)",
+    "ollama": "Ollama (Chat: Local or Cloud)",
 }
 
 # Fields that should be masked during display (passwords / secret keys)
@@ -170,6 +170,12 @@ class CredentialManager:
         collected: dict[str, str] = {}
 
         console.print(f"\n[bold cyan]  {display_name}[/bold cyan]")
+        if provider_id == "ollama":
+            console.print(
+                "[dim]  Ollama Cloud currently supports chat models only. "
+                "Embedding models must use a local or self-hosted Ollama base URL. "
+                "If you paste https://ollama.com/v1, MS_RAG will normalize it for chat use.[/dim]"
+            )
 
         for field in required_fields:
             value = self._prompt_field(

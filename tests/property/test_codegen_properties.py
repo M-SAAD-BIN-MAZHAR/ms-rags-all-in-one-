@@ -308,8 +308,10 @@ def test_generated_huggingface_llm_does_not_fall_back_to_openai() -> None:
     code = result.python_code
 
     ast.parse(code)
-    assert "from langchain_huggingface import HuggingFaceEndpoint" in code
-    assert "HuggingFaceEndpoint(repo_id='meta-llama/Meta-Llama-3-8B-Instruct'" in code
+    assert "from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint" in code
+    assert "ChatHuggingFace(llm=HuggingFaceEndpoint(" in code
+    assert "repo_id='meta-llama/Meta-Llama-3-8B-Instruct'" in code
+    assert "task='conversational'" in code
     assert "HUGGINGFACEHUB_API_TOKEN" in code
     assert "ChatOpenAI(model='gpt-4o'" not in code
     assert "OPENAI_API_KEY" not in code
@@ -373,7 +375,7 @@ def test_generated_llm_providers_match_runtime_support(
 
 
 def test_generated_ollama_pipeline_supports_cloud_headers() -> None:
-    """Generated Ollama pipelines must support bearer-token cloud auth and local fallback."""
+    """Generated Ollama pipelines must support cloud chat and local-only embeddings."""
     config = _make_config(providers=["ollama"])
     config.embedding_model = EmbeddingModelConfig(
         provider="ollama",
@@ -386,9 +388,102 @@ def test_generated_ollama_pipeline_supports_cloud_headers() -> None:
 
     ast.parse(code)
     assert 'OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")' in code
-    assert 'return OLLAMA_BASE_URL or ("https://ollama.com" if OLLAMA_API_KEY else "http://localhost:11434")' in code
-    assert 'return {"headers": {"Authorization": f"Bearer {OLLAMA_API_KEY}"}} if OLLAMA_API_KEY else {}' in code
-    assert 'client_kwargs=_ollama_client_kwargs()' in code
+    assert "def _normalize_ollama_base_url(base_url: str) -> str:" in code
+    assert 'if normalized.endswith("/v1"):' in code
+    assert "Ollama Cloud currently supports chat models only." in code
+    assert 'base_url=_ollama_base_url(usage="embedding")' in code
+    assert "base_url=_ollama_base_url(usage='chat')" in code
+    assert 'client_kwargs=_ollama_client_kwargs(usage="embedding")' in code
+
+
+def test_generated_hybrid_retriever_can_read_faiss_docstore_texts() -> None:
+    config = _make_config()
+    config.retrieval = RetrievalConfig(strategy="hybrid", top_k=5, alpha=0.5)
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert 'docstore = getattr(vector_store, "docstore", None)' in code
+    assert 'raw_docs = getattr(docstore, "_dict", None)' in code
+    assert 'elif hasattr(doc, "page_content")' in code
+
+
+def test_generated_vector_store_ingest_caches_keyword_corpus_texts() -> None:
+    config = _make_config()
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert '"_ms_rag_keyword_corpus"' in code
+    assert '[chunk.page_content for chunk in chunks if getattr(chunk, "page_content", "").strip()]' in code
+
+
+def test_generated_tfidf_retriever_falls_back_to_dense_when_corpus_is_missing() -> None:
+    config = _make_config()
+    config.retrieval = RetrievalConfig(strategy="tfidf", top_k=7)
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert "from langchain_community.retrievers import TFIDFRetriever" in code
+    assert "if not texts:" in code
+    assert "return _dense_retriever(vector_store, top_k=7)" in code
+
+
+def test_generated_ensemble_retriever_supports_keyword_and_dense_sub_retrievers() -> None:
+    config = _make_config()
+    config.retrieval = RetrievalConfig(
+        strategy="ensemble",
+        top_k=5,
+        ensemble_sub_retrievers=["dense_vector", "keyword_bm25", "tfidf", "mmr"],
+        ensemble_weights=[0.25, 0.25, 0.25, 0.25],
+    )
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert "def _build_single_retriever(vector_store, strategy_id, *, top_k, alpha, lam):" in code
+    assert 'if strategy_id == "keyword_bm25":' in code
+    assert 'if strategy_id == "tfidf":' in code
+    assert 'if strategy_id == "mmr":' in code
+    assert "return EnsembleRetriever(retrievers=sub_retrievers, weights=weights)" in code
+
+
+@pytest.mark.parametrize(
+    ("strategy", "expected"),
+    [
+        ("parent_child", "_parent_child_retriever(vector_store, top_k=5)"),
+        ("multi_vector", "_multi_vector_retriever(vector_store, top_k=5)"),
+        ("time_weighted", "_time_weighted_retriever(vector_store, top_k=5)"),
+    ],
+)
+def test_generated_advanced_retrievers_use_specialized_runtime(strategy: str, expected: str) -> None:
+    config = _make_config()
+    config.retrieval = RetrievalConfig(strategy=strategy, top_k=5)
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert expected in code
+    assert "ADVANCED_PARENT_DOCUMENTS" in code
+    assert "ADVANCED_CHUNK_DOCUMENTS" in code
+
+
+def test_generated_self_query_documents_dense_extension_point() -> None:
+    config = _make_config()
+    config.retrieval = RetrievalConfig(strategy="self_query", top_k=5)
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert "Self-Query needs a live LLM object" in code
+    assert 'search_type="similarity"' in code
 
 
 @pytest.mark.parametrize(

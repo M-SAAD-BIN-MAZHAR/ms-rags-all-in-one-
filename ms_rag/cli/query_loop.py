@@ -28,6 +28,7 @@ except ImportError:
 
 from ms_rag.models import SessionState
 from ms_rag.ui.prompts import get_console, print_error, print_hint, print_success
+from ms_rag.utils.error_formatting import format_provider_error
 from ms_rag.utils.logging import get_logger, log_error, log_event
 from ms_rag.utils.telemetry import TelemetryReporter
 
@@ -148,14 +149,14 @@ class QueryLoop:
 
                 console.print(
                     Panel(
-                        Text(answer, style="white"),
+                        Text(answer, style="white", overflow="fold", no_wrap=False),
                         title="[bold cyan]Answer[/bold cyan]",
                         border_style="cyan",
                         padding=(1, 2),
                     )
                 )
             except Exception as exc:  # noqa: BLE001
-                print_error(console, f"Query error: {type(exc).__name__}: {exc}")
+                print_error(console, f"Query error: {format_provider_error(exc)}")
                 log_error(logger, "query.failed", "Query processing failed", query_length=len(query))
                 telemetry.record_error(
                     "query.failed",
@@ -250,6 +251,12 @@ class QueryLoop:
             "Vector DB",
             f"{cfg.vector_db.db_type} / {cfg.vector_db.collection_name}"
             if cfg.vector_db
+            else "—",
+        )
+        table.add_row(
+            "Keyword Store",
+            f"{cfg.keyword_store.store_type} / {cfg.keyword_store.collection_name}"
+            if cfg.keyword_store
             else "—",
         )
         table.add_row(

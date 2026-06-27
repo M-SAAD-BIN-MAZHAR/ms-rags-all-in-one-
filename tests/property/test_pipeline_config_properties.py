@@ -22,6 +22,7 @@ from ms_rag.models import (
     EmbeddingModelConfig,
     EvaluationConfig,
     IngestionResult,
+    KeywordStoreConfig,
     LLMModelConfig,
     MetadataField,
     PipelineConfig,
@@ -315,6 +316,14 @@ def test_pipeline_config_round_trip(config: PipelineConfig) -> None:
         assert restored.retrieval.strategy == config.retrieval.strategy
         assert restored.retrieval.top_k == config.retrieval.top_k
 
+    # Keyword store
+    if config.keyword_store is None:
+        assert restored.keyword_store is None
+    else:
+        assert restored.keyword_store is not None
+        assert restored.keyword_store.store_type == config.keyword_store.store_type
+        assert restored.keyword_store.collection_name == config.keyword_store.collection_name
+
     # Reranking
     if config.reranking is None:
         assert restored.reranking is None
@@ -372,3 +381,22 @@ def test_empty_pipeline_config_round_trip() -> None:
     assert restored.configured_providers == []
     assert restored.rag_type is None
     assert restored.system_prompt == ""
+
+
+def test_keyword_store_secrets_are_sanitized_in_session_json() -> None:
+    config = PipelineConfig(
+        keyword_store=KeywordStoreConfig(
+            store_type="postgres",
+            connection_params={
+                "KEYWORD_POSTGRES_CONNECTION_STRING": "postgresql://user:secret@example/db",
+            },
+            collection_name="chunks",
+        )
+    )
+
+    data = json.loads(config.to_json())
+
+    assert (
+        data["keyword_store"]["connection_params"]["KEYWORD_POSTGRES_CONNECTION_STRING"]
+        == "KEYWORD_POSTGRES_CONNECTION_STRING"
+    )

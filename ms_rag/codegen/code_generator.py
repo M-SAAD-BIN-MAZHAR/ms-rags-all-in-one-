@@ -223,6 +223,9 @@ class CodeGenerator:
                 reqs.add("rank-bm25>=0.2.2")
             if config.retrieval.strategy in ("tfidf", "ensemble"):
                 reqs.add("scikit-learn>=1.4.0")
+            retrieval_ids = [config.retrieval.strategy] + (config.retrieval.ensemble_sub_retrievers or [])
+            if "multi_vector" in retrieval_ids:
+                reqs.add("faiss-cpu>=1.8.0")
 
         # Context compression (LangChain 1.x retriever compressors live in langchain-classic)
         if config.compression_enabled and config.compression:
@@ -283,10 +286,14 @@ RAG Type: {rag_type}
 
 import os
 import argparse
+import warnings
 from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+
+ADVANCED_PARENT_DOCUMENTS = {{}}
+ADVANCED_CHUNK_DOCUMENTS = []
 '''
 
     def _render_imports(self, config: PipelineConfig, uses_langgraph: bool) -> str:
@@ -359,7 +366,7 @@ load_dotenv()
             elif pid == "cohere":
                 lines.append("from langchain_cohere import ChatCohere")
             elif pid == "huggingface":
-                lines.append("from langchain_huggingface import HuggingFaceEndpoint")
+                lines.append("from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint")
             elif pid == "google_gemini":
                 lines.append("from langchain_google_genai import ChatGoogleGenerativeAI")
             elif pid == "mistral":
@@ -407,11 +414,31 @@ load_dotenv()
         if uses_ollama:
             lines.extend([
                 "",
-                "def _ollama_base_url():",
-                '    return OLLAMA_BASE_URL or ("https://ollama.com" if OLLAMA_API_KEY else "http://localhost:11434")',
+                "def _normalize_ollama_base_url(base_url: str) -> str:",
+                '    normalized = (base_url or "").strip().rstrip("/")',
+                '    if normalized.endswith("/v1"):',
+                '        normalized = normalized[:-3].rstrip("/")',
+                "    return normalized",
                 "",
-                "def _ollama_client_kwargs():",
-                '    return {"headers": {"Authorization": f"Bearer {OLLAMA_API_KEY}"}} if OLLAMA_API_KEY else {}',
+                "def _is_ollama_cloud_url(base_url: str) -> bool:",
+                '    return base_url.startswith("https://ollama.com") or base_url.startswith("http://ollama.com")',
+                "",
+                "def _ollama_base_url(*, usage: str = 'chat'):",
+                '    if OLLAMA_BASE_URL:',
+                '        base_url = _normalize_ollama_base_url(OLLAMA_BASE_URL)',
+                "    elif usage == 'chat' and OLLAMA_API_KEY:",
+                '        base_url = "https://ollama.com"',
+                "    else:",
+                '        base_url = "http://localhost:11434"',
+                "    if usage == 'embedding' and _is_ollama_cloud_url(base_url):",
+                '        raise ValueError("Ollama Cloud currently supports chat models only. Use a local/self-hosted Ollama base URL for embedding models.")',
+                "    return base_url",
+                "",
+                "def _ollama_client_kwargs(*, usage: str = 'chat'):",
+                '    base_url = _ollama_base_url(usage=usage)',
+                '    if OLLAMA_API_KEY and (usage == "chat" or not _is_ollama_cloud_url(base_url)):',
+                '        return {"headers": {"Authorization": f"Bearer {OLLAMA_API_KEY}"}}',
+                "    return {}",
             ])
         if config.vector_db and config.vector_db.connection_params:
             lines.append("")
@@ -455,13 +482,41 @@ def load_documents(sources: list[str]) -> list:
 def create_chunks(documents: list) -> list:
     """Split documents into chunks using {strategy} strategy."""
     from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from datetime import UTC, datetime
     import json
+    global ADVANCED_PARENT_DOCUMENTS, ADVANCED_CHUNK_DOCUMENTS
+    ADVANCED_PARENT_DOCUMENTS = {{}}
+    prepared_documents = []
+    ingested_at = datetime.now(UTC).isoformat()
+    for index, doc in enumerate(documents):
+        metadata = dict(getattr(doc, "metadata", {{}}) or {{}})
+        source = metadata.get("source", f"document_{{index}}")
+        parent_id = metadata.get("ms_rag_parent_id") or f"{{source}}::parent::{{index}}"
+        metadata.update({{
+            "source": source,
+            "ms_rag_parent_id": parent_id,
+            "ms_rag_ingested_at": metadata.get("ms_rag_ingested_at", ingested_at),
+        }})
+        doc.metadata = metadata
+        ADVANCED_PARENT_DOCUMENTS[parent_id] = doc
+        prepared_documents.append(doc)
     splitter = RecursiveCharacterTextSplitter(
         chunk_size={size},
         chunk_overlap={overlap},
     )
-    chunks = splitter.split_documents(documents)
-    for chunk in chunks:
+    chunks = splitter.split_documents(prepared_documents)
+    ADVANCED_CHUNK_DOCUMENTS = []
+    for index, chunk in enumerate(chunks):
+        metadata = dict(getattr(chunk, "metadata", {{}}) or {{}})
+        parent_id = metadata.get("ms_rag_parent_id") or metadata.get("source") or f"unknown_parent::{{index}}"
+        child_id = metadata.get("ms_rag_child_id") or f"{{parent_id}}::child::{{index}}"
+        metadata.update({{
+            "ms_rag_parent_id": parent_id,
+            "ms_rag_child_id": child_id,
+            "ms_rag_multi_vector_source_id": metadata.get("ms_rag_multi_vector_source_id", child_id),
+            "ms_rag_ingested_at": metadata.get("ms_rag_ingested_at", ingested_at),
+        }})
+        chunk.metadata = metadata
         clean = {{}}
         for key, value in chunk.metadata.items():
             if value is None:
@@ -473,6 +528,7 @@ def create_chunks(documents: list) -> list:
             else:
                 clean[key] = json.dumps(value, default=str)
         chunk.metadata = clean
+        ADVANCED_CHUNK_DOCUMENTS.append(chunk)
     return chunks'''
 
     def _render_vector_store_function(self, config: PipelineConfig) -> str:
@@ -493,7 +549,7 @@ def create_chunks(documents: list) -> list:
             ),
             "local": f'HuggingFaceEmbeddings(model_name="{emb_model}")',
             "google_gemini": f'GoogleGenerativeAIEmbeddings(model="{emb_model}")',
-            "ollama": f'OllamaEmbeddings(model="{emb_model}", base_url=_ollama_base_url(), client_kwargs=_ollama_client_kwargs())',
+            "ollama": f'OllamaEmbeddings(model="{emb_model}", base_url=_ollama_base_url(usage="embedding"), client_kwargs=_ollama_client_kwargs(usage="embedding"))',
             "mistral": f'MistralAIEmbeddings(model="{emb_model}")',
         }.get(emb_provider, f'OpenAIEmbeddings(model="{emb_model}")')
 
@@ -508,6 +564,14 @@ def init_vector_store(chunks: list = None):
 
     if chunks:
         vector_store = FAISS.from_documents(chunks, embeddings)
+        setattr(
+            vector_store,
+            "_ms_rag_keyword_corpus",
+            [chunk.page_content for chunk in chunks if getattr(chunk, "page_content", "").strip()],
+        )
+        setattr(vector_store, "_ms_rag_parent_documents", ADVANCED_PARENT_DOCUMENTS)
+        setattr(vector_store, "_ms_rag_chunk_documents", ADVANCED_CHUNK_DOCUMENTS)
+        setattr(vector_store, "_ms_rag_embeddings", embeddings)
         index_path.mkdir(parents=True, exist_ok=True)
         vector_store.save_local(str(index_path))
         return vector_store
@@ -518,11 +582,13 @@ def init_vector_store(chunks: list = None):
             "Run with --ingest first or set FAISS_INDEX_PATH to an existing index."
         )
 
-    return FAISS.load_local(
+    vector_store = FAISS.load_local(
         str(index_path),
         embeddings,
         allow_dangerous_deserialization=True,
-    )'''
+    )
+    setattr(vector_store, "_ms_rag_embeddings", embeddings)
+    return vector_store'''
 
         if db_type == "qdrant":
             return f'''# ─── Embedding + Vector Store ─────────────────────────────────
@@ -535,20 +601,31 @@ def init_vector_store(chunks: list = None):
     api_key = os.getenv("QDRANT_API_KEY") or None
 
     if chunks:
-        return QdrantVectorStore.from_documents(
+        vector_store = QdrantVectorStore.from_documents(
             chunks,
             embeddings,
             url=url,
             api_key=api_key,
             collection_name="{collection}",
         )
+        setattr(
+            vector_store,
+            "_ms_rag_keyword_corpus",
+            [chunk.page_content for chunk in chunks if getattr(chunk, "page_content", "").strip()],
+        )
+        setattr(vector_store, "_ms_rag_parent_documents", ADVANCED_PARENT_DOCUMENTS)
+        setattr(vector_store, "_ms_rag_chunk_documents", ADVANCED_CHUNK_DOCUMENTS)
+        setattr(vector_store, "_ms_rag_embeddings", embeddings)
+        return vector_store
 
     client = QdrantClient(url=url, api_key=api_key)
-    return QdrantVectorStore(
+    vector_store = QdrantVectorStore(
         client=client,
         collection_name="{collection}",
         embedding=embeddings,
-    )'''
+    )
+    setattr(vector_store, "_ms_rag_embeddings", embeddings)
+    return vector_store'''
 
         if db_type == "weaviate":
             return f'''# ─── Embedding + Vector Store ─────────────────────────────────
@@ -576,6 +653,14 @@ def init_vector_store(chunks: list = None):
     )
     if chunks:
         vector_store.add_documents(chunks)
+        setattr(
+            vector_store,
+            "_ms_rag_keyword_corpus",
+            [chunk.page_content for chunk in chunks if getattr(chunk, "page_content", "").strip()],
+        )
+        setattr(vector_store, "_ms_rag_parent_documents", ADVANCED_PARENT_DOCUMENTS)
+        setattr(vector_store, "_ms_rag_chunk_documents", ADVANCED_CHUNK_DOCUMENTS)
+    setattr(vector_store, "_ms_rag_embeddings", embeddings)
     return vector_store'''
 
         if db_type == "mongodb_atlas":
@@ -592,6 +677,14 @@ def init_vector_store(chunks: list = None):
     )
     if chunks:
         vector_store.add_documents(chunks)
+        setattr(
+            vector_store,
+            "_ms_rag_keyword_corpus",
+            [chunk.page_content for chunk in chunks if getattr(chunk, "page_content", "").strip()],
+        )
+        setattr(vector_store, "_ms_rag_parent_documents", ADVANCED_PARENT_DOCUMENTS)
+        setattr(vector_store, "_ms_rag_chunk_documents", ADVANCED_CHUNK_DOCUMENTS)
+    setattr(vector_store, "_ms_rag_embeddings", embeddings)
     return vector_store'''
 
         store_init = {
@@ -625,6 +718,14 @@ def init_vector_store(chunks: list = None):
     vector_store = {store_init}
     if chunks:
         vector_store.add_documents(chunks)
+        setattr(
+            vector_store,
+            "_ms_rag_keyword_corpus",
+            [chunk.page_content for chunk in chunks if getattr(chunk, "page_content", "").strip()],
+        )
+        setattr(vector_store, "_ms_rag_parent_documents", ADVANCED_PARENT_DOCUMENTS)
+        setattr(vector_store, "_ms_rag_chunk_documents", ADVANCED_CHUNK_DOCUMENTS)
+    setattr(vector_store, "_ms_rag_embeddings", embeddings)
     return vector_store'''
 
     def _render_retriever_function(self, config: PipelineConfig) -> str:
@@ -636,21 +737,169 @@ def init_vector_store(chunks: list = None):
             if config.retrieval and config.retrieval.lambda_diversity is not None
             else 0.5
         )
+        metadata_fields = config.retrieval.metadata_fields if config.retrieval and config.retrieval.metadata_fields else []
+        ensemble_subs = config.retrieval.ensemble_sub_retrievers if config.retrieval and config.retrieval.ensemble_sub_retrievers else ["dense_vector", "keyword_bm25"]
+        ensemble_weights = config.retrieval.ensemble_weights if config.retrieval and config.retrieval.ensemble_weights else [1.0 / len(ensemble_subs)] * len(ensemble_subs)
 
-        if strategy == "hybrid":
-            return f'''# ─── Retriever ────────────────────────────────────────────────
-def _extract_corpus_texts(vector_store):
-    """Extract indexed texts for BM25 keyword retrieval."""
+        helper_block = '''def _extract_corpus_texts(vector_store):
+    """Extract indexed texts for keyword retrieval."""
+    cached = getattr(vector_store, "_ms_rag_keyword_corpus", None)
+    if isinstance(cached, list) and cached:
+        return [text for text in cached if isinstance(text, str) and text.strip()]
+
     texts = []
     get_fn = getattr(vector_store, "get", None)
     if callable(get_fn):
         try:
             result = get_fn()
             documents = result.get("documents", []) if isinstance(result, dict) else []
-            texts.extend(doc for doc in documents if isinstance(doc, str) and doc.strip())
-        except Exception:
-            pass
+            for doc in documents:
+                if isinstance(doc, str) and doc.strip():
+                    texts.append(doc)
+                elif hasattr(doc, "page_content") and isinstance(doc.page_content, str) and doc.page_content.strip():
+                    texts.append(doc.page_content)
+        except Exception as exc:
+            warnings.warn(
+                f"Could not extract documents from vector_store.get(); keyword retrieval may degrade: {exc}",
+                stacklevel=2,
+            )
+    if not texts:
+        docstore = getattr(vector_store, "docstore", None)
+        raw_docs = getattr(docstore, "_dict", None)
+        if isinstance(raw_docs, dict):
+            for doc in raw_docs.values():
+                if isinstance(doc, str) and doc.strip():
+                    texts.append(doc)
+                elif hasattr(doc, "page_content") and isinstance(doc.page_content, str) and doc.page_content.strip():
+                    texts.append(doc.page_content)
     return texts
+
+
+def _dense_retriever(vector_store, *, top_k):
+    return vector_store.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": top_k},
+    )
+
+
+def _compact_multivector_text(content, metadata):
+    source = metadata.get("source", "")
+    first_lines = " ".join(line.strip() for line in content.splitlines()[:3] if line.strip())
+    snippet = (first_lines or content.strip())[:700]
+    return f"Source: {source}\\nSummary representation: {snippet}".strip()
+
+
+def _recency_score(raw_timestamp):
+    from datetime import datetime
+    if not isinstance(raw_timestamp, str) or not raw_timestamp.strip():
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    age_seconds = max((datetime.now(parsed.tzinfo) - parsed).total_seconds(), 0.0)
+    return 1.0 / (1.0 + (age_seconds / 86400))
+
+
+def _parent_child_retriever(vector_store, *, top_k):
+    from langchain_core.runnables import RunnableLambda
+    parent_documents = getattr(vector_store, "_ms_rag_parent_documents", None)
+    if not isinstance(parent_documents, dict) or not parent_documents:
+        raise RuntimeError(
+            "Parent-Child retrieval requires parent document state. Run this generated pipeline with --ingest first."
+        )
+    dense = vector_store.as_retriever(search_kwargs={"k": top_k})
+
+    def retrieve(query):
+        child_docs = dense.invoke(query)
+        results = []
+        seen = set()
+        for child in child_docs:
+            parent_id = getattr(child, "metadata", {}).get("ms_rag_parent_id")
+            parent_doc = parent_documents.get(parent_id)
+            if parent_id and parent_doc is not None and parent_id not in seen:
+                results.append(parent_doc)
+                seen.add(parent_id)
+            elif parent_id not in seen:
+                results.append(child)
+                if parent_id:
+                    seen.add(parent_id)
+        return results[:top_k]
+
+    return RunnableLambda(retrieve)
+
+
+def _multi_vector_retriever(vector_store, *, top_k):
+    from langchain_core.documents import Document
+    from langchain_core.runnables import RunnableLambda
+    from langchain_community.vectorstores import FAISS
+    chunk_documents = getattr(vector_store, "_ms_rag_chunk_documents", None)
+    embeddings = getattr(vector_store, "_ms_rag_embeddings", None)
+    if not isinstance(chunk_documents, list) or not chunk_documents:
+        raise RuntimeError(
+            "Multi-Vector retrieval requires chunk state. Run this generated pipeline with --ingest first."
+        )
+    if embeddings is None:
+        raise RuntimeError("Multi-Vector retrieval requires embeddings for the local representation index.")
+    source_documents = {}
+    representation_docs = []
+    for doc in chunk_documents:
+        content = getattr(doc, "page_content", "")
+        metadata = dict(getattr(doc, "metadata", {}) or {})
+        source_id = metadata.get("ms_rag_multi_vector_source_id") or metadata.get("ms_rag_child_id")
+        if not source_id or not content:
+            continue
+        source_documents[source_id] = doc
+        representation_docs.append(Document(
+            page_content=_compact_multivector_text(content, metadata),
+            metadata={"ms_rag_multi_vector_source_id": source_id},
+        ))
+    if not representation_docs:
+        raise RuntimeError("Multi-Vector retrieval could not build representation documents from chunks.")
+    representation_store = FAISS.from_documents(representation_docs, embeddings)
+    representation_retriever = representation_store.as_retriever(search_kwargs={"k": max(top_k * 2, top_k)})
+
+    def retrieve(query):
+        hits = representation_retriever.invoke(query)
+        results = []
+        seen = set()
+        for hit in hits:
+            source_id = getattr(hit, "metadata", {}).get("ms_rag_multi_vector_source_id")
+            source_doc = source_documents.get(source_id)
+            if source_id and source_doc is not None and source_id not in seen:
+                results.append(source_doc)
+                seen.add(source_id)
+            if len(results) >= top_k:
+                break
+        return results
+
+    return RunnableLambda(retrieve)
+
+
+def _time_weighted_retriever(vector_store, *, top_k):
+    from langchain_core.runnables import RunnableLambda
+    dense = vector_store.as_retriever(search_kwargs={"k": max(top_k * 4, top_k)})
+
+    def retrieve(query):
+        docs = dense.invoke(query)
+        if not any(getattr(doc, "metadata", {}).get("ms_rag_ingested_at") for doc in docs):
+            raise RuntimeError(
+                "Time-Weighted retrieval requires ms_rag_ingested_at metadata. Run this generated pipeline with --ingest first."
+            )
+        scored = []
+        for rank, doc in enumerate(docs):
+            dense_score = 1.0 / (rank + 1)
+            recency_score = _recency_score(getattr(doc, "metadata", {}).get("ms_rag_ingested_at"))
+            scored.append((0.4 * dense_score + 0.6 * recency_score, rank, doc))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return [doc for _, _, doc in scored[:top_k]]
+
+    return RunnableLambda(retrieve)
+'''
+
+        if strategy == "hybrid":
+            return f'''# ─── Retriever ────────────────────────────────────────────────
+{helper_block}
 
 
 def build_retriever(vector_store):
@@ -658,7 +907,7 @@ def build_retriever(vector_store):
     from langchain_community.retrievers import BM25Retriever
     from langchain_classic.retrievers import EnsembleRetriever
 
-    dense = vector_store.as_retriever(search_kwargs={{"k": {top_k}}})
+    dense = _dense_retriever(vector_store, top_k={top_k})
     texts = _extract_corpus_texts(vector_store)
     if not texts:
         return dense
@@ -670,22 +919,31 @@ def build_retriever(vector_store):
 
         if strategy == "keyword_bm25":
             return f'''# ─── Retriever ────────────────────────────────────────────────
+{helper_block}
+
+
 def build_retriever(vector_store):
     """Build BM25 retriever, top_k={top_k}."""
     from langchain_community.retrievers import BM25Retriever
 
-    texts = []
-    get_fn = getattr(vector_store, "get", None)
-    if callable(get_fn):
-        try:
-            result = get_fn()
-            documents = result.get("documents", []) if isinstance(result, dict) else []
-            texts.extend(doc for doc in documents if isinstance(doc, str) and doc.strip())
-        except Exception:
-            pass
+    texts = _extract_corpus_texts(vector_store)
     if not texts:
-        return vector_store.as_retriever(search_kwargs={{"k": {top_k}}})
+        return _dense_retriever(vector_store, top_k={top_k})
     return BM25Retriever.from_texts(texts, k={top_k})'''
+
+        if strategy == "tfidf":
+            return f'''# ─── Retriever ────────────────────────────────────────────────
+{helper_block}
+
+
+def build_retriever(vector_store):
+    """Build TF-IDF retriever, top_k={top_k}."""
+    from langchain_community.retrievers import TFIDFRetriever
+
+    texts = _extract_corpus_texts(vector_store)
+    if not texts:
+        return _dense_retriever(vector_store, top_k={top_k})
+    return TFIDFRetriever.from_texts(texts, k={top_k})'''
 
         if strategy == "mmr":
             return f'''# ─── Retriever ────────────────────────────────────────────────
@@ -694,6 +952,101 @@ def build_retriever(vector_store):
     return vector_store.as_retriever(
         search_type="mmr",
         search_kwargs={{"k": {top_k}, "lambda_mult": {lam}}},
+    )'''
+
+        if strategy == "ensemble":
+            sub_ids_literal = repr(ensemble_subs)
+            weights_literal = repr(ensemble_weights)
+            return f'''# ─── Retriever ────────────────────────────────────────────────
+{helper_block}
+
+
+def _build_single_retriever(vector_store, strategy_id, *, top_k, alpha, lam):
+    from langchain_community.retrievers import BM25Retriever, TFIDFRetriever
+    texts = _extract_corpus_texts(vector_store)
+
+    if strategy_id == "dense_vector":
+        return _dense_retriever(vector_store, top_k=top_k)
+    if strategy_id == "keyword_bm25":
+        if not texts:
+            return _dense_retriever(vector_store, top_k=top_k)
+        return BM25Retriever.from_texts(texts, k=top_k)
+    if strategy_id == "tfidf":
+        if not texts:
+            return _dense_retriever(vector_store, top_k=top_k)
+        return TFIDFRetriever.from_texts(texts, k=top_k)
+    if strategy_id == "hybrid":
+        from langchain_classic.retrievers import EnsembleRetriever
+        dense = _dense_retriever(vector_store, top_k=top_k)
+        if not texts:
+            return dense
+        bm25 = BM25Retriever.from_texts(texts, k=top_k)
+        return EnsembleRetriever(retrievers=[bm25, dense], weights=[1 - alpha, alpha])
+    if strategy_id == "mmr":
+        return vector_store.as_retriever(
+            search_type="mmr",
+            search_kwargs={{"k": top_k, "lambda_mult": lam}},
+        )
+    if strategy_id == "parent_child":
+        return _parent_child_retriever(vector_store, top_k=top_k)
+    if strategy_id == "multi_vector":
+        return _multi_vector_retriever(vector_store, top_k=top_k)
+    if strategy_id == "time_weighted":
+        return _time_weighted_retriever(vector_store, top_k=top_k)
+    return _dense_retriever(vector_store, top_k=top_k)
+
+
+def build_retriever(vector_store):
+    """Build ensemble retriever, top_k={top_k}."""
+    from langchain_classic.retrievers import EnsembleRetriever
+
+    sub_ids = {sub_ids_literal}
+    weights = {weights_literal}
+    sub_retrievers = [
+        _build_single_retriever(vector_store, sub_id, top_k={top_k}, alpha={alpha}, lam={lam})
+        for sub_id in sub_ids
+    ]
+    return EnsembleRetriever(retrievers=sub_retrievers, weights=weights)'''
+
+        if strategy == "parent_child":
+            return f'''# ─── Retriever ────────────────────────────────────────────────
+{helper_block}
+
+
+def build_retriever(vector_store):
+    """Build Parent-Child retriever, top_k={top_k}."""
+    return _parent_child_retriever(vector_store, top_k={top_k})'''
+
+        if strategy == "multi_vector":
+            return f'''# ─── Retriever ────────────────────────────────────────────────
+{helper_block}
+
+
+def build_retriever(vector_store):
+    """Build Multi-Vector retriever, top_k={top_k}."""
+    return _multi_vector_retriever(vector_store, top_k={top_k})'''
+
+        if strategy == "time_weighted":
+            return f'''# ─── Retriever ────────────────────────────────────────────────
+{helper_block}
+
+
+def build_retriever(vector_store):
+    """Build Time-Weighted retriever, top_k={top_k}."""
+    return _time_weighted_retriever(vector_store, top_k={top_k})'''
+
+        if strategy == "self_query":
+            return f'''# ─── Retriever ────────────────────────────────────────────────
+def build_retriever(vector_store):
+    """Build retriever using self_query strategy, top_k={top_k}.
+
+    Self-Query needs a live LLM object and vector store metadata translator.
+    This generated single-file pipeline uses dense retrieval unless you extend it
+    with provider-specific SelfQueryRetriever configuration.
+    """
+    return vector_store.as_retriever(
+        search_type="similarity",
+        search_kwargs={{"k": {top_k}}},
     )'''
 
         return f'''# ─── Retriever ────────────────────────────────────────────────
@@ -762,8 +1115,11 @@ def compress_context(retriever, embeddings):
             "anthropic": f"ChatAnthropic(model={model}, api_key=ANTHROPIC_API_KEY)",
             "cohere": f"ChatCohere(model={model}, cohere_api_key=COHERE_API_KEY)",
             "huggingface": (
-                f"HuggingFaceEndpoint(repo_id={model}, "
-                "huggingfacehub_api_token=HUGGINGFACEHUB_API_TOKEN)"
+                "ChatHuggingFace(llm=HuggingFaceEndpoint("
+                f"repo_id={model}, "
+                "huggingfacehub_api_token=HUGGINGFACEHUB_API_TOKEN, "
+                "task='conversational'), "
+                f"model_id={model})"
             ),
             "google_gemini": f"ChatGoogleGenerativeAI(model={model}, google_api_key=GOOGLE_API_KEY)",
             "mistral": f"ChatMistralAI(model={model}, api_key=MISTRAL_API_KEY)",
@@ -776,8 +1132,8 @@ def compress_context(retriever, embeddings):
                 f"Replicate(model={model}, replicate_api_token=REPLICATE_API_TOKEN)"
             ),
             "ollama": (
-                f"ChatOllama(model={model}, base_url=_ollama_base_url(), "
-                "client_kwargs=_ollama_client_kwargs())"
+                f"ChatOllama(model={model}, base_url=_ollama_base_url(usage='chat'), "
+                "client_kwargs=_ollama_client_kwargs(usage='chat'))"
             ),
             "azure_openai": (
                 f"AzureChatOpenAI(azure_deployment={model}, "

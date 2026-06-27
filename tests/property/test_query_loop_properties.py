@@ -300,3 +300,34 @@ def test_query_error_returns_to_prompt() -> None:
 
     # The query was attempted exactly once before /quit terminated the loop
     assert call_count["queries"] == 1
+
+
+def test_answer_panel_uses_wrapped_text_rendering() -> None:
+    session = _make_session()
+    responses = iter(["tell me about ms rag", "/quit"])
+
+    def text_ask(*args, **kwargs) -> str | None:
+        return next(responses, None)
+
+    def confirm_ask(*args, **kwargs) -> bool:
+        return True
+
+    with patch("ms_rag.cli.query_loop.questionary") as mock_q, \
+         patch("ms_rag.cli.query_loop.Panel"), \
+         patch("ms_rag.cli.query_loop.Text") as mock_text:
+
+        mock_prompt = MagicMock()
+        mock_prompt.ask.side_effect = text_ask
+        mock_q.text.return_value = mock_prompt
+
+        mock_confirm = MagicMock()
+        mock_confirm.ask.side_effect = confirm_ask
+        mock_q.confirm.return_value = mock_confirm
+
+        loop = QueryLoop(query_pipeline=lambda query, sess: "This is a long answer that should wrap cleanly.")
+        loop.run(session)
+
+    assert mock_text.call_args is not None
+    assert mock_text.call_args.args[0] == "This is a long answer that should wrap cleanly."
+    assert mock_text.call_args.kwargs["overflow"] == "fold"
+    assert mock_text.call_args.kwargs["no_wrap"] is False

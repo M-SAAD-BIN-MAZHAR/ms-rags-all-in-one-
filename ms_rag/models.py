@@ -130,6 +130,15 @@ class VectorDBConfig:
 
 
 @dataclass
+class KeywordStoreConfig:
+    """Persistent text/keyword store used by hybrid and keyword retrieval."""
+
+    store_type: str                     # sqlite | postgres | elasticsearch | opensearch | memory
+    connection_params: dict[str, str]
+    collection_name: str = "ms_rag_keywords"
+
+
+@dataclass
 class RetrievalConfig:
     """Parameters for the selected retrieval strategy."""
 
@@ -239,6 +248,7 @@ class PipelineConfig:
 
     # Step 11 — Retrieval
     retrieval: RetrievalConfig | None = None
+    keyword_store: KeywordStoreConfig | None = None
 
     # Step 12 — Reranking
     reranking: RerankingConfig | None = None
@@ -270,6 +280,13 @@ class PipelineConfig:
         """
         data = asdict(self)
         data["vector_db"] = _sanitized_vector_db_config(self.vector_db)
+        if self.keyword_store is not None:
+            keyword_store_data = asdict(self.keyword_store)
+            keyword_store_data["connection_params"] = {
+                key: key if _is_sensitive_connection_field(key) else value
+                for key, value in self.keyword_store.connection_params.items()
+            }
+            data["keyword_store"] = keyword_store_data
         return json.dumps(data, indent=2, ensure_ascii=False)
 
     @classmethod
@@ -331,6 +348,11 @@ class PipelineConfig:
                 return None
             return VectorDBConfig(**d)
 
+        def _keyword_store(d: dict | None) -> KeywordStoreConfig | None:
+            if d is None:
+                return None
+            return KeywordStoreConfig(**d)
+
         def _retrieval(d: dict | None) -> RetrievalConfig | None:
             if d is None:
                 return None
@@ -380,6 +402,7 @@ class PipelineConfig:
             query_enhancement=data.get("query_enhancement", []),
             hyde_llm_provider=data.get("hyde_llm_provider"),
             retrieval=_retrieval(data.get("retrieval")),
+            keyword_store=_keyword_store(data.get("keyword_store")),
             reranking=_reranking(data.get("reranking")),
             reranking_enabled=data.get("reranking_enabled", False),
             compression=_compression(data.get("compression")),

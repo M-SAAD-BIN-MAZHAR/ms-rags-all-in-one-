@@ -222,3 +222,114 @@ class TestRebuildSessionRuntime:
             "meta-llama/Meta-Llama-3-8B-Instruct",
         )
         assert mock_get_llm.call_args.kwargs["credential_store"] is store
+
+    @patch("ms_rag.llm.llm_integration.build_rag_chain")
+    @patch("ms_rag.llm.llm_integration.get_llm")
+    @patch("ms_rag.query.retrieval_strategy.RetrievalStrategyModule.get_retriever")
+    @patch("ms_rag.ingestion.ingestion_orchestrator.IngestionOrchestrator.build_keyword_corpus")
+    def test_rebuilds_keyword_corpus_for_hybrid_when_backend_has_no_texts(
+        self,
+        mock_build_keyword_corpus: MagicMock,
+        mock_get_retriever: MagicMock,
+        mock_get_llm: MagicMock,
+        mock_build_chain: MagicMock,
+    ) -> None:
+        config = _minimal_config()
+        config.document_sources = ["./docs/resume.docx"]
+        config.loader_map = {"docx": "Docx2txtLoader"}
+        config.retrieval = RetrievalConfig(strategy="hybrid", top_k=4, alpha=0.5)
+        mock_build_keyword_corpus.return_value = ["chunk one", "chunk two"]
+        mock_get_retriever.return_value = MagicMock(name="retriever")
+        mock_get_llm.return_value = MagicMock(name="llm")
+        mock_build_chain.return_value = MagicMock(name="rag_chain")
+        vector_store = MagicMock(name="vector_store")
+        vector_store._ms_rag_parent_documents = None
+        vector_store._ms_rag_chunk_documents = None
+
+        build_session_runtime_from_vector_store(
+            config,
+            CredentialStore(),
+            vector_store=vector_store,
+            embeddings=MagicMock(name="embeddings"),
+        )
+
+        mock_build_keyword_corpus.assert_called_once()
+        assert getattr(vector_store, "_ms_rag_keyword_corpus") == ["chunk one", "chunk two"]
+        assert mock_get_retriever.call_args.kwargs["corpus_texts"] == ["chunk one", "chunk two"]
+
+    @patch("ms_rag.llm.llm_integration.build_rag_chain")
+    @patch("ms_rag.llm.llm_integration.get_llm")
+    @patch("ms_rag.query.retrieval_strategy.RetrievalStrategyModule.get_retriever")
+    @patch("ms_rag.ingestion.keyword_store.KeywordStoreConnector.load_texts")
+    def test_rebuild_loads_keyword_corpus_from_persistent_keyword_store(
+        self,
+        mock_load_texts: MagicMock,
+        mock_get_retriever: MagicMock,
+        mock_get_llm: MagicMock,
+        mock_build_chain: MagicMock,
+    ) -> None:
+        from ms_rag.models import KeywordStoreConfig
+
+        config = _minimal_config()
+        config.retrieval = RetrievalConfig(strategy="hybrid", top_k=4, alpha=0.5)
+        config.keyword_store = KeywordStoreConfig(
+            store_type="sqlite",
+            connection_params={"KEYWORD_SQLITE_PATH": "./keywords.sqlite"},
+            collection_name="chunks",
+        )
+        mock_load_texts.return_value = ["stored keyword chunk"]
+        mock_get_retriever.return_value = MagicMock(name="retriever")
+        mock_get_llm.return_value = MagicMock(name="llm")
+        mock_build_chain.return_value = MagicMock(name="rag_chain")
+        vector_store = MagicMock(name="vector_store")
+        vector_store._ms_rag_keyword_corpus = None
+
+        build_session_runtime_from_vector_store(
+            config,
+            CredentialStore(),
+            vector_store=vector_store,
+            embeddings=MagicMock(name="embeddings"),
+        )
+
+        mock_load_texts.assert_called_once()
+        assert mock_get_retriever.call_args.kwargs["corpus_texts"] == ["stored keyword chunk"]
+
+    @patch("ms_rag.llm.llm_integration.build_rag_chain")
+    @patch("ms_rag.llm.llm_integration.get_llm")
+    @patch("ms_rag.query.retrieval_strategy.RetrievalStrategyModule.get_retriever")
+    @patch("ms_rag.ingestion.ingestion_orchestrator.IngestionOrchestrator.build_retrieval_state")
+    def test_rebuilds_advanced_retrieval_state_for_parent_child(
+        self,
+        mock_build_retrieval_state: MagicMock,
+        mock_get_retriever: MagicMock,
+        mock_get_llm: MagicMock,
+        mock_build_chain: MagicMock,
+    ) -> None:
+        config = _minimal_config()
+        config.document_sources = ["./docs/resume.docx"]
+        config.loader_map = {"docx": "Docx2txtLoader"}
+        config.retrieval = RetrievalConfig(strategy="parent_child", top_k=4)
+        parent_docs = {"parent-1": MagicMock(page_content="parent")}
+        chunk_docs = [MagicMock(page_content="child")]
+        mock_build_retrieval_state.return_value = {
+            "parent_documents": parent_docs,
+            "chunk_documents": chunk_docs,
+        }
+        mock_get_retriever.return_value = MagicMock(name="retriever")
+        mock_get_llm.return_value = MagicMock(name="llm")
+        mock_build_chain.return_value = MagicMock(name="rag_chain")
+        vector_store = MagicMock(name="vector_store")
+        vector_store._ms_rag_parent_documents = None
+        vector_store._ms_rag_chunk_documents = None
+
+        build_session_runtime_from_vector_store(
+            config,
+            CredentialStore(),
+            vector_store=vector_store,
+            embeddings=MagicMock(name="embeddings"),
+        )
+
+        mock_build_retrieval_state.assert_called_once()
+        assert getattr(vector_store, "_ms_rag_parent_documents") == parent_docs
+        assert getattr(vector_store, "_ms_rag_chunk_documents") == chunk_docs
+        assert mock_get_retriever.call_args.kwargs["embeddings"] is not None

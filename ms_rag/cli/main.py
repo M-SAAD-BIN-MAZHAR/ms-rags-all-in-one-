@@ -14,7 +14,7 @@ import click
 from ms_rag.models import CredentialStore, PipelineConfig, SessionState
 from ms_rag.ui.banner import display_banner
 from ms_rag.ui.prompts import prompt_telemetry_configuration
-from ms_rag.utils.logging import get_logger
+from ms_rag.utils.logging import get_logger, install_warning_renderer
 from ms_rag.utils.telemetry import TelemetryReporter
 
 
@@ -36,6 +36,7 @@ def run(load_path: str | None = None) -> None:
 
     console = Console()
     logger = get_logger()
+    install_warning_renderer(console)
 
     # Step 1: Banner
     display_banner(console)
@@ -86,6 +87,37 @@ def run(load_path: str | None = None) -> None:
                     )
                     db_connector = VectorDBConnector(credential_store=credential_store)
                     config.vector_db = db_connector.reprompt_credentials(config.vector_db)
+            if config.keyword_store:
+                from ms_rag.ingestion.keyword_store import KEYWORD_STORE_MAP, KeywordStoreConnector  # noqa: PLC0415
+                from ms_rag.ui.prompts import prompt_text  # noqa: PLC0415
+
+                store_info = KEYWORD_STORE_MAP.get(config.keyword_store.store_type)
+                if store_info and store_info.credential_fields:
+                    console.print(
+                        "[bold cyan]  Re-enter keyword store credentials for this saved session.[/bold cyan]"
+                    )
+                    params = dict(config.keyword_store.connection_params)
+                    for field_name in store_info.credential_fields:
+                        value = prompt_text(
+                            f"  {field_name}:",
+                            required=True,
+                            secret=True,
+                            console=console,
+                        )
+                        params[field_name] = str(value)
+                        credential_store.set(config.keyword_store.store_type, field_name, str(value))
+                    for field_name in store_info.optional_fields:
+                        value = prompt_text(
+                            f"  {field_name} (optional):",
+                            required=False,
+                            secret=any(token in field_name for token in ("KEY", "PASSWORD", "TOKEN", "SECRET")),
+                            console=console,
+                        )
+                        if value:
+                            params[field_name] = str(value)
+                            credential_store.set(config.keyword_store.store_type, field_name, str(value))
+                    config.keyword_store.connection_params = params
+                    KeywordStoreConnector(credential_store).test_connection(config.keyword_store)
             telemetry.record_event("session.load", "Session loaded", load_path=load_path)
             with telemetry.span("session.rebuild", load_path=load_path):
                 runtime = rebuild_session_runtime(config, credential_store)
@@ -129,6 +161,7 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
     from ms_rag.workflow.chunking_configurator import ChunkingConfigurator  # noqa: PLC0415
     from ms_rag.ingestion.vectorization_module import VectorizationModule  # noqa: PLC0415
     from ms_rag.ingestion.vectordb_connector import VectorDBConnector  # noqa: PLC0415
+    from ms_rag.ingestion.keyword_store import KeywordStoreConnector, retrieval_needs_keyword_store  # noqa: PLC0415
     from ms_rag.ingestion.ingestion_orchestrator import IngestionOrchestrator  # noqa: PLC0415
     from ms_rag.query.query_enhancer import QueryEnhancer  # noqa: PLC0415
     from ms_rag.query.retrieval_strategy import RetrievalStrategyModule  # noqa: PLC0415
@@ -269,6 +302,21 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
     with telemetry.span("setup.retrieval"):
         retrieval_module = RetrievalStrategyModule()
         config.retrieval = retrieval_module.configure()
+        if retrieval_needs_keyword_store(config.retrieval):
+            keyword_connector = KeywordStoreConnector(credential_store=credential_store)
+            production_recommended = bool(config.vector_db and config.vector_db.db_type not in {"chroma", "faiss"})
+            config.keyword_store = keyword_connector.prompt_and_configure(
+                production_recommended=production_recommended,
+            )
+            keyword_texts = keyword_connector.persist_documents(
+                config.keyword_store,
+                getattr(vector_store, "_ms_rag_chunk_documents", []) or [],
+            )
+            setattr(vector_store, "_ms_rag_keyword_corpus", keyword_texts)
+            print_success(
+                con,
+                f"Keyword store ready: {config.keyword_store.store_type} / {config.keyword_store.collection_name} ({len(keyword_texts)} chunks)",
+            )
 
     # Step 12: Reranking
     with telemetry.span("setup.reranking"):
@@ -536,6 +584,7 @@ def _build_runtime_with_recovery(
             embeddings=embeddings,
         )
         console.print("[green]  ✓ Runtime pipeline ready.[/green]")  # type: ignore[union-attr]
+        _display_runtime_readiness(config, runtime, console)
         return runtime
     except Exception as exc:  # noqa: BLE001
         from ms_rag.ui.prompts import print_error  # noqa: PLC0415
@@ -544,6 +593,52 @@ def _build_runtime_with_recovery(
         raise click.ClickException(
             "Runtime build failed. Check provider credentials, retrieval settings, and vector DB compatibility."
         ) from exc
+
+
+def _display_runtime_readiness(
+    config: PipelineConfig,
+    runtime: dict[str, object],
+    console: object,
+) -> None:
+    """Show final runtime wiring and retrieval-state status."""
+    from rich.table import Table  # noqa: PLC0415
+
+    vector_store = runtime.get("vector_store")
+    retrieval = config.retrieval
+    table = Table(title="Runtime Wiring Check", border_style="green")
+    table.add_column("Component", style="bold white")
+    table.add_column("Status", style="green")
+    table.add_column("Details", style="cyan")
+
+    table.add_row(
+        "Generation model",
+        "ready" if config.llm_model else "missing",
+        f"{config.llm_model.provider} / {config.llm_model.model_id}" if config.llm_model else "No model selected",
+    )
+    table.add_row(
+        "Vector store",
+        "ready" if vector_store is not None else "missing",
+        config.vector_db.db_type if config.vector_db else "No vector DB selected",
+    )
+    table.add_row(
+        "Retriever",
+        "ready" if runtime.get("retriever") is not None else "missing",
+        retrieval.strategy if retrieval else "No retrieval strategy selected",
+    )
+
+    selected = {retrieval.strategy} if retrieval else set()
+    if retrieval and retrieval.strategy == "ensemble":
+        selected.update(retrieval.ensemble_sub_retrievers or [])
+    if selected & {"parent_child", "multi_vector", "time_weighted"}:
+        parent_count = len(getattr(vector_store, "_ms_rag_parent_documents", {}) or {})
+        chunk_count = len(getattr(vector_store, "_ms_rag_chunk_documents", []) or [])
+        has_embeddings = getattr(vector_store, "_ms_rag_embeddings", None) is not None
+        table.add_row(
+            "Advanced state",
+            "ready" if parent_count or chunk_count else "missing",
+            f"parents={parent_count}, chunks={chunk_count}, representation_embeddings={'yes' if has_embeddings else 'no'}",
+        )
+    console.print(table)  # type: ignore[union-attr]
 
 
 def _ensure_vector_db_connection(

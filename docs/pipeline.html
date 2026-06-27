@@ -75,7 +75,7 @@
                   <tr><td><a href="https://replicate.com/" rel="noopener">Replicate</a></td><td><code>REPLICATE_API_TOKEN</code></td><td>Model experimentation.</td></tr>
                   <tr><td><a href="https://azure.microsoft.com/en-us/products/ai-services/openai-service" rel="noopener">Azure OpenAI</a></td><td><code>AZURE_OPENAI_API_KEY</code>, <code>AZURE_OPENAI_ENDPOINT</code>, <code>AZURE_OPENAI_DEPLOYMENT_NAME</code></td><td>Azure enterprise deployments.</td></tr>
                   <tr><td><a href="https://aws.amazon.com/bedrock/" rel="noopener">AWS Bedrock</a></td><td><code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code>, optional <code>AWS_REGION</code></td><td>AWS enterprise deployments.</td></tr>
-                  <tr><td><a href="https://ollama.com/" rel="noopener">Ollama</a></td><td><code>OLLAMA_MODEL_NAME</code>, optional <code>OLLAMA_API_KEY</code>, optional <code>OLLAMA_BASE_URL</code></td><td>Local Ollama by default; Ollama Cloud when API key is present.</td></tr>
+                  <tr><td><a href="https://ollama.com/" rel="noopener">Ollama</a></td><td><code>OLLAMA_MODEL_NAME</code>, optional <code>OLLAMA_API_KEY</code>, optional <code>OLLAMA_BASE_URL</code></td><td>Chat models can use local Ollama or Ollama Cloud; embeddings must use local or self-hosted Ollama.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -96,7 +96,7 @@
                 <tbody>
                   <tr><td><a href="https://openai.com/api/" rel="noopener">OpenAI</a></td><td><code>gpt-4o</code> by default; users can pass another OpenAI chat model in generated code.</td><td>Plan around 128k for <code>gpt-4o</code>; newer OpenAI models may differ.</td><td>Best first hosted choice, strong general QA, good tool ecosystem.</td><td>Hosted API sends prompt/context to OpenAI. Long context increases cost and latency.</td></tr>
                   <tr><td><a href="https://www.anthropic.com/" rel="noopener">Anthropic</a></td><td><code>claude-3-5-sonnet-20241022</code>.</td><td>Plan around 200k for Claude Sonnet-family RAG prompts.</td><td>Long-form answers, careful reasoning, policy/legal/research style responses.</td><td>Extra retrieval, self-checking, or compression calls can multiply cost.</td></tr>
-                  <tr><td><a href="https://cohere.com/" rel="noopener">Cohere</a></td><td><code>command-r-plus</code>.</td><td>Plan around 128k for Command R Plus-style retrieval prompts.</td><td>Enterprise RAG, reranking plus generation workflows, multilingual retrieval apps.</td><td>Use Cohere embeddings/reranking only if those credentials are configured.</td></tr>
+                  <tr><td><a href="https://cohere.com/" rel="noopener">Cohere</a></td><td><code>command-a-03-2025</code> by default; versioned Command R models can also be used.</td><td>Plan around long-context retrieval prompts and verify the exact context window on Cohere's official model page before production use.</td><td>Enterprise RAG, reranking plus generation workflows, multilingual retrieval apps.</td><td>Avoid removed unversioned aliases such as <code>command-r-plus</code>; use current/versioned model IDs.</td></tr>
                   <tr><td><a href="https://huggingface.co/" rel="noopener">Hugging Face</a></td><td><code>meta-llama/Meta-Llama-3-8B-Instruct</code> by default.</td><td>Plan around 8k for Llama 3 8B Instruct unless your endpoint says otherwise.</td><td>Token-only hosted open models or custom inference endpoints.</td><td>Model availability, rate limits, and context windows vary by endpoint.</td></tr>
                   <tr><td><a href="https://ai.google.dev/" rel="noopener">Google Gemini</a></td><td><code>gemini-1.5-pro</code>.</td><td>Plan around 1M-2M depending on the Gemini 1.5 Pro configuration and current limits.</td><td>Very large document context, Google ecosystem, multimodal-adjacent workflows.</td><td>Huge context is not a replacement for good retrieval; still chunk and rerank.</td></tr>
                   <tr><td><a href="https://mistral.ai/" rel="noopener">Mistral AI</a></td><td><code>mistral-large-latest</code>.</td><td>Plan around 128k for Mistral Large-class prompts.</td><td>Multilingual or EU-friendly hosted RAG, balanced quality and latency.</td><td>Use model-specific limits before selecting chunk count and top_k.</td></tr>
@@ -105,7 +105,7 @@
                   <tr><td><a href="https://replicate.com/" rel="noopener">Replicate</a></td><td><code>meta/meta-llama-3-8b-instruct</code>.</td><td>Plan around 8k for this Llama 3 8B Instruct version.</td><td>Testing model variants before committing to a provider.</td><td>Version pins matter; provider model pages can change.</td></tr>
                   <tr><td><a href="https://azure.microsoft.com/en-us/products/ai-services/openai-service" rel="noopener">Azure OpenAI</a></td><td>User-provided <code>AZURE_OPENAI_DEPLOYMENT_NAME</code>.</td><td>Use the context window of the deployed Azure model, often 128k for GPT-4o deployments.</td><td>Azure enterprise, private networking, existing Azure governance.</td><td>Deployment name is not always the public model name; document it clearly.</td></tr>
                   <tr><td><a href="https://aws.amazon.com/bedrock/" rel="noopener">AWS Bedrock</a></td><td><code>anthropic.claude-3-5-sonnet-20241022-v2:0</code>.</td><td>Plan around 200k for Claude 3.5 Sonnet on Bedrock where available.</td><td>AWS enterprise deployments and Bedrock governance.</td><td>Model availability varies by region and account permissions.</td></tr>
-                  <tr><td><a href="https://ollama.com/" rel="noopener">Ollama</a></td><td><code>OLLAMA_MODEL_NAME</code>, such as local <code>llama3</code> or cloud <code>gpt-oss:120b</code>.</td><td>Model/runtime dependent. Local defaults may be lower than the model maximum; check <code>ollama show &lt;model&gt;</code> and <code>num_ctx</code>.</td><td>Local/private runs, Ollama Cloud, simple key-based setup.</td><td>Chat models and embedding models are different; do not use a chat-only model for embeddings.</td></tr>
+                  <tr><td><a href="https://ollama.com/" rel="noopener">Ollama</a></td><td><code>OLLAMA_MODEL_NAME</code>, such as local <code>llama3</code> or cloud <code>gpt-oss:120b</code>.</td><td>Model/runtime dependent. Local defaults may be lower than the model maximum; check <code>ollama show &lt;model&gt;</code> and <code>num_ctx</code>.</td><td>Local/private runs and Ollama Cloud chat.</td><td>Ollama Cloud currently supports chat only. Embedding models such as <code>nomic-embed-text</code> must run on local or self-hosted Ollama.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -164,7 +164,7 @@
                   <tr><td>Hosted embeddings</td><td>Documents are sent to the provider API and vectors are returned.</td><td>Requires network and credentials; may have data governance implications.</td></tr>
                   <tr><td>Local HuggingFace</td><td>Model weights are downloaded and inference runs on the user's machine.</td><td>First run may be slow and disk-heavy; CPU models can be slower.</td></tr>
                   <tr><td>Hosted HuggingFace endpoint</td><td>Uses <code>HuggingFaceEndpointEmbeddings</code> and <code>HUGGINGFACEHUB_API_TOKEN</code>.</td><td>Token-only setup is easier, but endpoint availability and rate limits matter.</td></tr>
-                  <tr><td>Ollama local/cloud</td><td>No API key defaults to local <code>http://localhost:11434</code>; API key defaults to <code>https://ollama.com</code>.</td><td>Model name must be compatible with embedding or chat use.</td></tr>
+                  <tr><td>Ollama local/cloud</td><td>No API key defaults to local <code>http://localhost:11434</code>; API key defaults to <code>https://ollama.com</code> for chat. The framework normalizes <code>/v1</code> to the root base URL.</td><td>Ollama Cloud is chat-only; embedding models must use local or self-hosted Ollama.</td></tr>
                   <tr><td>Dimension changes</td><td>Vector dimensions are fixed by the embedding model.</td><td>Changing models requires a new collection or full re-ingestion.</td></tr>
                 </tbody>
               </table>
@@ -300,10 +300,26 @@
                   <tr><td>Hybrid</td><td>Combines vector and keyword scores using alpha.</td><td>Production docs where exact terms and meaning both matter.</td></tr>
                   <tr><td>MMR</td><td>Balances relevance with diversity.</td><td>When retrieved chunks are too repetitive.</td></tr>
                   <tr><td>Ensemble</td><td>Combines multiple retrievers with weights that sum to 1.0.</td><td>Advanced users with measured complementary retrievers.</td></tr>
-                  <tr><td>Parent-Child</td><td>Retrieves small child chunks but returns parent context.</td><td>Long documents.</td></tr>
-                  <tr><td>Multi-Vector</td><td>Stores multiple representations, such as summaries and full chunks.</td><td>Documents with long or noisy full text.</td></tr>
+                  <tr><td>Parent-Child</td><td>Retrieves small child chunks, maps them to parent IDs, and returns larger parent context.</td><td>Long PDFs, reports, policies, legal docs, and research docs where surrounding context matters.</td></tr>
+                  <tr><td>Multi-Vector</td><td>Builds a local FAISS representation index from compact chunk representations and returns the original chunks.</td><td>Documents where short representations, titles, or first lines retrieve better than noisy full text.</td></tr>
                   <tr><td>Self-Query</td><td>LLM generates structured metadata filters.</td><td>Corpora with reliable metadata fields.</td></tr>
-                  <tr><td>Time-Weighted</td><td>Boosts recent documents along with similarity.</td><td>Frequently updated knowledge bases.</td></tr>
+                  <tr><td>Time-Weighted</td><td>Combines dense similarity with <code>ms_rag_ingested_at</code> recency metadata.</td><td>Frequently updated knowledge bases, support tickets, changelogs, and policy updates.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="grid three">
+              <div class="card"><h3>Parent-Child state</h3><p>MS_RAG creates parent document IDs and child chunk IDs during ingestion. Saved sessions rebuild this state from original sources before runtime starts.</p></div>
+              <div class="card"><h3>Multi-Vector model</h3><p>Uses the selected embedding model to build a separate local FAISS representation index. Synthetic representation vectors are not written into Pinecone, Qdrant, Chroma, or other production stores.</p></div>
+              <div class="card"><h3>Time metadata</h3><p>Every chunk gets <code>ms_rag_ingested_at</code>. If timestamps are missing, MS_RAG raises a setup error instead of silently pretending time-weighted retrieval is active.</p></div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Keyword store</th><th>Why it exists</th><th>Recommended use</th></tr></thead>
+                <tbody>
+                  <tr><td>SQLite</td><td>Persists raw chunk text locally for BM25/TF-IDF/hybrid.</td><td>Single-server production and development.</td></tr>
+                  <tr><td>PostgreSQL</td><td>Stores chunk text and metadata beside production app data.</td><td>Managed Postgres deployments.</td></tr>
+                  <tr><td>Elasticsearch</td><td>Provides production full-text search for keyword retrieval.</td><td>Enterprise search and large corpora.</td></tr>
+                  <tr><td>OpenSearch</td><td>OpenSearch/AWS-compatible full-text keyword storage.</td><td>AWS/OpenSearch deployments.</td></tr>
                 </tbody>
               </table>
             </div>

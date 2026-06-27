@@ -15,9 +15,12 @@ Implements:
 
 from __future__ import annotations
 
+from copy import copy
+from datetime import UTC, datetime
 import time
 from pathlib import Path
 from typing import Callable
+import warnings
 
 try:
     from rich.console import Console
@@ -75,6 +78,75 @@ def retry_with_backoff(
                     on_retry(attempt + 1, exc)
                 time.sleep(wait)
     raise last_exc  # type: ignore[misc]
+
+
+def _empty_retrieval_state() -> dict[str, object]:
+    """Return the in-memory state needed by advanced retrievers."""
+    return {
+        "parent_documents": {},
+        "chunk_documents": [],
+    }
+
+
+def _copy_document(doc: object) -> object:
+    """Make a shallow document copy so metadata edits do not surprise loaders."""
+    try:
+        copied = copy(doc)
+        copied.metadata = dict(getattr(doc, "metadata", {}) or {})
+        return copied
+    except Exception:  # noqa: BLE001
+        return doc
+
+
+def _prepare_parent_documents(docs: list, source: str) -> dict[str, object]:
+    """Attach stable parent IDs and timestamps to loaded documents."""
+    parent_documents: dict[str, object] = {}
+    prepared_docs: list = []
+    ingested_at = datetime.now(UTC).isoformat()
+
+    for index, doc in enumerate(docs):
+        prepared = _copy_document(doc)
+        metadata = dict(getattr(prepared, "metadata", {}) or {})
+        parent_id = metadata.get("ms_rag_parent_id") or f"{source}::parent::{index}"
+        metadata.update(
+            {
+                "source": metadata.get("source", source),
+                "ms_rag_parent_id": parent_id,
+                "ms_rag_ingested_at": metadata.get("ms_rag_ingested_at", ingested_at),
+            }
+        )
+        prepared.metadata = metadata
+        parent_documents[parent_id] = prepared
+        prepared_docs.append(prepared)
+
+    return {
+        "documents": prepared_docs,
+        "parent_documents": parent_documents,
+    }
+
+
+def _prepare_child_documents(chunks: list) -> None:
+    """Attach child IDs, parent IDs, source IDs, and recency metadata to chunks."""
+    ingested_at = datetime.now(UTC).isoformat()
+    for index, chunk in enumerate(chunks):
+        metadata = dict(getattr(chunk, "metadata", {}) or {})
+        parent_id = metadata.get("ms_rag_parent_id") or metadata.get("source") or f"unknown_parent::{index}"
+        child_id = metadata.get("ms_rag_child_id") or f"{parent_id}::child::{index}"
+        metadata.update(
+            {
+                "ms_rag_parent_id": parent_id,
+                "ms_rag_child_id": child_id,
+                "ms_rag_multi_vector_source_id": metadata.get("ms_rag_multi_vector_source_id", child_id),
+                "ms_rag_ingested_at": metadata.get("ms_rag_ingested_at", ingested_at),
+            }
+        )
+        chunk.metadata = metadata
+
+
+def _attach_retrieval_state(vector_store: object, state: dict[str, object]) -> None:
+    """Attach backend-independent advanced retrieval state to a vector store."""
+    setattr(vector_store, "_ms_rag_parent_documents", state.get("parent_documents", {}))
+    setattr(vector_store, "_ms_rag_chunk_documents", state.get("chunk_documents", []))
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +285,8 @@ class IngestionOrchestrator:
 
         total_chunks = 0
         failed_documents: list[tuple[str, str]] = []
+        keyword_corpus: list[str] = []
+        retrieval_state = _empty_retrieval_state()
 
         with telemetry.span(
             "ingestion.run",
@@ -230,10 +304,19 @@ class IngestionOrchestrator:
                             loader_map=loader_map,
                             youtube_language=youtube_language,
                         )
+                        prepared_docs = _prepare_parent_documents(docs, source_str)
+                        retrieval_state["parent_documents"].update(prepared_docs["parent_documents"])
 
                         # Chunk
-                        chunks = splitter.split_documents(docs)
+                        chunks = splitter.split_documents(prepared_docs["documents"])
+                        _prepare_child_documents(chunks)
                         sanitize_documents(chunks)
+                        retrieval_state["chunk_documents"].extend(chunks)
+                        keyword_corpus.extend(
+                            chunk.page_content
+                            for chunk in chunks
+                            if getattr(chunk, "page_content", "").strip()
+                        )
 
                         # Store (with retry)
                         def _store(c: list = chunks, vs: object = vector_store) -> None:
@@ -257,10 +340,75 @@ class IngestionOrchestrator:
             collection_name=vector_db.collection_name,
             failed_documents=failed_documents,
         )
+        setattr(vector_store, "_ms_rag_keyword_corpus", keyword_corpus)
+        _attach_retrieval_state(vector_store, retrieval_state)
 
         # Post-ingestion summary (Req 9.7)
         self._display_summary(result, console)
         return result
+
+    def build_keyword_corpus(
+        self,
+        *,
+        sources: list[str],
+        loader_map: dict[str, str],
+        chunking_config: ChunkingConfig,
+        youtube_language: str = "en",
+    ) -> list[str]:
+        """Load and chunk sources to build a backend-independent keyword corpus."""
+        doc_types = list(loader_map.keys())
+        discovered = self.discover_documents(sources, doc_types)
+        splitter = ChunkingEngine().get_splitter(chunking_config)
+        texts: list[str] = []
+
+        for source in discovered:
+            docs = self._load_source(
+                source=source,
+                loader_map=loader_map,
+                youtube_language=youtube_language,
+            )
+            chunks = splitter.split_documents(docs)
+            texts.extend(
+                chunk.page_content
+                for chunk in chunks
+                if getattr(chunk, "page_content", "").strip()
+            )
+
+        return texts
+
+    def build_retrieval_state(
+        self,
+        *,
+        sources: list[str],
+        loader_map: dict[str, str],
+        chunking_config: ChunkingConfig,
+        youtube_language: str = "en",
+    ) -> dict[str, object]:
+        """Load and chunk sources to rebuild advanced retriever state.
+
+        This state is backend-independent and is used by Parent-Child,
+        Multi-Vector, and Time-Weighted retrieval when a saved session is loaded.
+        """
+        doc_types = list(loader_map.keys())
+        discovered = self.discover_documents(sources, doc_types)
+        splitter = ChunkingEngine().get_splitter(chunking_config)
+        state = _empty_retrieval_state()
+
+        for source in discovered:
+            source_str = str(source)
+            docs = self._load_source(
+                source=source,
+                loader_map=loader_map,
+                youtube_language=youtube_language,
+            )
+            prepared_docs = _prepare_parent_documents(docs, source_str)
+            state["parent_documents"].update(prepared_docs["parent_documents"])
+            chunks = splitter.split_documents(prepared_docs["documents"])
+            _prepare_child_documents(chunks)
+            sanitize_documents(chunks)
+            state["chunk_documents"].extend(chunks)
+
+        return state
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -335,7 +483,11 @@ class IngestionOrchestrator:
             try:
                 from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
                 return UnstructuredLoader(source).load()
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"UnstructuredPDFLoader could not parse {source}; falling back to PyPDFLoader: {exc}",
+                    stacklevel=2,
+                )
                 from langchain_community.document_loaders import PyPDFLoader  # noqa: PLC0415
                 return PyPDFLoader(source).load()
 
@@ -343,12 +495,31 @@ class IngestionOrchestrator:
             from langchain_community.document_loaders import PDFPlumberLoader  # noqa: PLC0415
             return PDFPlumberLoader(source).load()
 
+        if loader_class_name in {"CamelotLoader", "TabulaLoader"}:
+            try:
+                if loader_class_name == "CamelotLoader":
+                    from langchain_community.document_loaders import CamelotPDFLoader  # noqa: PLC0415
+                    return CamelotPDFLoader(source).load()
+                from langchain_community.document_loaders import UnstructuredPDFLoader  # noqa: PLC0415
+                return UnstructuredPDFLoader(source, mode="elements", strategy="fast").load()
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"{loader_class_name} could not parse {source}; falling back to PyPDFLoader: {exc}",
+                    stacklevel=2,
+                )
+                from langchain_community.document_loaders import PyPDFLoader  # noqa: PLC0415
+                return PyPDFLoader(source).load()
+
         # ── DOCX loaders ─────────────────────────────────────────────
         if loader_class_name == "UnstructuredWordDocumentLoader":
             try:
                 from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
                 return UnstructuredLoader(source).load()
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"UnstructuredWordDocumentLoader could not parse {source}; falling back to Docx2txtLoader: {exc}",
+                    stacklevel=2,
+                )
                 from langchain_community.document_loaders import Docx2txtLoader  # noqa: PLC0415
                 return Docx2txtLoader(source).load()
 

@@ -54,6 +54,10 @@ RuntimeError: FAISS store has no documents yet.
 
 **Generated pipeline hardening:** Standalone generated FAISS pipelines now save on ingest and load the persisted index in query-only mode. Standalone generated Qdrant pipelines now connect to an existing collection in query-only mode instead of calling `from_documents()` without chunks.
 
+**Retriever hardening across databases:** Keyword-dependent retrieval strategies no longer depend only on backend-specific `vector_store.get()` behavior. Ingestion now caches a backend-independent `_ms_rag_keyword_corpus` from chunk text, runtime rebuilds can reconstruct that corpus from the original sources when needed, FAISS docstore text is read directly, and generated pipelines mirror the same behavior. This protects BM25, TF-IDF, hybrid, and ensemble retrieval across FAISS, Chroma, Pinecone, Qdrant, Weaviate, Milvus, Redis, PGVector, Elasticsearch, OpenSearch, Azure AI Search, and MongoDB Atlas. Parent-Child, Multi-Vector, and Time-Weighted retrieval now have dedicated runtime state: ingestion attaches parent documents, child chunks, source IDs, and timestamps; saved-session rebuilds reconstruct that state; generated pipelines carry equivalent standalone state. The interactive UI explains required state/models and asks for confirmation before advanced retrieval is selected. Runtime build uses strict advanced mode, so missing advanced state raises a clear setup error instead of silently degrading to dense retrieval.
+
+**Persistent keyword store for production hybrid retrieval:** Hybrid, BM25, TF-IDF, and ensembles containing keyword retrievers now require a `KeywordStoreConfig`. After retrieval selection, the CLI asks where to persist raw chunk text: SQLite, PostgreSQL, Elasticsearch, OpenSearch, or memory-only for development. This is required for cloud vector DBs such as Pinecone because they store/search vectors while the keyword store persists searchable text. Saved-session JSON sanitizes keyword-store secrets, and `--load` re-prompts for keyword-store credentials before rebuilding retrieval.
+
 **Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\property\test_codegen_properties.py tests\integration\test_rebuild_session_runtime.py tests\integration\test_end_to_end.py tests\unit\test_vectordb_connector.py -q` passed with 41 tests.
 
 ### Recent Production UX Hardening — Permissions, Embeddings, and Logs
@@ -76,7 +80,7 @@ RuntimeError: FAISS store has no documents yet.
 
 **HuggingFace embedding modes:** HuggingFace embeddings are split into local/downloaded models (`provider="huggingface"`) and hosted token-only endpoint models (`provider="huggingface_endpoint"`). Hosted selections use `HuggingFaceEndpointEmbeddings` with `HUGGINGFACEHUB_API_TOKEN` and model IDs prefixed with `hf-endpoint:` so they do not collide with local model IDs.
 
-**Ollama local/cloud support:** Ollama remains a single provider, but it now supports both local and cloud execution. If `OLLAMA_API_KEY` is present and no explicit `OLLAMA_BASE_URL` is supplied, the runtime and generated code default to `https://ollama.com`; otherwise they fall back to local `http://localhost:11434`. Both chat and embedding paths pass bearer auth headers when needed.
+**Ollama local/cloud support:** Ollama remains a single provider, but cloud support is chat-only. If `OLLAMA_API_KEY` is present and no explicit `OLLAMA_BASE_URL` is supplied, chat/runtime generation defaults to `https://ollama.com`; otherwise it falls back to local `http://localhost:11434`. Ollama embeddings must use a local or self-hosted Ollama server, and `https://ollama.com` / `https://ollama.com/v1` should be rejected for embedding use with a clear message.
 
 **Recovery path:** Embedding/vector-store/ingestion setup failures now show likely causes and offer retry, change embedding model, change vector DB settings, or abort. Runtime build failures are wrapped with a clearer production-facing message.
 

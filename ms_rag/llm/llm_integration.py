@@ -12,11 +12,12 @@ from __future__ import annotations
 from typing import Any
 import warnings
 
-from ms_rag.models import PipelineConfig
+from ms_rag.models import PipelineConfig, RetrievalConfig
 from ms_rag.utils.credentials import (
     resolve_credential,
     resolve_model_id,
     resolve_ollama_connection,
+    validate_llm_model,
 )
 from ms_rag.utils.telemetry import TelemetryReporter
 from ms_rag.workflow.rag_type_selector import LANGGRAPH_TYPES
@@ -39,7 +40,7 @@ def get_llm(
         openai        → langchain_openai.ChatOpenAI
         anthropic     → langchain_anthropic.ChatAnthropic
         cohere        → langchain_cohere.ChatCohere
-        huggingface   → langchain_huggingface.HuggingFaceEndpoint
+        huggingface   → langchain_huggingface.ChatHuggingFace + HuggingFaceEndpoint
         google_gemini → langchain_google_genai.ChatGoogleGenerativeAI
         mistral       → langchain_mistralai.ChatMistralAI
         groq          → langchain_groq.ChatGroq
@@ -68,6 +69,7 @@ def get_llm(
         return resolve_credential(field, credential_store, provider_id or provider)
 
     resolved_model = resolve_model_id(provider, model_id, credential_store)
+    validate_llm_model(provider, resolved_model)
 
     if provider == "openai":
         from langchain_openai import ChatOpenAI  # noqa: PLC0415
@@ -98,12 +100,18 @@ def get_llm(
         )
 
     if provider == "huggingface":
-        from langchain_huggingface import HuggingFaceEndpoint  # noqa: PLC0415
-        return HuggingFaceEndpoint(
+        from langchain_huggingface import (  # noqa: PLC0415
+            ChatHuggingFace,
+            HuggingFaceEndpoint,
+        )
+        hf_task = kwargs.pop("task", "conversational")
+        endpoint = HuggingFaceEndpoint(
             repo_id=resolved_model,
             huggingfacehub_api_token=_env("HUGGINGFACEHUB_API_TOKEN"),
+            task=hf_task,
             **kwargs,
         )
+        return ChatHuggingFace(llm=endpoint, model_id=resolved_model)
 
     if provider == "google_gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI  # noqa: PLC0415
@@ -334,6 +342,7 @@ def build_session_runtime_from_vector_store(
     ingestion. Reusing it is important for in-memory stores such as FAISS,
     where creating a new wrapper would lose the just-ingested documents.
     """
+    from ms_rag.ingestion.ingestion_orchestrator import IngestionOrchestrator  # noqa: PLC0415
     from ms_rag.query.context_compressor import ContextCompressor  # noqa: PLC0415
     from ms_rag.query.reranking_module import RerankingModule  # noqa: PLC0415
     from ms_rag.query.retrieval_strategy import RetrievalStrategyModule  # noqa: PLC0415
@@ -343,6 +352,8 @@ def build_session_runtime_from_vector_store(
             "Session config is incomplete — retrieval strategy is required "
             "to build the runtime pipeline."
         )
+    if embeddings is not None:
+        setattr(vector_store, "_ms_rag_embeddings", embeddings)
 
     if config.llm_model:
         provider = config.llm_model.provider
@@ -357,11 +368,65 @@ def build_session_runtime_from_vector_store(
         )
     llm = get_llm(provider, model_id, credential_store=credential_store)
 
+    keyword_corpus: list[str] | None = None
+    if _retrieval_uses_keyword_corpus(config.retrieval):
+        if config.keyword_store is not None:
+            try:
+                from ms_rag.ingestion.keyword_store import KeywordStoreConnector  # noqa: PLC0415
+
+                keyword_corpus = KeywordStoreConnector(credential_store).load_texts(config.keyword_store)
+                if keyword_corpus:
+                    setattr(vector_store, "_ms_rag_keyword_corpus", keyword_corpus)
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"Could not load keyword corpus from persistent keyword store; will try runtime cache/source rebuild: {exc}",
+                    stacklevel=2,
+                )
+        cached = getattr(vector_store, "_ms_rag_keyword_corpus", None)
+        if isinstance(cached, list) and cached:
+            keyword_corpus = cached
+        elif config.document_sources and config.loader_map and config.chunking is not None:
+            try:
+                keyword_corpus = IngestionOrchestrator().build_keyword_corpus(
+                    sources=config.document_sources,
+                    loader_map=config.loader_map,
+                    chunking_config=config.chunking,
+                )
+                setattr(vector_store, "_ms_rag_keyword_corpus", keyword_corpus)
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"Could not rebuild keyword corpus for {config.retrieval.strategy}; "
+                    f"keyword retrieval may degrade: {exc}",
+                    stacklevel=2,
+                )
+
+    if _retrieval_uses_advanced_state(config.retrieval):
+        has_parent_state = bool(getattr(vector_store, "_ms_rag_parent_documents", None))
+        has_chunk_state = bool(getattr(vector_store, "_ms_rag_chunk_documents", None))
+        if not (has_parent_state and has_chunk_state) and config.document_sources and config.loader_map and config.chunking is not None:
+            try:
+                state = IngestionOrchestrator().build_retrieval_state(
+                    sources=config.document_sources,
+                    loader_map=config.loader_map,
+                    chunking_config=config.chunking,
+                )
+                setattr(vector_store, "_ms_rag_parent_documents", state.get("parent_documents", {}))
+                setattr(vector_store, "_ms_rag_chunk_documents", state.get("chunk_documents", []))
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"Could not rebuild advanced retrieval state for {config.retrieval.strategy}; "
+                    f"the selected retriever may degrade: {exc}",
+                    stacklevel=2,
+                )
+
     retrieval_module = RetrievalStrategyModule()
     base_retriever = retrieval_module.get_retriever(
         config.retrieval,
         vector_store,
         llm=llm,
+        corpus_texts=keyword_corpus,
+        embeddings=embeddings,
+        strict_advanced=True,
     )
 
     reranking_module = RerankingModule(credential_store=credential_store)
@@ -391,6 +456,33 @@ def build_session_runtime_from_vector_store(
         "llm": llm,
         "rag_chain": rag_chain,
     }
+
+
+def _retrieval_uses_keyword_corpus(config: PipelineConfig | RetrievalConfig | None) -> bool:
+    """Return True when the retrieval strategy depends on raw text corpus access."""
+    retrieval = config.retrieval if isinstance(config, PipelineConfig) else config
+    if retrieval is None:
+        return False
+    if retrieval.strategy in {"keyword_bm25", "tfidf", "hybrid"}:
+        return True
+    if retrieval.strategy == "ensemble":
+        sub_ids = retrieval.ensemble_sub_retrievers or ["dense_vector", "keyword_bm25"]
+        return any(sub_id in {"keyword_bm25", "tfidf", "hybrid"} for sub_id in sub_ids)
+    return False
+
+
+def _retrieval_uses_advanced_state(config: PipelineConfig | RetrievalConfig | None) -> bool:
+    """Return True when retrieval needs parent/chunk/timestamp runtime state."""
+    retrieval = config.retrieval if isinstance(config, PipelineConfig) else config
+    if retrieval is None:
+        return False
+    advanced = {"parent_child", "multi_vector", "time_weighted"}
+    if retrieval.strategy in advanced:
+        return True
+    if retrieval.strategy == "ensemble":
+        sub_ids = retrieval.ensemble_sub_retrievers or ["dense_vector", "keyword_bm25"]
+        return any(sub_id in advanced for sub_id in sub_ids)
+    return False
 
 
 def invoke_rag_chain(rag_chain: object, query: str, *, requires_langgraph: bool) -> str:

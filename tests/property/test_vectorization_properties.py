@@ -318,7 +318,7 @@ class TestGetEmbeddingsDispatch:
             huggingfacehub_api_token="hf_token",
         )
 
-    def test_ollama_embeddings_use_cloud_headers_when_api_key_present(self) -> None:
+    def test_ollama_embeddings_default_to_local_base_when_api_key_present(self) -> None:
         module = VectorizationModule()
         store = MagicMock()
         store.get.side_effect = lambda provider, field: {
@@ -338,6 +338,24 @@ class TestGetEmbeddingsDispatch:
 
         mock_embeddings.assert_called_once_with(
             model="gpt-oss:120b",
-            base_url="https://ollama.com",
+            base_url="http://localhost:11434",
             client_kwargs={"headers": {"Authorization": "Bearer ollama-token"}},
         )
+
+    def test_ollama_embeddings_reject_cloud_base_url(self) -> None:
+        module = VectorizationModule()
+        store = MagicMock()
+        store.get.side_effect = lambda provider, field: {
+            ("ollama", "OLLAMA_API_KEY"): "ollama-token",
+            ("ollama", "OLLAMA_BASE_URL"): "https://ollama.com/v1",
+        }.get((provider, field))
+        store.all_providers.return_value = ["ollama"]
+
+        config = EmbeddingModelConfig(
+            provider="ollama",
+            model_id="nomic-embed-text",
+            local_path="nomic-embed-text",
+        )
+
+        with pytest.raises(ValueError, match="chat models only"):
+            module.get_embeddings(config, credential_store=store)

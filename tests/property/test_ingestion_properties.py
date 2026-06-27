@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from ms_rag.ingestion.document_type_selector import (
@@ -46,7 +46,7 @@ from ms_rag.models import (
         max_size=10,
     ),
 )
-@settings(max_examples=100)
+@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
 def test_ingestion_failure_isolation(
     num_docs: int, fail_indices: frozenset[int]
 ) -> None:
@@ -288,6 +288,119 @@ def test_load_source_raises_ingestion_error_for_missing_loader() -> None:
             source=fake_path,
             loader_map={"txt": "TextLoader"},  # pdf not included
         )
+
+
+def test_tabula_loader_falls_back_to_pypdf_for_general_pdf_text() -> None:
+    orchestrator = IngestionOrchestrator()
+    fallback_docs = [MagicMock(page_content="resume text")]
+
+    with pytest.warns(UserWarning, match="falling back to PyPDFLoader"), \
+         patch("langchain_community.document_loaders.UnstructuredPDFLoader", side_effect=RuntimeError("tabula unavailable")), \
+         patch("langchain_community.document_loaders.PyPDFLoader") as mock_pypdf:
+            mock_pypdf.return_value.load.return_value = fallback_docs
+            result = orchestrator._invoke_loader("TabulaLoader", "Resume\\resume.pdf")
+
+    assert result == fallback_docs
+    mock_pypdf.assert_called_once_with("Resume\\resume.pdf")
+
+
+def test_camelot_loader_falls_back_to_pypdf_for_general_pdf_text() -> None:
+    orchestrator = IngestionOrchestrator()
+    fallback_docs = [MagicMock(page_content="resume text")]
+
+    with pytest.warns(UserWarning, match="falling back to PyPDFLoader"), \
+         patch("langchain_community.document_loaders.CamelotPDFLoader", side_effect=RuntimeError("camelot unavailable"), create=True), \
+         patch("langchain_community.document_loaders.PyPDFLoader") as mock_pypdf:
+            mock_pypdf.return_value.load.return_value = fallback_docs
+            result = orchestrator._invoke_loader("CamelotLoader", "Resume\\resume.pdf")
+
+    assert result == fallback_docs
+    mock_pypdf.assert_called_once_with("Resume\\resume.pdf")
+
+
+def test_unstructured_pdf_loader_warns_before_falling_back_to_pypdf() -> None:
+    orchestrator = IngestionOrchestrator()
+    fallback_docs = [MagicMock(page_content="resume text")]
+
+    with pytest.warns(UserWarning, match="UnstructuredPDFLoader could not parse"), \
+         patch("langchain_unstructured.UnstructuredLoader", side_effect=RuntimeError("missing dependency")), \
+         patch("langchain_community.document_loaders.PyPDFLoader") as mock_pypdf:
+            mock_pypdf.return_value.load.return_value = fallback_docs
+            result = orchestrator._invoke_loader("UnstructuredPDFLoader", "Resume\\resume.pdf")
+
+    assert result == fallback_docs
+    mock_pypdf.assert_called_once_with("Resume\\resume.pdf")
+
+
+def test_unstructured_docx_loader_warns_before_falling_back_to_docx2txt() -> None:
+    orchestrator = IngestionOrchestrator()
+    fallback_docs = [MagicMock(page_content="resume text")]
+
+    with pytest.warns(UserWarning, match="UnstructuredWordDocumentLoader could not parse"), \
+         patch("langchain_unstructured.UnstructuredLoader", side_effect=RuntimeError("missing dependency")), \
+         patch("langchain_community.document_loaders.Docx2txtLoader") as mock_docx:
+            mock_docx.return_value.load.return_value = fallback_docs
+            result = orchestrator._invoke_loader("UnstructuredWordDocumentLoader", "Resume\\resume.docx")
+
+    assert result == fallback_docs
+    mock_docx.assert_called_once_with("Resume\\resume.docx")
+
+
+def test_ingest_attaches_keyword_corpus_to_vector_store() -> None:
+    orchestrator = IngestionOrchestrator()
+    mock_store = MagicMock()
+    mock_splitter = MagicMock()
+    chunk_a = MagicMock(page_content="first chunk")
+    chunk_b = MagicMock(page_content="second chunk")
+    mock_splitter.split_documents.return_value = [chunk_a, chunk_b]
+
+    with patch.object(orchestrator, "discover_documents", return_value=[Path("doc.txt")]), \
+         patch.object(orchestrator, "_load_source", return_value=[MagicMock(page_content="raw doc")]), \
+         patch("ms_rag.ingestion.ingestion_orchestrator.ChunkingEngine") as mock_chunking:
+        mock_chunking.return_value.get_splitter.return_value = mock_splitter
+        result = orchestrator.ingest(
+            sources=["doc.txt"],
+            loader_map={"txt": "TextLoader"},
+            chunking_config=ChunkingConfig(strategy="recursive_character", chunk_size=100, chunk_overlap=0),
+            embedding_model=EmbeddingModelConfig(provider="openai", model_id="text-embedding-3-small"),
+            vector_db=VectorDBConfig(db_type="faiss", connection_params={}, collection_name="test"),
+            vector_store=mock_store,
+        )
+
+    assert result.chunk_count == 2
+    assert getattr(mock_store, "_ms_rag_keyword_corpus") == ["first chunk", "second chunk"]
+
+
+def test_ingest_attaches_advanced_retrieval_state_to_vector_store() -> None:
+    orchestrator = IngestionOrchestrator()
+    mock_store = MagicMock()
+    parent_doc = MagicMock(page_content="full resume")
+    parent_doc.metadata = {"source": "doc.txt"}
+    chunk = MagicMock(page_content="resume chunk")
+    chunk.metadata = {"source": "doc.txt", "ms_rag_parent_id": "doc.txt::parent::0"}
+    mock_splitter = MagicMock()
+    mock_splitter.split_documents.return_value = [chunk]
+
+    with patch.object(orchestrator, "discover_documents", return_value=[Path("doc.txt")]), \
+         patch.object(orchestrator, "_load_source", return_value=[parent_doc]), \
+         patch("ms_rag.ingestion.ingestion_orchestrator.ChunkingEngine") as mock_chunking:
+        mock_chunking.return_value.get_splitter.return_value = mock_splitter
+        orchestrator.ingest(
+            sources=["doc.txt"],
+            loader_map={"txt": "TextLoader"},
+            chunking_config=ChunkingConfig(strategy="recursive_character", chunk_size=100, chunk_overlap=0),
+            embedding_model=EmbeddingModelConfig(provider="openai", model_id="text-embedding-3-small"),
+            vector_db=VectorDBConfig(db_type="faiss", connection_params={}, collection_name="test"),
+            vector_store=mock_store,
+        )
+
+    parent_documents = getattr(mock_store, "_ms_rag_parent_documents")
+    chunk_documents = getattr(mock_store, "_ms_rag_chunk_documents")
+    assert parent_documents
+    assert chunk_documents == [chunk]
+    assert chunk.metadata["ms_rag_child_id"]
+    assert chunk.metadata["ms_rag_multi_vector_source_id"]
+    assert chunk.metadata["ms_rag_ingested_at"]
 
 
 # ---------------------------------------------------------------------------

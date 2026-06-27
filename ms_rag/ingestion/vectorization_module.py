@@ -249,7 +249,7 @@ EMBEDDING_MODELS: list[EmbeddingModelInfo] = [
         display_name="Ollama (local — enter model name)",
         dimensions=0,
         is_local=True,
-        description="Any Ollama embedding model running locally (e.g. nomic-embed-text)",
+        description="Any local/self-hosted Ollama embedding model (Ollama Cloud chat only; embeddings are not supported there)",
     ),
 ]
 
@@ -379,6 +379,10 @@ class VectorizationModule:
         # Prompt for local path/name for Ollama (Requirement 8.4)
         local_path: str | None = None
         if selected_info and selected_info.model_id == "__user_specified__":
+            console.print(
+                "[dim]  Ollama embeddings require a local or self-hosted Ollama server. "
+                "Ollama Cloud currently supports chat models only.[/dim]"
+            )
             while True:
                 local_path = questionary.text(
                     "  Enter Ollama model name (e.g. nomic-embed-text, mxbai-embed-large):",
@@ -415,7 +419,7 @@ class VectorizationModule:
         elif provider == "ollama":
             console.print(
                 "[yellow]  ⚠ Custom Ollama dimension is model-dependent. "
-                "Check the model's embedding dimension before reusing an existing vector index.[/yellow]"
+                "Use a local/self-hosted Ollama embedding model and check its dimension before reusing an existing vector index.[/yellow]"
             )
 
         return config
@@ -519,7 +523,10 @@ class VectorizationModule:
         if provider == "ollama":
             # Use langchain-ollama (NOT deprecated langchain-community)
             from langchain_ollama import OllamaEmbeddings  # noqa: PLC0415
-            base_url, client_kwargs = resolve_ollama_connection(credential_store)
+            base_url, client_kwargs = resolve_ollama_connection(
+                credential_store,
+                usage="embedding",
+            )
             return OllamaEmbeddings(
                 model=config.local_path or model_id,
                 base_url=base_url,

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import warnings
 
+from ms_rag.utils.error_formatting import format_provider_error
+
 try:
     import questionary
     from rich.console import Console
@@ -278,7 +280,10 @@ class QueryEnhancer:
             chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
             return chain.invoke({"query": query}).strip()
         except Exception as exc:  # noqa: BLE001
-            warnings.warn(f"Query expansion failed; using original query: {exc}", stacklevel=2)
+            warnings.warn(
+                f"Query expansion failed; using original query: {format_provider_error(exc)}",
+                stacklevel=2,
+            )
             return query
 
     def _generate_hypothetical_document(self, query: str, llm: object | None) -> str:
@@ -297,7 +302,10 @@ class QueryEnhancer:
             chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
             return chain.invoke({"query": query}).strip()
         except Exception as exc:  # noqa: BLE001
-            warnings.warn(f"HyDE generation failed; using original query: {exc}", stacklevel=2)
+            warnings.warn(
+                f"HyDE generation failed; using original query: {format_provider_error(exc)}",
+                stacklevel=2,
+            )
             return query
 
     def _generate_multi_queries(

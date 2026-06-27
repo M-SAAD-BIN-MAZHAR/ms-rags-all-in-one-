@@ -11,9 +11,11 @@ Tests (Requirement 12.1-12.7):
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+from langchain_core.documents import Document
 
 from ms_rag.models import MetadataField, RetrievalConfig
 from ms_rag.query.retrieval_strategy import (
@@ -21,6 +23,7 @@ from ms_rag.query.retrieval_strategy import (
     STRATEGY_IDS,
     STRATEGY_MAP,
     RetrievalStrategyModule,
+    _extract_corpus_texts,
 )
 from ms_rag.utils.exceptions import ValidationError
 
@@ -109,6 +112,127 @@ class TestGetRetrieverFactory:
                 if isinstance(exc, ValueError):
                     if "Unsupported retrieval strategy" in str(exc):
                         pytest.fail(f"Strategy {strategy_id!r} raised ValueError: {exc}")
+
+    def test_extract_corpus_texts_reads_faiss_docstore_documents(self) -> None:
+        mock_doc_a = MagicMock()
+        mock_doc_a.page_content = "Muhammad Saad is an AI engineer."
+        mock_doc_b = MagicMock()
+        mock_doc_b.page_content = "Python, Java, and C++ skills."
+
+        mock_store = MagicMock()
+        mock_store.get = MagicMock(side_effect=AttributeError("not supported"))
+        mock_store.docstore = MagicMock()
+        mock_store.docstore._dict = {
+            "a": mock_doc_a,
+            "b": mock_doc_b,
+        }
+
+        texts = _extract_corpus_texts(mock_store)
+
+        assert texts == [
+            "Muhammad Saad is an AI engineer.",
+            "Python, Java, and C++ skills.",
+        ]
+
+    def test_extract_corpus_texts_prefers_cached_ms_rag_keyword_corpus(self) -> None:
+        mock_store = MagicMock()
+        mock_store._ms_rag_keyword_corpus = ["resume text", "skills text"]
+
+        texts = _extract_corpus_texts(mock_store)
+
+        assert texts == ["resume text", "skills text"]
+
+    def test_parent_child_retriever_returns_parent_documents_from_child_hits(self) -> None:
+        module = RetrievalStrategyModule()
+        child = Document(
+            page_content="small child chunk",
+            metadata={"ms_rag_parent_id": "parent-1"},
+        )
+        parent = Document(page_content="larger parent document", metadata={"ms_rag_parent_id": "parent-1"})
+        mock_store = MagicMock()
+        dense = MagicMock()
+        dense.invoke.return_value = [child]
+        mock_store.as_retriever.return_value = dense
+        mock_store._ms_rag_parent_documents = {"parent-1": parent}
+
+        config = RetrievalConfig(strategy="parent_child", top_k=5)
+        result = module.get_retriever(config, mock_store)
+
+        assert result.invoke("query") == [parent]
+
+    def test_parent_child_strict_mode_raises_when_state_missing(self) -> None:
+        module = RetrievalStrategyModule()
+        mock_store = MagicMock()
+        config = RetrievalConfig(strategy="parent_child", top_k=5)
+
+        with pytest.raises(RuntimeError, match="parent document state"):
+            module.get_retriever(config, mock_store, strict_advanced=True)
+
+    def test_time_weighted_retriever_boosts_recent_documents(self) -> None:
+        module = RetrievalStrategyModule()
+        old = Document(
+            page_content="older but first dense hit",
+            metadata={"ms_rag_ingested_at": (datetime.now(UTC) - timedelta(days=30)).isoformat()},
+        )
+        recent = Document(
+            page_content="recent second dense hit",
+            metadata={"ms_rag_ingested_at": datetime.now(UTC).isoformat()},
+        )
+        mock_store = MagicMock()
+        dense = MagicMock()
+        dense.invoke.return_value = [old, recent]
+        mock_store.as_retriever.return_value = dense
+
+        config = RetrievalConfig(strategy="time_weighted", top_k=1)
+        result = module.get_retriever(config, mock_store)
+
+        assert result.invoke("query") == [recent]
+
+    def test_multi_vector_retriever_uses_representation_index_and_returns_source_docs(self) -> None:
+        module = RetrievalStrategyModule()
+        source_doc = Document(
+            page_content="Full resume chunk with Python and RAG experience.",
+            metadata={"ms_rag_multi_vector_source_id": "chunk-1", "source": "resume.pdf"},
+        )
+        mock_store = MagicMock()
+        mock_store._ms_rag_chunk_documents = [source_doc]
+        fake_embeddings = MagicMock()
+
+        representation_hit = Document(
+            page_content="summary",
+            metadata={"ms_rag_multi_vector_source_id": "chunk-1"},
+        )
+        representation_retriever = MagicMock()
+        representation_retriever.invoke.return_value = [representation_hit]
+        representation_store = MagicMock()
+        representation_store.as_retriever.return_value = representation_retriever
+
+        with patch("langchain_community.vectorstores.FAISS.from_documents", return_value=representation_store) as mock_from_docs:
+            config = RetrievalConfig(strategy="multi_vector", top_k=5)
+            result = module.get_retriever(config, mock_store, embeddings=fake_embeddings)
+
+        assert result.invoke("rag query") == [source_doc]
+        mock_from_docs.assert_called_once()
+
+    def test_multi_vector_strict_mode_raises_when_embeddings_missing(self) -> None:
+        module = RetrievalStrategyModule()
+        mock_store = MagicMock()
+        mock_store._ms_rag_chunk_documents = [
+            Document(page_content="chunk", metadata={"ms_rag_multi_vector_source_id": "chunk-1"})
+        ]
+        config = RetrievalConfig(strategy="multi_vector", top_k=5)
+
+        with pytest.raises(RuntimeError, match="embeddings are unavailable"):
+            module.get_retriever(config, mock_store, strict_advanced=True)
+
+    def test_confirm_advanced_requirements_prompts_for_advanced_strategy(self) -> None:
+        module = RetrievalStrategyModule()
+        config = RetrievalConfig(strategy="parent_child", top_k=5)
+
+        with patch("ms_rag.ui.prompts.prompt_required_confirm") as mock_confirm:
+            module._confirm_advanced_requirements(config, MagicMock())
+
+        mock_confirm.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
