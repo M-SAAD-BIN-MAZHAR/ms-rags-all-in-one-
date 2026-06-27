@@ -184,6 +184,8 @@ class CodeGenerator:
         # LLM providers
         for pid in config.configured_providers:
             reqs.update(_PROVIDER_REQUIREMENTS.get(pid, []))
+        if config.llm_model:
+            reqs.update(_PROVIDER_REQUIREMENTS.get(config.llm_model.provider, []))
 
         # Embedding model provider
         if config.embedding_model:
@@ -345,23 +347,35 @@ load_dotenv()
                 lines.append("from pymongo import MongoClient")
 
         # LLM imports
-        for pid in config.configured_providers:
+        llm_providers = list(dict.fromkeys(
+            list(config.configured_providers)
+            + ([config.llm_model.provider] if config.llm_model else [])
+        ))
+        for pid in llm_providers:
             if pid == "openai":
                 lines.append("from langchain_openai import ChatOpenAI")
             elif pid == "anthropic":
                 lines.append("from langchain_anthropic import ChatAnthropic")
             elif pid == "cohere":
                 lines.append("from langchain_cohere import ChatCohere")
+            elif pid == "huggingface":
+                lines.append("from langchain_huggingface import HuggingFaceEndpoint")
             elif pid == "google_gemini":
                 lines.append("from langchain_google_genai import ChatGoogleGenerativeAI")
             elif pid == "mistral":
                 lines.append("from langchain_mistralai import ChatMistralAI")
             elif pid == "groq":
                 lines.append("from langchain_groq import ChatGroq")
+            elif pid == "together_ai":
+                lines.append("from langchain_openai import ChatOpenAI")
+            elif pid == "replicate":
+                lines.append("from langchain_community.llms import Replicate")
             elif pid == "ollama":
                 lines.append("from langchain_ollama import ChatOllama")
             elif pid == "azure_openai":
                 lines.append("from langchain_openai import AzureChatOpenAI")
+            elif pid == "aws_bedrock":
+                lines.append("from langchain_aws import ChatBedrock")
 
         if uses_langgraph:
             lines.append("")
@@ -373,7 +387,11 @@ load_dotenv()
 
     def _render_credentials(self, config: PipelineConfig) -> str:
         lines = ["# ─── Credentials (via environment variables) ─────────────────"]
-        for pid in config.configured_providers:
+        credential_providers = list(dict.fromkeys(
+            list(config.configured_providers)
+            + ([config.llm_model.provider] if config.llm_model else [])
+        ))
+        for pid in credential_providers:
             from ms_rag.config.credential_manager import PROVIDER_FIELDS  # noqa: PLC0415
             for field in PROVIDER_FIELDS.get(pid, []):
                 lines.append(f'{field} = os.getenv("{field}")')
@@ -383,7 +401,7 @@ load_dotenv()
                 if f'{field} = os.getenv("{field}")' not in lines:
                     lines.append(f'{field} = os.getenv("{field}")')
 
-        uses_ollama = "ollama" in config.configured_providers or (
+        uses_ollama = "ollama" in credential_providers or (
             config.embedding_model is not None and config.embedding_model.provider == "ollama"
         )
         if uses_ollama:
@@ -725,17 +743,61 @@ def compress_context(retriever, embeddings):
         base_retriever=retriever,
     )'''
 
-    def _render_lcel_chain(self, config: PipelineConfig) -> str:
-        provider = config.configured_providers[0] if config.configured_providers else "openai"
+    def _render_llm_initializer(self, config: PipelineConfig) -> str:
+        """Render the selected generation LLM constructor."""
+        from ms_rag.utils.credentials import DEFAULT_LLM_MODELS  # noqa: PLC0415
+
+        if config.llm_model:
+            provider = config.llm_model.provider
+            model_id = config.llm_model.model_id
+        elif config.configured_providers:
+            provider = config.configured_providers[0]
+            model_id = DEFAULT_LLM_MODELS.get(provider, "default")
+        else:
+            raise ValueError("Cannot generate pipeline without a selected generation LLM model.")
+
+        model = repr(model_id)
         llm_init = {
-            "openai": 'ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY)',
-            "anthropic": 'ChatAnthropic(model="claude-3-5-sonnet-20241022", api_key=ANTHROPIC_API_KEY)',
-            "cohere": 'ChatCohere(model="command-r-plus", cohere_api_key=COHERE_API_KEY)',
-            "google_gemini": 'ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=GOOGLE_API_KEY)',
-            "mistral": 'ChatMistralAI(model="mistral-large-latest", api_key=MISTRAL_API_KEY)',
-            "groq": 'ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=GROQ_API_KEY)',
-            "ollama": 'ChatOllama(model=os.getenv("OLLAMA_MODEL_NAME", "llama3"), base_url=_ollama_base_url(), client_kwargs=_ollama_client_kwargs())',
-        }.get(provider, 'ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY)')
+            "openai": f"ChatOpenAI(model={model}, openai_api_key=OPENAI_API_KEY)",
+            "anthropic": f"ChatAnthropic(model={model}, api_key=ANTHROPIC_API_KEY)",
+            "cohere": f"ChatCohere(model={model}, cohere_api_key=COHERE_API_KEY)",
+            "huggingface": (
+                f"HuggingFaceEndpoint(repo_id={model}, "
+                "huggingfacehub_api_token=HUGGINGFACEHUB_API_TOKEN)"
+            ),
+            "google_gemini": f"ChatGoogleGenerativeAI(model={model}, google_api_key=GOOGLE_API_KEY)",
+            "mistral": f"ChatMistralAI(model={model}, api_key=MISTRAL_API_KEY)",
+            "groq": f"ChatGroq(model={model}, groq_api_key=GROQ_API_KEY)",
+            "together_ai": (
+                f"ChatOpenAI(model={model}, base_url='https://api.together.xyz/v1', "
+                "openai_api_key=TOGETHER_API_KEY)"
+            ),
+            "replicate": (
+                f"Replicate(model={model}, replicate_api_token=REPLICATE_API_TOKEN)"
+            ),
+            "ollama": (
+                f"ChatOllama(model={model}, base_url=_ollama_base_url(), "
+                "client_kwargs=_ollama_client_kwargs())"
+            ),
+            "azure_openai": (
+                f"AzureChatOpenAI(azure_deployment={model}, "
+                "azure_endpoint=AZURE_OPENAI_ENDPOINT or '', "
+                'api_version=AZURE_OPENAI_API_VERSION or "2024-02-01", '
+                "openai_api_key=AZURE_OPENAI_API_KEY)"
+            ),
+            "aws_bedrock": (
+                f"ChatBedrock(model_id={model}, region_name=AWS_REGION or 'us-east-1', "
+                "aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)"
+            ),
+        }.get(provider)
+        if not llm_init:
+            raise ValueError(
+                f"Unsupported generation LLM provider for code generation: {provider!r}"
+            )
+        return llm_init
+
+    def _render_lcel_chain(self, config: PipelineConfig) -> str:
+        llm_init = self._render_llm_initializer(config)
 
         return f'''# ─── RAG Chain (LCEL) ─────────────────────────────────────────
 def build_rag_chain(retriever):
@@ -765,12 +827,7 @@ def build_rag_chain(retriever):
 
     def _render_langgraph_workflow(self, config: PipelineConfig) -> str:
         rag_type = config.rag_type.rag_type if config.rag_type else "self_rag"
-        provider = config.configured_providers[0] if config.configured_providers else "openai"
-        llm_init = {
-            "openai": 'ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY)',
-            "anthropic": 'ChatAnthropic(model="claude-3-5-sonnet-20241022", api_key=ANTHROPIC_API_KEY)',
-            "ollama": 'ChatOllama(model=os.getenv("OLLAMA_MODEL_NAME", "llama3"), base_url=_ollama_base_url(), client_kwargs=_ollama_client_kwargs())',
-        }.get(provider, 'ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY)')
+        llm_init = self._render_llm_initializer(config)
 
         return f'''# ─── LangGraph Workflow ({rag_type}) ───────────────────────────
 class GraphState(TypedDict):

@@ -1,7 +1,7 @@
 """Runtime evaluator implementations for EvaluationFramework.
 
-Each runner returns metric_name -> score (0.0-1.0). Failures are non-fatal and
-return an empty dict so the query pipeline continues.
+Each runner returns metric_name -> score (0.0-1.0). Failures are non-fatal but
+must emit warnings before falling back or returning an empty result.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -103,7 +104,11 @@ def run_ragas(
                     if isinstance(value, (int, float)):
                         scores[str(col).lower()] = float(value)
         return scores
-    except Exception:
+    except Exception as exc:
+        warnings.warn(
+            f"RAGAS evaluation failed; using lexical fallback metrics: {exc}",
+            stacklevel=2,
+        )
         return lexical_grounding_scores(query, answer, context, prefix="ragas")
 
 
@@ -126,7 +131,11 @@ def run_deepeval(
         metric.measure(test_case)
         score = float(metric.score or 0.0)
         return {"answer_relevancy": score, "deepeval_answer_relevancy": score}
-    except Exception:
+    except Exception as exc:
+        warnings.warn(
+            f"DeepEval evaluation failed; using lexical fallback metrics: {exc}",
+            stacklevel=2,
+        )
         return lexical_grounding_scores(query, answer, context, prefix="deepeval")
 
 
@@ -142,7 +151,11 @@ def run_trulens(
 
         _ = (Feedback, Select)  # validate package import
         return lexical_grounding_scores(query, answer, context, prefix="trulens")
-    except Exception:
+    except Exception as exc:
+        warnings.warn(
+            f"TruLens import/check failed; using lexical fallback metrics: {exc}",
+            stacklevel=2,
+        )
         return lexical_grounding_scores(query, answer, context, prefix="trulens")
 
 
@@ -162,6 +175,10 @@ def run_langsmith(
         project = os.getenv("LANGCHAIN_PROJECT", "ms_rag_pipeline")
 
     if not api_key:
+        warnings.warn(
+            "LangSmith evaluator selected but LANGCHAIN_API_KEY is not configured; skipping LangSmith logging.",
+            stacklevel=2,
+        )
         return {}
 
     try:
@@ -177,7 +194,8 @@ def run_langsmith(
             extra={"context_count": len(context)},
         )
         return {"langsmith_logged": 1.0 if run else 0.0}
-    except Exception:
+    except Exception as exc:
+        warnings.warn(f"LangSmith logging failed: {exc}", stacklevel=2)
         return {}
 
 
@@ -200,6 +218,10 @@ def run_langfuse(
         secret_key = secret_key or os.getenv("LANGFUSE_SECRET_KEY")
 
     if not public_key or not secret_key:
+        warnings.warn(
+            "Langfuse evaluator selected but LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY are not configured; skipping Langfuse logging.",
+            stacklevel=2,
+        )
         return {}
 
     try:
@@ -210,7 +232,8 @@ def run_langfuse(
         trace.span(name="retrieval", metadata={"context_count": len(context)})
         langfuse.flush()
         return {"langfuse_logged": 1.0}
-    except Exception:
+    except Exception as exc:
+        warnings.warn(f"Langfuse logging failed: {exc}", stacklevel=2)
         return {}
 
 
@@ -239,7 +262,11 @@ def run_arize_phoenix(
 
         _ = px
         return lexical_grounding_scores(query, answer, context, prefix="phoenix")
-    except Exception:
+    except Exception as exc:
+        warnings.warn(
+            f"Phoenix import/check failed; using lexical fallback metrics: {exc}",
+            stacklevel=2,
+        )
         return lexical_grounding_scores(query, answer, context, prefix="phoenix")
 
 
@@ -275,7 +302,8 @@ def run_langgraph_trace(
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record) + "\n")
         return {"langgraph_trace_logged": 1.0}
-    except Exception:
+    except Exception as exc:
+        warnings.warn(f"LangGraph trace export failed: {exc}", stacklevel=2)
         return {}
 
 
@@ -303,7 +331,8 @@ def run_monitoring_export(
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record) + "\n")
         return {"monitoring_export_logged": 1.0}
-    except Exception:
+    except Exception as exc:
+        warnings.warn(f"Monitoring metrics export failed: {exc}", stacklevel=2)
         return {}
 
 

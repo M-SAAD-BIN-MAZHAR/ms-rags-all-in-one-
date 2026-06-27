@@ -60,6 +60,18 @@ RuntimeError: FAISS store has no documents yet.
 
 **User permission principle:** Before irreversible or state-changing setup work, keep an explicit confirmation gate. The live setup now reviews embedding model, embedding dimension, vector DB, collection/index, and sources before ingestion, then asks for confirmation before writing vectors.
 
+**Generation model selection:** The CLI now has an explicit Step 2b for selecting the LLM provider/model that will answer user queries. `PipelineConfig.llm_model` stores that selection so live runtime, `/save` + `--load`, and generated standalone pipelines all use the exact selected generation model. Do not silently fall back to OpenAI when no generation model is selected; ask the user to configure providers/models again or fail loudly in non-interactive paths.
+
+**No secret persistence:** `PipelineConfig.to_json()` must not persist vector database secrets or connection strings. Sensitive vector DB `connection_params` are serialized as env-var markers, and saved sessions should re-prompt or resolve them from environment variables on load.
+
+**No silent production degradation:** Query enhancement, retrieval, reranking, compression, and evaluation may keep the query loop alive when a feature fails, but they must emit an explicit warning/log before falling back. Do not add bare `except/pass` paths for user-selected features.
+
+**Prompt cancellation safety:** Interactive steps must re-prompt on `questionary.*().ask()` returning `None`; do not treat cancellation as a real selection, disabled feature, or model/config value. Prefer shared prompt helpers, or local retry loops when tests patch module-level `questionary`.
+
+**Vector DB recovery preserves embedding context:** When vector DB connection recovery re-selects a database, pass the selected embedding model back into `prompt_and_configure()` so `VectorDBConfig.dimension` remains aligned with the embedding model.
+
+**Generated/runtime parity:** If runtime supports an LLM provider, the code generator must generate matching imports, credentials, and constructor code for standalone pipelines. Keep Together AI, Replicate, AWS Bedrock, Ollama cloud/local, HuggingFace endpoint, Azure OpenAI, and OpenAI-compatible providers aligned.
+
 **Embedding/vector DB compatibility:** Step 8 now explains that embedding dimensions must match the vector DB collection/index. Step 9 carries the selected embedding dimension into `VectorDBConfig.dimension` and displays it in the vector DB summary. If users change embedding models, guide them to create a fresh collection/index or re-ingest.
 
 **HuggingFace embedding modes:** HuggingFace embeddings are split into local/downloaded models (`provider="huggingface"`) and hosted token-only endpoint models (`provider="huggingface_endpoint"`). Hosted selections use `HuggingFaceEndpointEmbeddings` with `HUGGINGFACEHUB_API_TOKEN` and model IDs prefixed with `hf-endpoint:` so they do not collide with local model IDs.

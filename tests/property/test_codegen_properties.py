@@ -22,6 +22,7 @@ from ms_rag.codegen.code_generator import CodeGenerator
 from ms_rag.models import (
     ChunkingConfig,
     EmbeddingModelConfig,
+    LLMModelConfig,
     PipelineConfig,
     RAGTypeConfig,
     RetrievalConfig,
@@ -39,8 +40,15 @@ def _make_config(
     providers: list[str] | None = None,
 ) -> PipelineConfig:
     requires_lg = rag_type_id in LANGGRAPH_TYPES
+    selected_providers = providers or ["openai"]
     config = PipelineConfig(
-        configured_providers=providers or ["openai"],
+        configured_providers=selected_providers,
+        llm_model=LLMModelConfig(
+            provider=selected_providers[0],
+            model_id="meta-llama/Meta-Llama-3-8B-Instruct"
+            if selected_providers[0] == "huggingface"
+            else "gpt-4o",
+        ),
         rag_type=RAGTypeConfig(
             rag_type=rag_type_id,
             display_name=rag_type_id.replace("_", " ").title(),
@@ -286,6 +294,82 @@ def test_generated_huggingface_endpoint_embedding_uses_token_only_hosted_class()
     assert 'model="sentence-transformers/all-MiniLM-L6-v2"' in code
     assert 'huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN")' in code
     assert "sentence-transformers>=3.0.0" not in result.requirements_txt
+
+
+def test_generated_huggingface_llm_does_not_fall_back_to_openai() -> None:
+    """A HuggingFace-only run must generate a HuggingFace answer model, not OpenAI."""
+    config = _make_config(providers=["huggingface"])
+    config.llm_model = LLMModelConfig(
+        provider="huggingface",
+        model_id="meta-llama/Meta-Llama-3-8B-Instruct",
+    )
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert "from langchain_huggingface import HuggingFaceEndpoint" in code
+    assert "HuggingFaceEndpoint(repo_id='meta-llama/Meta-Llama-3-8B-Instruct'" in code
+    assert "HUGGINGFACEHUB_API_TOKEN" in code
+    assert "ChatOpenAI(model='gpt-4o'" not in code
+    assert "OPENAI_API_KEY" not in code
+
+
+def test_codegen_requires_generation_llm_when_no_provider_selected() -> None:
+    """Generated code should fail loudly instead of silently defaulting to OpenAI."""
+    config = _make_config()
+    config.configured_providers = []
+    config.llm_model = None
+
+    with pytest.raises(ValueError, match="generation LLM"):
+        CodeGenerator().generate(config)
+
+
+@pytest.mark.parametrize(
+    ("provider", "model_id", "expected_snippets"),
+    [
+        (
+            "together_ai",
+            "meta-llama/Meta-Llama-3-8B-Instruct-Turbo",
+            [
+                "from langchain_openai import ChatOpenAI",
+                "base_url='https://api.together.xyz/v1'",
+                "openai_api_key=TOGETHER_API_KEY",
+            ],
+        ),
+        (
+            "replicate",
+            "meta/meta-llama-3-8b-instruct",
+            [
+                "from langchain_community.llms import Replicate",
+                "replicate_api_token=REPLICATE_API_TOKEN",
+            ],
+        ),
+        (
+            "aws_bedrock",
+            "anthropic.claude-3-5-sonnet-20241022-v2:0",
+            [
+                "from langchain_aws import ChatBedrock",
+                "aws_access_key_id=AWS_ACCESS_KEY_ID",
+                "aws_secret_access_key=AWS_SECRET_ACCESS_KEY",
+            ],
+        ),
+    ],
+)
+def test_generated_llm_providers_match_runtime_support(
+    provider: str,
+    model_id: str,
+    expected_snippets: list[str],
+) -> None:
+    config = _make_config(providers=[provider])
+    config.llm_model = LLMModelConfig(provider=provider, model_id=model_id)
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    for snippet in expected_snippets:
+        assert snippet in code
 
 
 def test_generated_ollama_pipeline_supports_cloud_headers() -> None:

@@ -145,11 +145,14 @@ class ChunkingConfigurator:
             )
             for i, (sid, info) in enumerate(STRATEGY_DESCRIPTIONS.items())
         ]
-        selected: str = questionary.select(
-            "Select chunking strategy:",
-            choices=choices,
-        ).ask()
-        return selected
+        while True:
+            selected: str | None = questionary.select(
+                "Select chunking strategy:",
+                choices=choices,
+            ).ask()
+            if selected:
+                return selected
+            console.print("[yellow]  Selection cancelled — please choose a chunking strategy.[/yellow]")  # type: ignore[union-attr]
 
     def _prompt_int(
         self,
@@ -210,7 +213,7 @@ class ChunkingConfigurator:
         console.print(  # type: ignore[union-attr]
             "  [dim]Custom separators (comma-separated, e.g. '\\n\\n,\\n, ').[/dim]"
         )
-        raw: str = questionary.text(
+        raw: str | None = questionary.text(
             "  Separators (leave blank for defaults ['\\n\\n','\\n',' ','']):",
             default="",
         ).ask()
@@ -237,19 +240,27 @@ class ChunkingConfigurator:
                 questionary.Choice("r50k_base (GPT-3)", "r50k_base"),
                 questionary.Choice("HuggingFace tokenizer (custom)", "__hf__"),
             ]
-            selected: str = questionary.select(
-                "  Select tokenizer:",
-                choices=choices,
-            ).ask()
-            if selected == "__hf__":
-                hf_id: str = questionary.text(
-                    "  HuggingFace tokenizer identifier (e.g. 'bert-base-uncased'):",
+            while True:
+                selected: str | None = questionary.select(
+                    "  Select tokenizer:",
+                    choices=choices,
                 ).ask()
-                return hf_id.strip() if hf_id else "bert-base-uncased"
+                if selected:
+                    break
+                console.print("[yellow]  Selection cancelled — please choose a tokenizer.[/yellow]")  # type: ignore[union-attr]
+            if selected == "__hf__":
+                while True:
+                    hf_id: str | None = questionary.text(
+                        "  HuggingFace tokenizer identifier (e.g. 'bert-base-uncased'):",
+                        default="bert-base-uncased",
+                    ).ask()
+                    if hf_id and hf_id.strip():
+                        return hf_id.strip()
+                    console.print("[red]  ✗ Tokenizer identifier is required.[/red]")  # type: ignore[union-attr]
             return selected
         else:
             # sentence strategy
-            raw: str = questionary.text(
+            raw: str | None = questionary.text(
                 "  Sentence transformer model name "
                 "(default: sentence-transformers/all-MiniLM-L6-v2):",
                 default="sentence-transformers/all-MiniLM-L6-v2",
@@ -262,8 +273,11 @@ class ChunkingConfigurator:
             questionary.Choice(lang.capitalize(), lang)
             for lang in SUPPORTED_LANGUAGES
         ]
-        selected: str = questionary.select(
-            "  Select programming language for code-aware splitting:",
-            choices=choices,
-        ).ask()
-        return selected or "python"
+        while True:
+            selected: str | None = questionary.select(
+                "  Select programming language for code-aware splitting:",
+                choices=choices,
+            ).ask()
+            if selected:
+                return selected
+            console.print("[yellow]  Selection cancelled — please choose a language.[/yellow]")  # type: ignore[union-attr]

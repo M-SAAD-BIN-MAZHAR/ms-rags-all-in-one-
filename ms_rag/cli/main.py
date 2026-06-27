@@ -48,6 +48,7 @@ def run(load_path: str | None = None) -> None:
     # --load: skip setup and jump to query loop
     if load_path:
         from ms_rag.config.credential_manager import CredentialManager  # noqa: PLC0415
+        from ms_rag.ingestion.vectordb_connector import VECTOR_DB_MAP, VectorDBConnector  # noqa: PLC0415
         from ms_rag.llm.llm_integration import rebuild_session_runtime  # noqa: PLC0415
         from ms_rag.session.session_manager import SessionManager  # noqa: PLC0415
         from ms_rag.utils.exceptions import SessionLoadError  # noqa: PLC0415
@@ -66,13 +67,25 @@ def run(load_path: str | None = None) -> None:
             )
             cred_manager = CredentialManager(credential_store=credential_store)
             while True:
-                for pid in config.configured_providers:
+                credential_providers = list(dict.fromkeys(
+                    list(config.configured_providers)
+                    + ([config.llm_model.provider] if config.llm_model else [])
+                ))
+                for pid in credential_providers:
                     creds = cred_manager.collect_credentials(pid)
                     cred_manager.store(pid, creds)
                 if cred_manager.display_summary_and_confirm():
                     break
                 credential_store.clear()
                 console.print("[yellow]  Please re-enter credentials.[/yellow]")
+            if config.vector_db:
+                db_info = VECTOR_DB_MAP.get(config.vector_db.db_type)
+                if db_info and db_info.credential_fields:
+                    console.print(
+                        "[bold cyan]  Re-enter vector database credentials for this saved session.[/bold cyan]"
+                    )
+                    db_connector = VectorDBConnector(credential_store=credential_store)
+                    config.vector_db = db_connector.reprompt_credentials(config.vector_db)
             telemetry.record_event("session.load", "Session loaded", load_path=load_path)
             with telemetry.span("session.rebuild", load_path=load_path):
                 runtime = rebuild_session_runtime(config, credential_store)
@@ -152,7 +165,19 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
                 cred_manager.store(pid, creds)
             if cred_manager.display_summary_and_confirm():
                 config.configured_providers = selected_providers
+                config.llm_model = _prompt_llm_model_selection(
+                    selected_providers,
+                    credential_store,
+                    cred_manager,
+                    con,
+                )
                 telemetry.record_event("credentials.confirmed", "Providers confirmed", providers=selected_providers)
+                telemetry.record_event(
+                    "llm.selected",
+                    "Generation LLM selected",
+                    provider=config.llm_model.provider if config.llm_model else "",
+                    model_id=config.llm_model.model_id if config.llm_model else "",
+                )
                 break
             credential_store.clear()
             print_warning(con, "Let's re-configure your providers.")
@@ -199,7 +224,12 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
 
     # Connection test — must succeed before ingestion (Req 9.4-9.5)
     with telemetry.span("setup.vector_db_connection"):
-        config.vector_db = _ensure_vector_db_connection(db_connector, config.vector_db, con)
+        config.vector_db = _ensure_vector_db_connection(
+            db_connector,
+            config.vector_db,
+            con,
+            embedding_model=config.embedding_model,
+        )
 
     with telemetry.span("setup.sources"):
         config.document_sources = prompt_document_sources(console=con)
@@ -233,6 +263,7 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
     with telemetry.span("setup.query_enhancement"):
         query_enhancer = QueryEnhancer()
         config.query_enhancement = query_enhancer.configure(config.configured_providers)
+        config.hyde_llm_provider = query_enhancer.hyde_llm_provider
 
     # Step 11: Retrieval Strategy
     with telemetry.span("setup.retrieval"):
@@ -296,6 +327,101 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
 
     _run_query_loop(session, eval_framework=eval_framework if config.evaluation_enabled else None)
     return config
+
+
+def _prompt_llm_model_selection(
+    configured_providers: list[str],
+    credential_store: CredentialStore,
+    cred_manager: object,
+    console: object,
+) -> object:
+    """Prompt for the generation LLM, with a recovery path for accidental empty selection."""
+    import questionary  # noqa: PLC0415
+    from ms_rag.models import LLMModelConfig  # noqa: PLC0415
+    from ms_rag.ui.prompts import (  # noqa: PLC0415
+        print_step,
+        print_success,
+        print_warning,
+        prompt_confirm,
+        prompt_select,
+        prompt_text,
+    )
+    from ms_rag.utils.credentials import DEFAULT_LLM_MODELS  # noqa: PLC0415
+
+    def provider_label(provider_id: str) -> str:
+        from ms_rag.config.credential_manager import PROVIDER_DISPLAY_NAMES  # noqa: PLC0415
+
+        return PROVIDER_DISPLAY_NAMES.get(provider_id, provider_id)
+
+    while True:
+        providers = [pid for pid in configured_providers if pid in DEFAULT_LLM_MODELS]
+        if not providers:
+            print_warning(
+                console,
+                "No generation model is available from the selected providers.",
+            )
+            reconfigure = prompt_confirm(
+                "  Configure LLM providers again?",
+                default=True,
+                console=console,
+            )
+            if reconfigure:
+                credential_store.clear()
+                new_providers = cred_manager.prompt_providers()  # type: ignore[union-attr]
+                if not new_providers:
+                    print_warning(console, "Please select at least one LLM provider.")
+                    continue
+                for pid in new_providers:
+                    creds = cred_manager.collect_credentials(pid)  # type: ignore[union-attr]
+                    cred_manager.store(pid, creds)  # type: ignore[union-attr]
+                if cred_manager.display_summary_and_confirm():  # type: ignore[union-attr]
+                    configured_providers[:] = new_providers
+                    continue
+                credential_store.clear()
+                continue
+            raise click.ClickException("A generation LLM model is required to continue.")
+
+        print_step(console, "2b", "Select Generation Model")
+        provider = prompt_select(
+            "  Which provider should answer user questions?",
+            [
+                questionary.Choice(
+                    f"{provider_label(pid)} — default: {DEFAULT_LLM_MODELS[pid]}",
+                    value=pid,
+                )
+                for pid in providers
+            ]
+            + [questionary.Choice("Configure providers again", value="__reconfigure__")],
+            console=console,
+        )
+        if provider == "__reconfigure__":
+            credential_store.clear()
+            new_providers = cred_manager.prompt_providers()  # type: ignore[union-attr]
+            if not new_providers:
+                print_warning(console, "Please select at least one LLM provider.")
+                continue
+            for pid in new_providers:
+                creds = cred_manager.collect_credentials(pid)  # type: ignore[union-attr]
+                cred_manager.store(pid, creds)  # type: ignore[union-attr]
+            if cred_manager.display_summary_and_confirm():  # type: ignore[union-attr]
+                configured_providers[:] = new_providers
+            else:
+                credential_store.clear()
+            continue
+
+        default_model = DEFAULT_LLM_MODELS[provider]
+        model_id = prompt_text(
+            "  Generation model ID:",
+            default=default_model,
+            required=True,
+            console=console,
+        )
+        selected = LLMModelConfig(provider=provider, model_id=str(model_id))
+        print_success(
+            console,
+            f"Generation model: {selected.provider} / {selected.model_id}",
+        )
+        return selected
 
 
 def _display_ingestion_review(config: PipelineConfig, console: object) -> None:
@@ -371,12 +497,22 @@ def _run_ingestion_with_recovery(
             if action == "embedding":
                 config.embedding_model = vectorization.display_and_select(config.configured_providers)  # type: ignore[union-attr]
                 config.vector_db = db_connector.prompt_and_configure(config.embedding_model)  # type: ignore[union-attr]
-                config.vector_db = _ensure_vector_db_connection(db_connector, config.vector_db, console)
+                config.vector_db = _ensure_vector_db_connection(
+                    db_connector,
+                    config.vector_db,
+                    console,
+                    embedding_model=config.embedding_model,
+                )
                 _display_ingestion_review(config, console)
                 continue
             if action == "vectordb":
                 config.vector_db = db_connector.prompt_and_configure(config.embedding_model)  # type: ignore[union-attr]
-                config.vector_db = _ensure_vector_db_connection(db_connector, config.vector_db, console)
+                config.vector_db = _ensure_vector_db_connection(
+                    db_connector,
+                    config.vector_db,
+                    console,
+                    embedding_model=config.embedding_model,
+                )
                 _display_ingestion_review(config, console)
                 continue
             raise click.ClickException("Setup aborted during ingestion.")
@@ -414,6 +550,8 @@ def _ensure_vector_db_connection(
     db_connector: object,
     vector_db_config: object,
     console: object,
+    *,
+    embedding_model: object | None = None,
 ) -> object:
     """Test vector DB connection; re-prompt until successful."""
     import questionary  # noqa: PLC0415
@@ -442,7 +580,7 @@ def _ensure_vector_db_connection(
         if action == "creds":
             config = db_connector.reprompt_credentials(config)  # type: ignore[union-attr]
         else:
-            config = db_connector.prompt_and_configure()  # type: ignore[union-attr]
+            config = db_connector.prompt_and_configure(embedding_model)  # type: ignore[union-attr]
 
 
 def _run_query_loop(session: SessionState, eval_framework: object | None = None) -> None:

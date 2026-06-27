@@ -10,6 +10,7 @@ Requirement 17.3: generated code uses LangGraph for agentic RAG types
 from __future__ import annotations
 
 from typing import Any
+import warnings
 
 from ms_rag.models import PipelineConfig
 from ms_rag.utils.credentials import (
@@ -343,8 +344,18 @@ def build_session_runtime_from_vector_store(
             "to build the runtime pipeline."
         )
 
-    provider = config.configured_providers[0] if config.configured_providers else "ollama"
-    llm = get_llm(provider, "default", credential_store=credential_store)
+    if config.llm_model:
+        provider = config.llm_model.provider
+        model_id = config.llm_model.model_id
+    elif config.configured_providers:
+        provider = config.configured_providers[0]
+        model_id = "default"
+    else:
+        raise ValueError(
+            "No generation LLM model is selected. "
+            "Please configure an LLM provider and model before building the runtime."
+        )
+    llm = get_llm(provider, model_id, credential_store=credential_store)
 
     retrieval_module = RetrievalStrategyModule()
     base_retriever = retrieval_module.get_retriever(
@@ -619,8 +630,13 @@ def process_query(
                     query=query,
                     techniques=cfg.query_enhancement,
                     llm=ss.llm,
+                    hyde_provider=cfg.hyde_llm_provider,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"Query enhancement failed; using the original query: {exc}",
+                    stacklevel=2,
+                )
                 enhanced_queries = [query]
 
         # Use the first enhanced query for retrieval
@@ -654,7 +670,10 @@ def process_query(
                     answer=answer,
                     config=cfg.evaluation,
                 )
-            except Exception:  # noqa: BLE001
-                pass  # evaluation failure is non-fatal
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"Evaluation failed for this query; answer returned without scores: {exc}",
+                    stacklevel=2,
+                )
 
         return answer

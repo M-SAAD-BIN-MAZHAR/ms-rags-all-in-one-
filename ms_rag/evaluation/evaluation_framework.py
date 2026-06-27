@@ -15,6 +15,7 @@ Requirement 16:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import warnings
 
 try:
     import questionary
@@ -174,10 +175,15 @@ class EvaluationFramework:
         console = Console()
         console.print("\n[bold cyan]Step 15 — Evaluation Framework[/bold cyan]\n")
 
-        wants_evaluation: bool = questionary.confirm(
-            "  Do you want to configure evaluation?",
-            default=False,
-        ).ask()
+        while True:
+            result = questionary.confirm(
+                "  Do you want to configure evaluation?",
+                default=False,
+            ).ask()
+            if result is not None:
+                wants_evaluation = bool(result)
+                break
+            console.print("[yellow]  Selection cancelled — please answer yes or no.[/yellow]")
 
         if not wants_evaluation:
             console.print("  [dim]Evaluation disabled.[/dim]")
@@ -262,6 +268,10 @@ class EvaluationFramework:
 
             runner = EVALUATOR_RUNNERS.get(evaluator_id)
             if runner is None:
+                warnings.warn(
+                    f"Evaluator {evaluator_id!r} has no runtime runner; skipping it.",
+                    stacklevel=2,
+                )
                 continue
 
             try:
@@ -276,7 +286,11 @@ class EvaluationFramework:
                     result = runner(query, context, answer)
                 else:
                     result = runner(query, context, answer)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"Evaluator {evaluator_id!r} failed and returned no scores: {exc}",
+                    stacklevel=2,
+                )
                 result = {}
 
             for metric, value in result.items():
@@ -385,7 +399,7 @@ class EvaluationFramework:
 
         for metric, default in CICD_DEFAULT_METRICS.items():
             while True:
-                raw: str = questionary.text(
+                raw: str | None = questionary.text(
                     f"    {metric} threshold (default {default}):",
                     default=str(default),
                 ).ask()
@@ -404,14 +418,19 @@ class EvaluationFramework:
 
         # Allow adding custom metrics
         while True:
-            add_more: bool = questionary.confirm(
-                "  Add a custom metric threshold?",
-                default=False,
-            ).ask()
+            while True:
+                add_more_raw = questionary.confirm(
+                    "  Add a custom metric threshold?",
+                    default=False,
+                ).ask()
+                if add_more_raw is not None:
+                    add_more = bool(add_more_raw)
+                    break
+                console.print("[yellow]  Selection cancelled — please answer yes or no.[/yellow]")  # type: ignore[union-attr]
             if not add_more:
                 break
 
-            metric_name: str = questionary.text("    Custom metric name:").ask()
+            metric_name: str | None = questionary.text("    Custom metric name:").ask()
             if not metric_name or not metric_name.strip():
                 break
 

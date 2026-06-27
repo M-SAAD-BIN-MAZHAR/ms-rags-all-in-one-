@@ -115,20 +115,46 @@ python -m venv .venv
 # Linux / macOS
 source .venv/bin/activate
 
-# 3. Install EVERYTHING — core + all vector DBs + all evaluators + rerankers
+# 3. Install the production feature set
 pip install -e ".[production]"
 
 # 4. Run
 ms-rag
 ```
 
-That's it. **No manual extra installs needed.** The `[production]` extra includes:
+That's it for the standard production feature set. The `[production]` extra includes:
 - All 12 LLM providers
-- All 12 vector databases (Redis via `langchain-redis`, not deprecated `langchain-community`)
+- ChromaDB, FAISS, Pinecone, Qdrant, Weaviate, Milvus, PGVector, Elasticsearch, OpenSearch, MongoDB Atlas, and AWS/Azure-compatible vector integrations
 - All 12 evaluation frameworks with **live runtime scoring** (RAGAS, DeepEval, TruLens, LangSmith, Langfuse, etc.)
 - All rerankers (FlashRank, Cohere)
 - All document loaders (PDF, DOCX, CSV, HTML, YouTube, images, etc.)
 - Aligned `grpcio` pins for Weaviate compatibility (`grpcio>=1.59.5,<1.80.0`)
+
+### Important Redis Install Note
+
+Redis vector support is available, but it is **not included in `[production]`**
+right now because the latest `langchain-redis==0.2.5` package pins
+`hf-xet<1.2.1`, while the modern HuggingFace stack used by MS\_RAG requires
+`hf-xet>=1.4.3`. Installing both in the same fresh environment causes pip to
+fail with a dependency conflict.
+
+If you need Redis vectors, install it intentionally in a Redis-focused
+environment:
+
+```bash
+pip install -e ".[redis]"
+```
+
+For Docker:
+
+```bash
+docker build --build-arg USE_CONSTRAINTS=0 --build-arg INSTALL_EXTRAS=redis -t ms-rag:redis .
+```
+
+Use this Redis-specific path only when Redis is the vector DB you plan to test.
+For most production users, prefer Pinecone, Qdrant, ChromaDB, FAISS, Weaviate,
+Milvus, PGVector, Elasticsearch, OpenSearch, or MongoDB Atlas until the upstream
+`langchain-redis` / `hf-xet` conflict is resolved.
 
 ### Minimal Install (core only)
 
@@ -155,8 +181,9 @@ their machine.
 | Command | What it installs | Recommended for |
 |---------|------------------|-----------------|
 | `docker build -t ms-rag:1.0.0 .` | Core MS\_RAG package and required base dependencies | Fast local testing, basic CLI walkthroughs, lightweight images |
-| `docker build --build-arg INSTALL_EXTRAS=production -t ms-rag:production .` | Core MS\_RAG plus all optional providers, vector DB clients, evaluators, rerankers, telemetry, and loader dependencies | Production-style usage and full feature testing |
+| `docker build --build-arg INSTALL_EXTRAS=production -t ms-rag:production .` | Core MS\_RAG plus production providers, vector DB clients except Redis, evaluators, rerankers, telemetry, and loader dependencies | Production-style usage and full feature testing |
 | `docker build --build-arg INSTALL_EXTRAS=pinecone,qdrant,ragas,rerankers,telemetry -t ms-rag:custom .` | Only the optional extras you name | Smaller images for teams that support a fixed stack |
+| `docker build --build-arg USE_CONSTRAINTS=0 --build-arg INSTALL_EXTRAS=redis -t ms-rag:redis .` | Redis vector support path | Redis-only testing while the upstream Redis/HuggingFace dependency conflict exists |
 
 If you want **all dependencies**, use the production build argument:
 
@@ -166,6 +193,12 @@ docker build --build-arg INSTALL_EXTRAS=production -t ms-rag:production .
 
 The plain `ms-rag:1.0.0` image is intentionally smaller. It is valid, but it does
 not install every optional integration.
+
+Production Docker builds use `constraints-production.txt`. That file pins the
+known-compatible dependency family from the tested MS\_RAG environment so pip
+does not spend a long time trying incompatible dependency combinations.
+It intentionally leaves platform-sensitive scientific wheels to pip so the same
+file can resolve cleanly on Windows and Linux Docker builds.
 
 ### Build The Image
 
@@ -178,8 +211,8 @@ docker build -t ms-rag:1.0.0 .
 ```
 
 To build the full production image with every optional provider, vector
-database, evaluator, reranker, OpenTelemetry exporter, document loader, OCR/PDF
-tool, and local embedding dependency:
+database except Redis, evaluator, reranker, OpenTelemetry exporter, document
+loader, OCR/PDF tool, and local embedding dependency:
 
 ```bash
 docker build --build-arg INSTALL_EXTRAS=production -t ms-rag:production .
@@ -191,12 +224,23 @@ For a custom feature set, pass any optional-extra group from `pyproject.toml`:
 docker build --build-arg INSTALL_EXTRAS=pinecone,qdrant,ragas,rerankers,telemetry -t ms-rag:custom .
 ```
 
+Redis is the exception. Use the Redis-specific Docker command from the
+"Important Redis Install Note" section because the upstream `langchain-redis`
+dependency currently conflicts with the modern HuggingFace dependency family.
+
 If Docker fails while resolving or downloading from `files.pythonhosted.org`, it
 is a Docker network/DNS issue rather than an MS\_RAG code error. Retry the build
 after Docker networking is healthy, or pass your internal package index:
 
 ```bash
 docker build --build-arg PIP_INDEX_URL=https://pypi.org/simple -t ms-rag:1.0.0 .
+```
+
+If Docker fails with `resolution-too-deep`, make sure the build context includes
+`constraints-production.txt` and rebuild without cache:
+
+```bash
+docker build --no-cache --build-arg INSTALL_EXTRAS=production -t ms-rag:production .
 ```
 
 ### Local Equivalent

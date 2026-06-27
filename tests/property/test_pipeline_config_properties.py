@@ -22,6 +22,7 @@ from ms_rag.models import (
     EmbeddingModelConfig,
     EvaluationConfig,
     IngestionResult,
+    LLMModelConfig,
     MetadataField,
     PipelineConfig,
     RAGTypeConfig,
@@ -114,6 +115,15 @@ def embedding_model_strategy(draw: st.DrawFn) -> EmbeddingModelConfig:
 
 
 @st.composite
+def llm_model_strategy(draw: st.DrawFn, providers: list[str]) -> LLMModelConfig:
+    provider = draw(st.sampled_from(providers or PROVIDER_IDS))
+    return LLMModelConfig(
+        provider=provider,
+        model_id=draw(_safe_text),
+    )
+
+
+@st.composite
 def vector_db_strategy(draw: st.DrawFn) -> VectorDBConfig:
     return VectorDBConfig(
         db_type=draw(st.sampled_from([
@@ -183,6 +193,7 @@ def pipeline_config_strategy(draw: st.DrawFn) -> PipelineConfig:
     """Build a structurally valid PipelineConfig with arbitrary (but legal) values."""
     providers = draw(st.lists(st.sampled_from(PROVIDER_IDS), min_size=0, max_size=3, unique=True))
     include_rag = draw(st.booleans())
+    include_llm_model = bool(providers) and draw(st.booleans())
     include_chunking = draw(st.booleans())
     include_embedding = draw(st.booleans())
     include_vector_db = draw(st.booleans())
@@ -194,6 +205,7 @@ def pipeline_config_strategy(draw: st.DrawFn) -> PipelineConfig:
     return PipelineConfig(
         schema_version="1.0",
         configured_providers=providers,
+        llm_model=draw(llm_model_strategy(providers)) if include_llm_model else None,
         rag_type=draw(rag_type_config_strategy()) if include_rag else None,
         document_types=draw(st.lists(
             st.sampled_from(["pdf", "txt", "docx", "csv", "html", "markdown"]),
@@ -254,6 +266,12 @@ def test_pipeline_config_round_trip(config: PipelineConfig) -> None:
     # Top-level scalar fields
     assert restored.schema_version == config.schema_version
     assert restored.configured_providers == config.configured_providers
+    if config.llm_model is None:
+        assert restored.llm_model is None
+    else:
+        assert restored.llm_model is not None
+        assert restored.llm_model.provider == config.llm_model.provider
+        assert restored.llm_model.model_id == config.llm_model.model_id
     assert restored.document_types == config.document_types
     assert restored.loader_map == config.loader_map
     assert restored.query_enhancement == config.query_enhancement

@@ -14,6 +14,58 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+_SAFE_VECTOR_DB_CONFIG_FIELDS = frozenset(
+    {
+        "CHROMA_PERSIST_DIRECTORY",
+        "CHROMA_PERSIST_DIR",
+        "FAISS_INDEX_PATH",
+        "QDRANT_PORT",
+        "WEAVIATE_GRPC_PORT",
+        "MONGODB_ATLAS_DB_NAME",
+        "MONGODB_ATLAS_COLLECTION_NAME",
+        "REDIS_INDEX_NAME",
+        "PINECONE_INDEX_NAME",
+        "PGVECTOR_COLLECTION_NAME",
+        "AZURE_SEARCH_INDEX_NAME",
+    }
+)
+
+
+def _is_sensitive_connection_field(field_name: str) -> bool:
+    """Return True when a vector DB connection field may contain a secret."""
+    upper = field_name.upper()
+    if upper in _SAFE_VECTOR_DB_CONFIG_FIELDS:
+        return False
+    return any(
+        token in upper
+        for token in (
+            "KEY",
+            "SECRET",
+            "TOKEN",
+            "PASSWORD",
+            "CONNECTION_STRING",
+            "CLUSTER_URI",
+            "REDIS_URL",
+            "PGVECTOR",
+            "URI",
+            "URL",
+            "ENDPOINT",
+        )
+    )
+
+
+def _sanitized_vector_db_config(vector_db: "VectorDBConfig | None") -> dict[str, Any] | None:
+    """Serialize vector DB config without leaking connection secrets."""
+    if vector_db is None:
+        return None
+    data = asdict(vector_db)
+    data["connection_params"] = {
+        key: key if _is_sensitive_connection_field(key) else value
+        for key, value in vector_db.connection_params.items()
+    }
+    return data
+
+
 # ---------------------------------------------------------------------------
 # Supporting config types
 # ---------------------------------------------------------------------------
@@ -48,6 +100,14 @@ class EmbeddingModelConfig:
     provider: str            # e.g. "openai", "huggingface", "ollama"
     model_id: str            # e.g. "text-embedding-3-large", "BAAI/bge-m3"
     local_path: str | None = None  # for local/Ollama models — HF model ID or filesystem path
+
+
+@dataclass
+class LLMModelConfig:
+    """Identifies the selected generation model for answering queries."""
+
+    provider: str            # e.g. "openai", "huggingface", "ollama"
+    model_id: str            # e.g. "gpt-4o", "meta-llama/Meta-Llama-3-8B-Instruct"
 
 
 @dataclass
@@ -149,6 +209,7 @@ class PipelineConfig:
 
     # Step 2 — LLM Providers
     configured_providers: list[str] = field(default_factory=list)
+    llm_model: LLMModelConfig | None = None
 
     # Step 3 — RAG Architecture
     rag_type: RAGTypeConfig | None = None
@@ -208,6 +269,7 @@ class PipelineConfig:
             A formatted JSON string.
         """
         data = asdict(self)
+        data["vector_db"] = _sanitized_vector_db_config(self.vector_db)
         return json.dumps(data, indent=2, ensure_ascii=False)
 
     @classmethod
@@ -259,6 +321,11 @@ class PipelineConfig:
                 return None
             return EmbeddingModelConfig(**d)
 
+        def _llm_model(d: dict | None) -> LLMModelConfig | None:
+            if d is None:
+                return None
+            return LLMModelConfig(**d)
+
         def _vector_db(d: dict | None) -> VectorDBConfig | None:
             if d is None:
                 return None
@@ -301,6 +368,7 @@ class PipelineConfig:
         return cls(
             schema_version=data.get("schema_version", "1.0"),
             configured_providers=data.get("configured_providers", []),
+            llm_model=_llm_model(data.get("llm_model")),
             rag_type=_rag_type(data.get("rag_type")),
             document_types=data.get("document_types", []),
             loader_map=data.get("loader_map", {}),

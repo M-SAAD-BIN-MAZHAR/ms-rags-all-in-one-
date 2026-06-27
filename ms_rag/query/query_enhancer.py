@@ -14,6 +14,8 @@ Requirement 11:
 
 from __future__ import annotations
 
+import warnings
+
 try:
     import questionary
     from rich.console import Console
@@ -82,6 +84,9 @@ class QueryEnhancer:
         )
     """
 
+    def __init__(self) -> None:
+        self.hyde_llm_provider: str | None = None
+
     def configure(self, configured_providers: list[str] | None = None) -> list[str]:
         """Interactive yes/no → technique checkbox → optional HyDE LLM selection.
 
@@ -93,14 +98,17 @@ class QueryEnhancer:
         Returns:
             List of selected technique IDs (may be empty if user says no).
         """
+        from ms_rag.ui.prompts import prompt_checkbox, prompt_confirm, prompt_select  # noqa: PLC0415
+
         console = Console()
 
         console.print("\n[bold cyan]Step 10 — Query Enhancement[/bold cyan]\n")
 
-        wants_enhancement: bool = questionary.confirm(
+        wants_enhancement = prompt_confirm(
             "  Do you want to enable query enhancement techniques?",
             default=True,
-        ).ask()
+            console=console,
+        )
 
         if not wants_enhancement:
             console.print("  [dim]Skipping query enhancement — raw query will be used.[/dim]")
@@ -114,10 +122,12 @@ class QueryEnhancer:
             for t in QUERY_ENHANCEMENT_TECHNIQUES
         ]
 
-        selected: list[str] = questionary.checkbox(
+        selected = prompt_checkbox(
             "  Select query enhancement techniques:",
             choices=choices,
-        ).ask()
+            min_selections=0,
+            console=console,
+        )
 
         if not selected:
             console.print("  [dim]No techniques selected — raw query will be used.[/dim]")
@@ -127,6 +137,7 @@ class QueryEnhancer:
         hyde_provider: str | None = None
         if "hyde" in selected:
             hyde_provider = self._select_hyde_llm(configured_providers or [], console)
+            self.hyde_llm_provider = hyde_provider
             console.print(
                 f"  [green]HyDE LLM: [bold]{hyde_provider or 'default'}[/bold][/green]"
             )
@@ -227,7 +238,11 @@ class QueryEnhancer:
                 fused.extend(self._generate_fusion_queries(q, llm, num_queries))
             return list(dict.fromkeys(fused))
 
-        return queries  # unknown technique: pass through
+        warnings.warn(
+            f"Unknown query enhancement technique {technique!r}; using current queries unchanged.",
+            stacklevel=2,
+        )
+        return queries
 
     def _rewrite_query(self, query: str, llm: object | None) -> str:
         """Rewrite query to be clearer and more retrieval-friendly."""
@@ -244,7 +259,8 @@ class QueryEnhancer:
             ])
             chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
             return chain.invoke({"query": query}).strip()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(f"Query rewriting failed; using original query: {exc}", stacklevel=2)
             return query
 
     def _expand_query(self, query: str, llm: object | None) -> str:
@@ -261,7 +277,8 @@ class QueryEnhancer:
             ])
             chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
             return chain.invoke({"query": query}).strip()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(f"Query expansion failed; using original query: {exc}", stacklevel=2)
             return query
 
     def _generate_hypothetical_document(self, query: str, llm: object | None) -> str:
@@ -279,7 +296,8 @@ class QueryEnhancer:
             ])
             chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
             return chain.invoke({"query": query}).strip()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(f"HyDE generation failed; using original query: {exc}", stacklevel=2)
             return query
 
     def _generate_multi_queries(
@@ -300,7 +318,8 @@ class QueryEnhancer:
             raw = chain.invoke({"query": query})
             variants = [line.strip() for line in raw.splitlines() if line.strip()]
             return variants[:n] if variants else [query]
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(f"Multi-query generation failed; using original query: {exc}", stacklevel=2)
             return [query]
 
     def _generate_step_back(self, query: str, llm: object | None) -> str:
@@ -317,7 +336,8 @@ class QueryEnhancer:
             ])
             chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
             return chain.invoke({"query": query}).strip()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(f"Step-back prompting failed; using original query: {exc}", stacklevel=2)
             return query
 
     def _decompose_query(self, query: str, llm: object | None) -> list[str]:
@@ -336,7 +356,8 @@ class QueryEnhancer:
             raw = chain.invoke({"query": query})
             parts = [line.strip() for line in raw.splitlines() if line.strip()]
             return parts if parts else [query]
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(f"Sub-question decomposition failed; using original query: {exc}", stacklevel=2)
             return [query]
 
     def _generate_fusion_queries(
@@ -358,7 +379,8 @@ class QueryEnhancer:
             raw = chain.invoke({"query": query})
             variants = [line.strip() for line in raw.splitlines() if line.strip()]
             return ([query] + variants[:n - 1]) if variants else [query]
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(f"RAG-Fusion query generation failed; using original query: {exc}", stacklevel=2)
             return [query]
 
     def _select_hyde_llm(
@@ -371,14 +393,17 @@ class QueryEnhancer:
             )
             return None
 
+        from ms_rag.ui.prompts import prompt_select  # noqa: PLC0415
+
         choices = [
             questionary.Choice(title=p.replace("_", " ").title(), value=p)
             for p in configured_providers
         ]
 
-        selected: str = questionary.select(
+        selected = prompt_select(
             "  Select LLM provider for HyDE hypothetical document generation:",
             choices=choices,
-        ).ask()
+            console=console,  # type: ignore[arg-type]
+        )
 
         return selected

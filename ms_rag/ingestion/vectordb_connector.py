@@ -16,6 +16,7 @@ Requirement 9:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 
 try:
@@ -324,7 +325,7 @@ class VectorDBConnector:
             ValueError:  If the db_type is not recognised.
         """
         db_type = config.db_type
-        params = config.connection_params
+        params = self._resolved_connection_params(config)
 
         if db_type == "chroma":
             from langchain_chroma import Chroma  # noqa: PLC0415
@@ -602,7 +603,7 @@ class VectorDBConnector:
     def _probe_connection(self, config: VectorDBConfig) -> None:
         """Lightweight connection probe — raises on failure."""
         db_type = config.db_type
-        params = config.connection_params
+        params = self._resolved_connection_params(config)
 
         if db_type in ("chroma", "faiss"):
             # Local DBs — always succeed
@@ -641,6 +642,17 @@ class VectorDBConnector:
             # For other DBs, a simple import check is sufficient for the probe
             # Real connection test happens in get_vector_store()
             pass
+
+    @staticmethod
+    def _resolved_connection_params(config: VectorDBConfig) -> dict[str, str]:
+        """Resolve sanitized env-var markers in connection_params to runtime values."""
+        resolved: dict[str, str] = {}
+        for key, value in config.connection_params.items():
+            if value == key:
+                resolved[key] = os.getenv(key, "")
+            else:
+                resolved[key] = value
+        return resolved
 
 
 class _FAISSFactory:

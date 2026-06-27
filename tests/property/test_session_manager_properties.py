@@ -187,3 +187,26 @@ class TestSessionManagerErrors:
             data = json.loads(path.read_text(encoding="utf-8"))
             assert "schema_version" in data
             assert data["schema_version"] == "1.0"
+
+    def test_save_does_not_persist_vector_db_secrets(self) -> None:
+        manager = SessionManager()
+        config = PipelineConfig(
+            vector_db=VectorDBConfig(
+                db_type="pinecone",
+                connection_params={
+                    "PINECONE_API_KEY": "pc-secret-value",
+                    "PINECONE_INDEX_NAME": "ms-rag-index",
+                },
+                collection_name="ms-rag-index",
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "session.json"
+            manager.save(config, path)
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+
+        assert "pc-secret-value" not in raw
+        assert data["vector_db"]["connection_params"]["PINECONE_API_KEY"] == "PINECONE_API_KEY"
+        assert data["vector_db"]["connection_params"]["PINECONE_INDEX_NAME"] == "ms-rag-index"

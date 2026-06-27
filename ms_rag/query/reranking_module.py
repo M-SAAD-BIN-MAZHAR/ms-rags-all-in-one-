@@ -15,6 +15,7 @@ Requirement 13:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import warnings
 
 try:
     import questionary
@@ -139,13 +140,16 @@ class RerankingModule:
         Returns:
             RerankingConfig if enabled, None if user declines.
         """
+        from ms_rag.ui.prompts import prompt_confirm, prompt_select, prompt_text  # noqa: PLC0415
+
         console = Console()
         console.print("\n[bold cyan]Step 12 — Reranking[/bold cyan]\n")
 
-        wants_reranking: bool = questionary.confirm(
+        wants_reranking = prompt_confirm(
             "  Do you want to enable reranking?",
             default=False,
-        ).ask()
+            console=console,
+        )
 
         if not wants_reranking:
             console.print("  [dim]Reranking disabled.[/dim]")
@@ -165,10 +169,11 @@ class RerankingModule:
         ]
 
         while True:
-            reranker_id: str = questionary.select(
+            reranker_id = prompt_select(
                 "  Select reranker:",
                 choices=choices,
-            ).ask()
+                console=console,
+            )
 
             info = RERANKER_MAP[reranker_id]
 
@@ -187,25 +192,30 @@ class RerankingModule:
         # Local model ID prompt (Req 13.4)
         model_id = DEFAULT_MODEL_IDS.get(reranker_id, "")
         if info.requires_local_model:
-            raw: str = questionary.text(
+            raw = prompt_text(
                 f"  HuggingFace model ID or local path "
                 f"(default: {DEFAULT_MODEL_IDS.get(reranker_id, '')}):",
                 default=DEFAULT_MODEL_IDS.get(reranker_id, ""),
-            ).ask()
+                required=True,
+                console=console,
+            )
             while not raw or not raw.strip():
                 console.print("[red]  ✗ Model ID is required.[/red]")
-                raw = questionary.text(
+                raw = prompt_text(
                     "  HuggingFace model ID or local path:",
-                ).ask()
+                    required=True,
+                    console=console,
+                )
             model_id = raw.strip()
         elif reranker_id == "cohere_reranker":
-            model_raw: str = questionary.select(
+            model_raw = prompt_select(
                 "  Select Cohere reranker model:",
                 choices=[
                     questionary.Choice("rerank-english-v3.0", "rerank-english-v3.0"),
                     questionary.Choice("rerank-multilingual-v3.0", "rerank-multilingual-v3.0"),
                 ],
-            ).ask()
+                console=console,
+            )
             model_id = model_raw
 
         # top_k prompt with immediate validation (Req 13.5)
@@ -264,8 +274,11 @@ class RerankingModule:
             if reranker_id == "flashrank":
                 return self._rerank_flashrank(query, docs, config)
 
-        except Exception:  # noqa: BLE001
-            pass  # fallback: return original top-k
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(
+                f"Reranker {reranker_id!r} failed; returning original top-k documents: {exc}",
+                stacklevel=2,
+            )
 
         return docs[: config.top_k]
 
@@ -381,17 +394,20 @@ class RerankingModule:
 
     def _prompt_rerank_top_k(self, retrieval_top_k: int, console: object) -> int:
         """Prompt for reranking top_k; validate immediately ≤ retrieval_top_k. Req 13.5."""
+        from ms_rag.ui.prompts import prompt_text  # noqa: PLC0415
+
         while True:
-            raw: str = questionary.text(
+            raw = prompt_text(
                 f"  Reranking top_k (must be ≤ {retrieval_top_k}, default 3):",
                 default=str(min(3, retrieval_top_k)),
-            ).ask()
+                console=console,  # type: ignore[arg-type]
+            )
 
-            if not raw or not raw.strip():
+            if not raw or not str(raw).strip():
                 return min(3, retrieval_top_k)
 
             try:
-                value = int(raw.strip())
+                value = int(str(raw).strip())
                 validate_numeric(value, 1, retrieval_top_k, "reranking_top_k")
                 return value
             except ValueError:

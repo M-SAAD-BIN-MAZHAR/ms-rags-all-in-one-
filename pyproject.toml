@@ -129,8 +129,13 @@ arize-phoenix = ["arize-phoenix>=4.0.0", "openinference-instrumentation-langchai
 # ── Individual reranker extras ────────────────────────────────────────────────
 rerankers = ["flashrank>=0.2.0", "cohere>=5.0.0"]
 
-# ── Production — installs EVERYTHING for full feature support ─────────────────
+# ── Production — full feature support except Redis vectors ────────────────────
 # Run: pip install -e ".[production]"
+#
+# Redis is intentionally kept as a separate `redis` extra. The latest
+# langchain-redis release (0.2.5) pins hf-xet<1.2.1, which conflicts with the
+# modern HuggingFace stack used for local/hosted HF embeddings. Install Redis
+# separately only when your environment is prepared for that upstream conflict.
 production = [
     # All vector DBs
     "langchain-pinecone>=0.2.0",
@@ -142,8 +147,6 @@ production = [
     "langchain-milvus>=0.1.0",
     "pymilvus>=2.4.0",
     "langchain-postgres>=0.0.9",
-    "langchain-redis>=0.2.0",
-    "redis>=5.0.0",
     "psycopg2-binary>=2.9.0",
     "pgvector>=0.3.0",
     "langchain-elasticsearch>=0.2.0",

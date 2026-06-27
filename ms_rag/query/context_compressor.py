@@ -15,6 +15,7 @@ Requirement 14:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import warnings
 
 try:
     import questionary
@@ -102,10 +103,15 @@ class ContextCompressor:
 
         console.print("\n[bold cyan]Step 13 — Context Compression[/bold cyan]\n")
 
-        wants_compression: bool = questionary.confirm(
-            "  Do you want to enable context compression?",
-            default=False,
-        ).ask()
+        while True:
+            result = questionary.confirm(
+                "  Do you want to enable context compression?",
+                default=False,
+            ).ask()
+            if result is not None:
+                wants_compression = bool(result)
+                break
+            console.print("[yellow]  Selection cancelled — please answer yes or no.[/yellow]")
 
         if not wants_compression:
             console.print("  [dim]Context compression disabled.[/dim]")
@@ -130,7 +136,7 @@ class ContextCompressor:
 
         selected: list[str] | None = None
         while True:
-            raw: list[str] = questionary.checkbox(
+            raw: list[str] | None = questionary.checkbox(
                 "  Select compression techniques (1-6, applied in checklist order):",
                 choices=choices,
             ).ask()
@@ -203,6 +209,10 @@ class ContextCompressor:
                 compressors.append(comp)
 
         if not compressors:
+            warnings.warn(
+                "No configured context compressors could be built; retrieval will run without compression.",
+                stacklevel=2,
+            )
             return None
 
         if len(compressors) == 1:
@@ -238,6 +248,10 @@ class ContextCompressor:
 
         if technique == "llm_chain_extraction":
             if llm is None:
+                warnings.warn(
+                    "LLM Chain Extraction was selected but no LLM is available; skipping it.",
+                    stacklevel=2,
+                )
                 return None
             from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
                 LLMChainExtractor,
@@ -246,6 +260,10 @@ class ContextCompressor:
 
         if technique == "embeddings_filter":
             if embeddings is None:
+                warnings.warn(
+                    "Embeddings Filter was selected but no embeddings object is available; skipping it.",
+                    stacklevel=2,
+                )
                 return None
             from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
                 EmbeddingsFilter,
@@ -257,6 +275,10 @@ class ContextCompressor:
 
         if technique == "redundancy_removal":
             if embeddings is None:
+                warnings.warn(
+                    "Redundancy Removal was selected but no embeddings object is available; skipping it.",
+                    stacklevel=2,
+                )
                 return None
             from langchain_community.document_transformers import (  # noqa: PLC0415
                 EmbeddingsRedundantFilter,
@@ -273,18 +295,23 @@ class ContextCompressor:
 
         if technique == "summary_compression":
             if llm is None:
+                warnings.warn(
+                    "Summary Compression was selected but no LLM is available; skipping it.",
+                    stacklevel=2,
+                )
                 return None
             from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
                 LLMChainFilter,
             )
             return LLMChainFilter.from_llm(llm)  # type: ignore[arg-type]
 
+        warnings.warn(f"Unknown compression technique {technique!r}; skipping it.", stacklevel=2)
         return None
 
     def _prompt_threshold(self, console: object) -> float:
         """Prompt for Embeddings Filter similarity threshold (Req 14.4)."""
         while True:
-            raw: str = questionary.text(
+            raw: str | None = questionary.text(
                 "  Embeddings filter similarity threshold (0.0-1.0, default 0.75):",
                 default="0.75",
             ).ask()

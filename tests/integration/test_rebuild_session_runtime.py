@@ -14,6 +14,7 @@ from ms_rag.models import (
     ChunkingConfig,
     CredentialStore,
     EmbeddingModelConfig,
+    LLMModelConfig,
     PipelineConfig,
     RAGTypeConfig,
     RetrievalConfig,
@@ -24,6 +25,7 @@ from ms_rag.models import (
 def _minimal_config(*, langgraph: bool = False) -> PipelineConfig:
     return PipelineConfig(
         configured_providers=["openai"],
+        llm_model=LLMModelConfig(provider="openai", model_id="gpt-4o"),
         rag_type=RAGTypeConfig(
             rag_type="self_rag" if langgraph else "naive_rag",
             display_name="Self-RAG" if langgraph else "Naive RAG",
@@ -185,3 +187,38 @@ class TestRebuildSessionRuntime:
         assert runtime["retriever"] is retriever
         mock_get_retriever.assert_called_once()
         assert mock_get_retriever.call_args.args[1] is existing_store
+
+    @patch("ms_rag.llm.llm_integration.build_rag_chain")
+    @patch("ms_rag.llm.llm_integration.get_llm")
+    @patch("ms_rag.query.retrieval_strategy.RetrievalStrategyModule.get_retriever")
+    def test_uses_selected_generation_model(
+        self,
+        mock_get_retriever: MagicMock,
+        mock_get_llm: MagicMock,
+        mock_build_chain: MagicMock,
+    ) -> None:
+        config = _minimal_config()
+        config.configured_providers = ["huggingface"]
+        config.llm_model = LLMModelConfig(
+            provider="huggingface",
+            model_id="meta-llama/Meta-Llama-3-8B-Instruct",
+        )
+        mock_get_retriever.return_value = MagicMock(name="retriever")
+        mock_get_llm.return_value = MagicMock(name="llm")
+        mock_build_chain.return_value = MagicMock(name="rag_chain")
+
+        store = CredentialStore()
+
+        build_session_runtime_from_vector_store(
+            config,
+            store,
+            vector_store=MagicMock(name="vector_store"),
+            embeddings=MagicMock(name="embeddings"),
+        )
+
+        mock_get_llm.assert_called_once()
+        assert mock_get_llm.call_args.args[:2] == (
+            "huggingface",
+            "meta-llama/Meta-Llama-3-8B-Instruct",
+        )
+        assert mock_get_llm.call_args.kwargs["credential_store"] is store

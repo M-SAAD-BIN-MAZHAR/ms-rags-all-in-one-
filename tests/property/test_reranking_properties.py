@@ -72,7 +72,7 @@ def test_prompt_rerank_top_k_reprompts_on_violation(
         m.ask.return_value = str(rerank_k) if call_count["n"] == 1 else str(valid_k)
         return m
 
-    with patch("ms_rag.query.reranking_module.questionary") as mock_q:
+    with patch("ms_rag.ui.prompts.questionary") as mock_q:
         mock_q.text.side_effect = text_side_effect
         result = module._prompt_rerank_top_k(ret_k, console=MagicMock())
 
@@ -197,7 +197,8 @@ class TestRerankMethod:
         docs = [MagicMock() for _ in range(10)]
         config = RerankingConfig(reranker="flashrank", model_id="", top_k=3)
 
-        with patch.object(module, "_rerank_flashrank", side_effect=ImportError("no flashrank")):
+        with patch.object(module, "_rerank_flashrank", side_effect=ImportError("no flashrank")), \
+             pytest.warns(UserWarning, match="Reranker 'flashrank' failed"):
             result = module.rerank("query", docs, config)
 
         # Fallback: returns first top_k from original list

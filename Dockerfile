@@ -5,6 +5,7 @@ FROM python:3.11-slim AS runtime
 ARG INSTALL_EXTRAS=
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG PIP_EXTRA_INDEX_URL=
+ARG USE_CONSTRAINTS=1
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -32,18 +33,20 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md requirements.txt ./
+COPY pyproject.toml README.md requirements.txt constraints-production.txt ./
 COPY ms_rag ./ms_rag
 
 RUN if [ -n "$PIP_EXTRA_INDEX_URL" ]; then \
         python -m pip config set global.extra-index-url "$PIP_EXTRA_INDEX_URL"; \
     fi \
     && python -m pip install --upgrade --retries 10 --timeout 120 pip setuptools wheel \
+    && CONSTRAINT_ARGS="" \
+    && if [ "$USE_CONSTRAINTS" = "1" ]; then CONSTRAINT_ARGS="-c constraints-production.txt"; fi \
     && for attempt in 1 2 3; do \
         if [ -n "$INSTALL_EXTRAS" ]; then \
-            python -m pip install --prefer-binary --retries 10 --timeout 120 -e ".[${INSTALL_EXTRAS}]"; \
+            python -m pip install --prefer-binary --retries 10 --timeout 120 $CONSTRAINT_ARGS -e ".[${INSTALL_EXTRAS}]"; \
         else \
-            python -m pip install --prefer-binary --retries 10 --timeout 120 -e .; \
+            python -m pip install --prefer-binary --retries 10 --timeout 120 $CONSTRAINT_ARGS -e .; \
         fi && break; \
         if [ "$attempt" = "3" ]; then exit 1; fi; \
         echo "pip install failed; retrying in $((attempt * 10)) seconds..."; \

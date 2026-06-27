@@ -226,6 +226,62 @@ class TestGetVectorStoreDispatch:
             "faiss_indexes/test_collection"
         )
 
+    def test_sanitized_connection_param_marker_resolves_from_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        connector = VectorDBConnector()
+        config = VectorDBConfig(
+            db_type="qdrant",
+            connection_params={
+                "QDRANT_URL": "QDRANT_URL",
+                "QDRANT_API_KEY": "QDRANT_API_KEY",
+            },
+            collection_name="test_collection",
+        )
+        monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")
+        monkeypatch.setenv("QDRANT_API_KEY", "qdrant-secret")
+
+        with patch("qdrant_client.QdrantClient") as mock_client, \
+             patch("langchain_qdrant.QdrantVectorStore") as mock_store:
+            connector.get_vector_store(config, MagicMock())
+
+        assert mock_client.call_args.kwargs["url"] == "https://qdrant.example"
+        assert mock_client.call_args.kwargs["api_key"] == "qdrant-secret"
+        assert mock_store.called
+
+
+def test_connection_reselect_preserves_embedding_model_for_dimension() -> None:
+    """Connection failure recovery must pass embedding model into DB re-selection."""
+    from ms_rag.cli.main import _ensure_vector_db_connection  # noqa: PLC0415
+
+    connector = MagicMock()
+    original = _make_config("qdrant")
+    reselected = VectorDBConfig(
+        db_type="chroma",
+        connection_params={},
+        collection_name="new_collection",
+        dimension=1536,
+    )
+    embedding = EmbeddingModelConfig(
+        provider="openai",
+        model_id="text-embedding-3-small",
+    )
+    connector.test_connection.side_effect = [
+        ConnectionResult(success=False, error_message="bad connection"),
+        ConnectionResult(success=True),
+    ]
+    connector.prompt_and_configure.return_value = reselected
+
+    with patch("ms_rag.ui.prompts.questionary") as mock_prompt_q:
+        mock_prompt_q.select.return_value.ask.return_value = "reselect"
+        result = _ensure_vector_db_connection(
+            connector,
+            original,
+            MagicMock(),
+            embedding_model=embedding,
+        )
+
+    connector.prompt_and_configure.assert_called_once_with(embedding)
+    assert result is reselected
+
     def test_embedding_dimension_is_carried_into_vector_db_config(self) -> None:
         connector = VectorDBConnector()
         embedding = EmbeddingModelConfig(

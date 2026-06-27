@@ -47,15 +47,16 @@ def test_query_enhancement_configuration_round_trip(
 
     # Mock: user says yes, then selects the given techniques
     with patch("ms_rag.query.query_enhancer.questionary") as mock_q, \
+         patch("ms_rag.ui.prompts.questionary") as mock_prompt_q, \
          patch("ms_rag.query.query_enhancer.Console"):
 
         mock_confirm = MagicMock()
         mock_confirm.ask.return_value = True  # wants enhancement
-        mock_q.confirm.return_value = mock_confirm
+        mock_prompt_q.confirm.return_value = mock_confirm
 
         mock_checkbox = MagicMock()
         mock_checkbox.ask.return_value = techniques_list
-        mock_q.checkbox.return_value = mock_checkbox
+        mock_prompt_q.checkbox.return_value = mock_checkbox
 
         mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
 
@@ -63,7 +64,7 @@ def test_query_enhancement_configuration_round_trip(
         if "hyde" in techniques:
             mock_select = MagicMock()
             mock_select.ask.return_value = "openai"
-            mock_q.select.return_value = mock_select
+            mock_prompt_q.select.return_value = mock_select
 
         result = enhancer.configure(configured_providers=["openai"])
 
@@ -77,11 +78,12 @@ def test_no_enhancement_returns_empty_list() -> None:
     enhancer = QueryEnhancer()
 
     with patch("ms_rag.query.query_enhancer.questionary") as mock_q, \
+         patch("ms_rag.ui.prompts.questionary") as mock_prompt_q, \
          patch("ms_rag.query.query_enhancer.Console"):
 
         mock_confirm = MagicMock()
         mock_confirm.ask.return_value = False  # declines enhancement
-        mock_q.confirm.return_value = mock_confirm
+        mock_prompt_q.confirm.return_value = mock_confirm
 
         result = enhancer.configure()
 
@@ -93,20 +95,38 @@ def test_empty_checkbox_selection_returns_empty_list() -> None:
     enhancer = QueryEnhancer()
 
     with patch("ms_rag.query.query_enhancer.questionary") as mock_q, \
+         patch("ms_rag.ui.prompts.questionary") as mock_prompt_q, \
          patch("ms_rag.query.query_enhancer.Console"):
 
         mock_confirm = MagicMock()
         mock_confirm.ask.return_value = True
-        mock_q.confirm.return_value = mock_confirm
+        mock_prompt_q.confirm.return_value = mock_confirm
 
         mock_checkbox = MagicMock()
         mock_checkbox.ask.return_value = []
-        mock_q.checkbox.return_value = mock_checkbox
+        mock_prompt_q.checkbox.return_value = mock_checkbox
         mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
 
         result = enhancer.configure()
 
     assert result == []
+
+
+def test_hyde_provider_selection_is_exposed_for_persistence() -> None:
+    enhancer = QueryEnhancer()
+
+    with patch("ms_rag.query.query_enhancer.questionary") as mock_q, \
+         patch("ms_rag.ui.prompts.questionary") as mock_prompt_q, \
+         patch("ms_rag.query.query_enhancer.Console"):
+        mock_prompt_q.confirm.return_value.ask.return_value = True
+        mock_prompt_q.checkbox.return_value.ask.return_value = ["hyde"]
+        mock_prompt_q.select.return_value.ask.return_value = "groq"
+        mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
+
+        result = enhancer.configure(configured_providers=["openai", "groq"])
+
+    assert result == ["hyde"]
+    assert enhancer.hyde_llm_provider == "groq"
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +170,8 @@ def test_enhance_failure_is_non_fatal() -> None:
     def always_fail(technique, queries, llm, num_queries) -> list[str]:
         raise RuntimeError("technique failed")
 
-    with patch.object(enhancer, "_apply_technique", side_effect=always_fail):
+    with patch.object(enhancer, "_apply_technique", side_effect=always_fail), \
+         pytest.warns(UserWarning, match="technique failed"):
         result = enhancer.enhance("test query", techniques=["query_rewriting"], llm=None)
 
     # Should return the original query despite the failure

@@ -16,6 +16,7 @@ Requirement 12:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import warnings
 
 try:
     import questionary
@@ -117,8 +118,11 @@ def _extract_corpus_texts(vector_store: object) -> list[str]:
                     texts.append(doc)
                 elif hasattr(doc, "page_content") and doc.page_content.strip():
                     texts.append(doc.page_content)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(
+                f"Could not extract documents from vector_store.get(); keyword retrieval may degrade: {exc}",
+                stacklevel=2,
+            )
 
     if not texts:
         collection = getattr(vector_store, "_collection", None)
@@ -128,8 +132,11 @@ def _extract_corpus_texts(vector_store: object) -> list[str]:
                 for doc in raw.get("documents", []) or []:
                     if isinstance(doc, str) and doc.strip():
                         texts.append(doc)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"Could not extract documents from vector store collection; keyword retrieval may degrade: {exc}",
+                    stacklevel=2,
+                )
 
     return texts
 
@@ -255,6 +262,10 @@ class RetrievalStrategyModule:
             from langchain_community.retrievers import BM25Retriever  # noqa: PLC0415
             texts = _extract_corpus_texts(vector_store)
             if not texts:
+                warnings.warn(
+                    "BM25 retrieval selected but no corpus texts were available; falling back to dense vector retrieval.",
+                    stacklevel=2,
+                )
                 return vector_store.as_retriever(  # type: ignore[union-attr]
                     search_kwargs={"k": config.top_k},
                 )
@@ -264,6 +275,10 @@ class RetrievalStrategyModule:
             from langchain_community.retrievers import TFIDFRetriever  # noqa: PLC0415
             texts = _extract_corpus_texts(vector_store)
             if not texts:
+                warnings.warn(
+                    "TF-IDF retrieval selected but no corpus texts were available; falling back to dense vector retrieval.",
+                    stacklevel=2,
+                )
                 return vector_store.as_retriever(  # type: ignore[union-attr]
                     search_kwargs={"k": config.top_k},
                 )
@@ -278,6 +293,10 @@ class RetrievalStrategyModule:
             )
             texts = _extract_corpus_texts(vector_store)
             if not texts:
+                warnings.warn(
+                    "Hybrid retrieval selected but no keyword corpus texts were available; using dense vector retrieval only.",
+                    stacklevel=2,
+                )
                 return dense
             bm25 = BM25Retriever.from_texts(texts, k=config.top_k)
             return EnsembleRetriever(
@@ -326,7 +345,10 @@ class RetrievalStrategyModule:
 
         if strategy == "self_query":
             if llm is None:
-                # Fallback to dense_vector without self-query
+                warnings.warn(
+                    "Self-Query retrieval selected but no LLM is available; falling back to dense vector retrieval.",
+                    stacklevel=2,
+                )
                 return vector_store.as_retriever(  # type: ignore[union-attr]
                     search_kwargs={"k": config.top_k}
                 )
@@ -426,19 +448,24 @@ class RetrievalStrategyModule:
                 console.print("[red]  ✗ At least one metadata field is required.[/red]")  # type: ignore[union-attr]
                 continue
 
-            data_type: str = questionary.select(
-                "    Data type:",
-                choices=[questionary.Choice(dt, dt) for dt in DATA_TYPES],
-            ).ask()
+            while True:
+                data_type: str | None = questionary.select(
+                    "    Data type:",
+                    choices=[questionary.Choice(dt, dt) for dt in DATA_TYPES],
+                ).ask()
+                if data_type:
+                    break
+                console.print("[yellow]  Selection cancelled — please choose a metadata data type.[/yellow]")  # type: ignore[union-attr]
 
-            description: str = questionary.text("    Description:").ask()
+            description: str | None = questionary.text("    Description:").ask()
             fields.append(MetadataField(
                 name=name.strip(),
                 data_type=data_type,
                 description=(description or "").strip(),
             ))
 
-            more: bool = questionary.confirm("    Add another field?", default=False).ask()
+            more_raw = questionary.confirm("    Add another field?", default=False).ask()
+            more = bool(more_raw) if more_raw is not None else False
             if not more:
                 break
 
