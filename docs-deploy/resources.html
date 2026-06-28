@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Official Resources - MS-RAGS(ALL-IN-ONE) Docs</title>
+    <link rel="stylesheet" href="assets/styles.css">
+  </head>
+  <body>
+    <div class="site">
+      <aside class="sidebar">
+        <a class="brand" href="index.html"><strong>MS-RAGS(ALL-IN-ONE)</strong><span>Production RAG framework builder</span></a>
+        <div class="nav-title">Start</div>
+        <a href="index.html">Overview</a><a href="getting-started.html">Getting started</a><a href="recommendations.html">Recommendations</a>
+        <div class="nav-title">Core Concepts</div>
+        <a href="rag-types.html">RAG types</a><a href="pipeline.html">Pipeline components</a><a href="databases.html">Vector databases</a>
+        <div class="nav-title">Production</div>
+        <a href="production.html">Production readiness</a><a class="active" href="resources.html">Official resources</a>
+        <div class="nav-title">Project</div>
+        <a href="https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-" rel="noopener">GitHub repository</a>
+      </aside>
+      <div class="content">
+        <div class="mobile-bar"><strong>MS-RAGS(ALL-IN-ONE) Docs</strong><button type="button" data-mobile-toggle>Menu</button></div>
+        <header class="page-header">
+          <p class="eyebrow">Reference</p>
+          <h1>Official Resources</h1>
+          <p>Use these links when you need the official service documentation, pricing, setup instructions, API references, or product pages behind a feature in MS-RAGS(ALL-IN-ONE).</p>
+        </header>
+        <main>
+          <section>
+            <h2>How To Use This Page</h2>
+            <p class="lead">
+              These are the official websites for the third-party services and
+              libraries mentioned across the MS-RAGS(ALL-IN-ONE) Docs. Use them to confirm current
+              pricing, model names, API limits, deployment instructions, data-handling
+              policies, and SDK setup before using a provider in production.
+            </p>
+            <div class="grid">
+              <div class="card"><h3>Before entering credentials</h3><p>Open the provider's official site, confirm the account is active, confirm the model or database feature exists in your region, and create a scoped API key.</p></div>
+              <div class="card"><h3>Before changing embeddings</h3><p>Check the model dimension and create a fresh collection or index when dimensions change. Mixing dimensions breaks ingestion or weakens retrieval.</p></div>
+              <div class="card"><h3>Before launch</h3><p>Review rate limits, logs, tracing support, retention policy, backups, and whether your documents may be sent to an external hosted API.</p></div>
+            </div>
+          </section>
+
+          <section>
+            <h2>MS-RAGS(ALL-IN-ONE) Project</h2>
+            <ul class="resource-list">
+              <li><a href="https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-" rel="noopener">MS-RAGS(ALL-IN-ONE) GitHub repository</a><br>Source code, issues, releases, and contribution history.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>LLM And Embedding Providers</h2>
+            <p>
+              Use these services for chat generation, embeddings, reranking, query
+              rewriting, or evaluation depending on the selected pipeline. Hosted
+              providers require credentials and send requests to external APIs; local
+              providers keep inference on the user's machine when configured that way.
+            </p>
+            <ul class="resource-list">
+              <li><a href="https://openai.com/api/" rel="noopener">OpenAI</a><br>General hosted chat and embedding default.</li>
+              <li><a href="https://www.anthropic.com/" rel="noopener">Anthropic</a><br>Hosted chat models for careful long-form responses.</li>
+              <li><a href="https://cohere.com/" rel="noopener">Cohere</a><br>Embeddings and hosted reranking.</li>
+              <li><a href="https://huggingface.co/" rel="noopener">Hugging Face</a><br>Hosted inference endpoints and model ecosystem.</li>
+              <li><a href="https://ai.google.dev/" rel="noopener">Google Gemini API</a><br>Google-hosted generation workflows.</li>
+              <li><a href="https://mistral.ai/" rel="noopener">Mistral AI</a><br>Hosted chat and embedding models.</li>
+              <li><a href="https://groq.com/" rel="noopener">Groq</a><br>Low-latency hosted inference.</li>
+              <li><a href="https://www.together.ai/" rel="noopener">Together AI</a><br>Hosted open model inference.</li>
+              <li><a href="https://replicate.com/" rel="noopener">Replicate</a><br>Hosted model experimentation.</li>
+              <li><a href="https://azure.microsoft.com/en-us/products/ai-services/openai-service" rel="noopener">Azure OpenAI Service</a><br>Azure enterprise OpenAI deployments.</li>
+              <li><a href="https://aws.amazon.com/bedrock/" rel="noopener">AWS Bedrock</a><br>AWS-managed foundation model access.</li>
+              <li><a href="https://ollama.com/" rel="noopener">Ollama</a><br>Local Ollama plus Ollama Cloud for chat; embeddings should use local or self-hosted Ollama.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>Frameworks And Runtime Libraries</h2>
+            <p>
+              These libraries power the generated RAG pipeline, agentic workflows,
+              terminal UI, automated tests, and production telemetry.
+            </p>
+            <ul class="resource-list">
+              <li><a href="https://www.langchain.com/" rel="noopener">LangChain</a><br>Core chains, retrievers, loaders, vector store integrations, and LCEL composition.</li>
+              <li><a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a><br>State-machine workflows for Agentic RAG, Self-RAG, CRAG, and Adaptive RAG.</li>
+              <li><a href="https://rich.readthedocs.io/" rel="noopener">Rich terminal UI</a><br>Readable tables, panels, progress, and status output in the CLI.</li>
+              <li><a href="https://hypothesis.readthedocs.io/" rel="noopener">Hypothesis testing</a><br>Property-based tests for validation and generated-code invariants.</li>
+              <li><a href="https://opentelemetry.io/" rel="noopener">OpenTelemetry</a><br>Vendor-neutral traces for ingestion, retrieval, query, and generation phases.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>Vector Databases</h2>
+            <p>
+              Vector databases store embeddings and metadata. The most important
+              production checks are embedding dimension compatibility, collection
+              naming, filtering support, backup strategy, and a live add/query smoke
+              test with the exact backend users will run.
+            </p>
+            <ul class="resource-list">
+              <li><a href="https://www.trychroma.com/" rel="noopener">ChromaDB</a><br>Local-first development and simple persisted collections.</li>
+              <li><a href="https://faiss.ai/" rel="noopener">FAISS</a><br>Fast local similarity search with file-backed persistence in MS-RAGS(ALL-IN-ONE).</li>
+              <li><a href="https://www.pinecone.io/" rel="noopener">Pinecone</a><br>Managed vector database for production deployments.</li>
+              <li><a href="https://qdrant.tech/" rel="noopener">Qdrant</a><br>Local or cloud vector search with filtering-friendly production behavior.</li>
+              <li><a href="https://weaviate.io/" rel="noopener">Weaviate</a><br>Schema-rich vector database with hybrid search options.</li>
+              <li><a href="https://milvus.io/" rel="noopener">Milvus</a><br>Large-scale vector database for heavier infrastructure teams.</li>
+              <li><a href="https://redis.io/" rel="noopener">Redis</a><br>Low-latency vector search when Redis is already in the stack.</li>
+              <li><a href="https://github.com/pgvector/pgvector" rel="noopener">PGVector</a><br>PostgreSQL-native vector search through the pgvector extension.</li>
+              <li><a href="https://www.elastic.co/elasticsearch" rel="noopener">Elasticsearch</a><br>Enterprise search combining lexical and vector retrieval.</li>
+              <li><a href="https://opensearch.org/" rel="noopener">OpenSearch</a><br>Open search stack commonly used in AWS environments.</li>
+              <li><a href="https://azure.microsoft.com/en-us/products/ai-services/ai-search" rel="noopener">Azure AI Search</a><br>Azure-hosted search with vector search capabilities.</li>
+              <li><a href="https://www.mongodb.com/products/platform/atlas-vector-search" rel="noopener">MongoDB Atlas Vector Search</a><br>Vector search for MongoDB Atlas document applications.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>Document Parsing And Web Extraction</h2>
+            <p>
+              Extraction quality controls the quality of the final answers. When a
+              simple loader loses layout, tables, OCR text, or web-rendered content,
+              use a more specialized parser and inspect retrieved chunks before launch.
+            </p>
+            <ul class="resource-list">
+              <li><a href="https://unstructured.io/" rel="noopener">Unstructured</a><br>Document parsing for PDFs, Word, PowerPoint, HTML, images, and more.</li>
+              <li><a href="https://www.llamaindex.ai/llamaparse" rel="noopener">LlamaParse</a><br>Advanced document parsing for complex PDF and layout-heavy content.</li>
+              <li><a href="https://www.firecrawl.dev/" rel="noopener">Firecrawl</a><br>Web crawling and page extraction for RAG ingestion.</li>
+              <li><a href="https://apify.com/" rel="noopener">Apify</a><br>Web scraping and automation platform for dynamic websites.</li>
+              <li><a href="https://pypdf.readthedocs.io/" rel="noopener">pypdf</a><br>Python PDF text extraction and manipulation.</li>
+              <li><a href="https://github.com/jsvine/pdfplumber" rel="noopener">pdfplumber</a><br>PDF extraction with stronger layout and table inspection.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>Evaluation And Observability</h2>
+            <p>
+              Production RAG should be measured. Use evaluation tools for answer
+              quality and tracing tools for operational visibility into ingestion,
+              retrieval, reranking, generation, and provider failures.
+            </p>
+            <ul class="resource-list">
+              <li><a href="https://docs.ragas.io/" rel="noopener">RAGAS</a><br>Faithfulness, context precision, recall, and answer quality evaluation.</li>
+              <li><a href="https://www.deepeval.com/" rel="noopener">DeepEval</a><br>LLM evaluation test cases and metrics.</li>
+              <li><a href="https://www.trulens.org/" rel="noopener">TruLens</a><br>Feedback functions and RAG quality analysis.</li>
+              <li><a href="https://www.langchain.com/langsmith" rel="noopener">LangSmith</a><br>Tracing, debugging, datasets, and evaluation for LangChain apps.</li>
+              <li><a href="https://langfuse.com/" rel="noopener">Langfuse</a><br>Open-source LLM observability and prompt monitoring.</li>
+              <li><a href="https://phoenix.arize.com/" rel="noopener">Arize Phoenix</a><br>LLM observability, tracing, and evaluation workflows.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>Beginner Shortcut</h2>
+            <div class="callout">
+              If you do not know which service to pick yet, start with one hosted LLM,
+              one hosted embedding model, ChromaDB locally, Recursive Character
+              chunking, Dense Vector retrieval, and no reranker. Once answers work,
+              move one layer at a time: better extraction, better chunking, better
+              retrieval, reranking, evaluation, and tracing.
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+    <script src="assets/app.js"></script>
+  </body>
+</html>
+

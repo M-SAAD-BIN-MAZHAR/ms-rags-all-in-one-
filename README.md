@@ -21,6 +21,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 [![Code style: production](https://img.shields.io/badge/code%20style-production-blue)]()
 
+[Live Documentation](https://ms-rags-all-in-one.vercel.app/) · [GitHub Repository](https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-)
+
 </div>
 
 ---
@@ -125,7 +127,7 @@ ms-rags
 That's it for the standard production feature set. The `[production]` extra includes:
 - All 12 LLM providers
 - ChromaDB, FAISS, Pinecone, Qdrant, Weaviate, Milvus, PGVector, Elasticsearch, OpenSearch, MongoDB Atlas, and AWS/Azure-compatible vector integrations
-- All 11 evaluation options are explicit about their runtime mode: package-backed scoring for RAGAS/DeepEval, modern TruLens package validation plus groundedness scores, LangSmith/Langfuse tracing, Phoenix OpenInference export, ARES package availability plus compatible scores, RAGBench dataset-compatible scoring, CI/CD gates, LangGraph trace export, and monitoring export.
+- All 11 evaluation options are explicit about their runtime mode: package-backed scoring for RAGAS/DeepEval, modern TruLens package validation plus groundedness scores, LangSmith/Langfuse tracing, Phoenix OpenInference export, ARES-compatible scores, RAGBench dataset-compatible scoring, CI/CD gates, LangGraph trace export, and monitoring export.
 - All rerankers (FlashRank, Cohere)
 - All document loaders (PDF, DOCX, CSV, Excel, PPTX, HTML, Markdown, JSON, XML, YouTube, images/OCR, ePub, RTF, code, SQL, MongoDB, etc.)
 - Production parser extras include Unstructured support for PPTX, Markdown, image OCR, ePub, and RTF, plus `jq`, `msoffcrypto-tool`, `python-pptx`, and `pypandoc-binary`.
@@ -144,6 +146,20 @@ environment:
 
 ```bash
 pip install -e ".[redis]"
+```
+
+### Important ARES Install Note
+
+ARES-compatible scoring is available in the framework, but the external
+`ares-ai` package is **not included in `[production]`** because current
+`ares-ai` releases pin old OpenAI/Anthropic SDK versions that conflict with the
+modern provider stack used by MS-RAGS(ALL-IN-ONE).
+
+If you need the package-backed ARES path, install it intentionally in a separate
+ARES-focused environment:
+
+```bash
+pip install -e ".[ares]"
 ```
 
 For Docker:
@@ -332,6 +348,8 @@ At startup, the CLI also asks whether you want to enable OpenTelemetry tracing f
 ---
 
 ## Deployable Documentation
+
+Public docs are live at: **https://ms-rags-all-in-one.vercel.app/**
 
 This repository includes a public, multi-page static documentation site in `docs/`.
 It is designed for Vercel and covers the MS-RAGS(ALL-IN-ONE) value proposition, setup, every
@@ -665,7 +683,7 @@ When evaluation is enabled in Step 15, metrics are computed **live after each qu
 | TruLens | Modern TruLens package validation plus TruLens-prefixed groundedness scores |
 | LangSmith / Langfuse | Logs trace/run when credentials are configured |
 | Arize Phoenix | OpenInference/Phoenix trace export when `PHOENIX_COLLECTOR_ENDPOINT` is configured; Phoenix-prefixed scores otherwise |
-| ARES | Uses `ares-ai` package availability path when installed plus ARES-compatible retrieval/generation scores |
+| ARES | ARES-compatible retrieval/generation scores; install the external `ares-ai` package only in a separate ARES-focused environment if you need its package-backed path |
 | RAGBench | Uses Hugging Face `datasets` tooling when installed plus RAGBench-compatible single-query scores |
 | CI/CD Gate | Checks thresholds against aggregated metrics via `check_cicd_thresholds()` |
 | LangGraph Trace | Appends to `MS_RAG_TRACE_LOG` (default: `./ms_rag_traces.jsonl`) |

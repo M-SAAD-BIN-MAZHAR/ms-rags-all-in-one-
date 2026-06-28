@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vector Databases - MS-RAGS(ALL-IN-ONE) Docs</title>
+    <link rel="stylesheet" href="assets/styles.css">
+  </head>
+  <body>
+    <div class="site">
+      <aside class="sidebar">
+        <a class="brand" href="index.html"><strong>MS-RAGS(ALL-IN-ONE)</strong><span>Production RAG framework builder</span></a>
+        <div class="nav-title">Start</div>
+        <a href="index.html">Overview</a><a href="getting-started.html">Getting started</a><a href="recommendations.html">Recommendations</a>
+        <div class="nav-title">Core Concepts</div>
+        <a href="rag-types.html">RAG types</a><a href="pipeline.html">Pipeline components</a><a class="active" href="databases.html">Vector databases</a>
+        <div class="nav-title">Production</div>
+        <a href="production.html">Production readiness</a><a href="resources.html">Official resources</a>
+        <div class="nav-title">Project</div><a href="https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-" rel="noopener">GitHub repository</a>
+      </aside>
+      <div class="content">
+        <div class="mobile-bar"><strong>MS-RAGS(ALL-IN-ONE) Docs</strong><button type="button" data-mobile-toggle>Menu</button></div>
+        <header class="page-header">
+          <p class="eyebrow">Storage</p>
+          <h1>Vector Databases</h1>
+          <p>Choose vector storage based on scale, operations, filtering, hybrid search, and your existing cloud environment.</p>
+        </header>
+        <main>
+          <section>
+            <h2>Database Comparison</h2>
+            <p class="lead">
+              Vector databases are not interchangeable only by name. They differ in
+              local vs managed operation, metadata filtering, hybrid search, index
+              lifecycle, tenancy, backups, and the amount of infrastructure your team
+              must own.
+            </p>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Database</th><th>Best for</th><th>Recommendation</th><th>Credentials</th></tr></thead>
+                <tbody>
+                  <tr><td><a href="https://www.trychroma.com/" rel="noopener">ChromaDB</a></td><td>Local development and demos</td><td>First choice for learning and local tests.</td><td>Optional <code>CHROMA_PERSIST_DIRECTORY</code></td></tr>
+                  <tr><td><a href="https://faiss.ai/" rel="noopener">FAISS</a></td><td>Fast local similarity search</td><td>Use for local file-persisted indexes.</td><td>Optional <code>FAISS_INDEX_PATH</code></td></tr>
+                  <tr><td><a href="https://www.pinecone.io/" rel="noopener">Pinecone</a></td><td>Managed production vector DB</td><td>Use when you want minimal operations.</td><td><code>PINECONE_API_KEY</code></td></tr>
+                  <tr><td><a href="https://qdrant.tech/" rel="noopener">Qdrant</a></td><td>Filtering, local/cloud flexibility</td><td>Strong production default.</td><td><code>QDRANT_URL</code>, optional <code>QDRANT_API_KEY</code></td></tr>
+                  <tr><td><a href="https://weaviate.io/" rel="noopener">Weaviate</a></td><td>Hybrid search and schema-rich data</td><td>Use when object schema and hybrid search matter.</td><td><code>WEAVIATE_URL</code>, optional <code>WEAVIATE_API_KEY</code></td></tr>
+                  <tr><td><a href="https://milvus.io/" rel="noopener">Milvus</a></td><td>Very large vector collections</td><td>Use when scale is the main challenge.</td><td><code>MILVUS_URI</code>, optional <code>MILVUS_TOKEN</code></td></tr>
+                  <tr><td><a href="https://redis.io/" rel="noopener">Redis</a></td><td>Low-latency vector search</td><td>Use when Redis is already part of the stack.</td><td><code>REDIS_URL</code></td></tr>
+                  <tr><td><a href="https://github.com/pgvector/pgvector" rel="noopener">PGVector</a></td><td>PostgreSQL-native vector search</td><td>Use when relational consistency matters.</td><td><code>PGVECTOR_CONNECTION_STRING</code></td></tr>
+                  <tr><td><a href="https://www.elastic.co/elasticsearch" rel="noopener">Elasticsearch</a></td><td>Full-text plus vector hybrid search</td><td>Use for mature search teams.</td><td><code>ELASTICSEARCH_URL</code></td></tr>
+                  <tr><td><a href="https://opensearch.org/" rel="noopener">OpenSearch</a></td><td>AWS/OpenSearch search stacks</td><td>Use for AWS-managed search environments.</td><td><code>OPENSEARCH_URL</code></td></tr>
+                  <tr><td><a href="https://azure.microsoft.com/en-us/products/ai-services/ai-search" rel="noopener">Azure AI Search</a></td><td>Azure enterprise search</td><td>Use for Azure-based apps.</td><td><code>AZURE_SEARCH_ENDPOINT</code>, <code>AZURE_SEARCH_KEY</code></td></tr>
+                  <tr><td><a href="https://www.mongodb.com/products/platform/atlas-vector-search" rel="noopener">MongoDB Atlas Vector Search</a></td><td>MongoDB document applications</td><td>Use when source documents already live in MongoDB.</td><td><code>MONGODB_ATLAS_CLUSTER_URI</code></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section>
+            <h2>Production Rules</h2>
+            <div class="grid">
+              <div class="card"><h3>Match dimensions</h3><p>The vector index dimension must match the selected embedding model. If the model changes, create a new collection or re-ingest.</p></div>
+              <div class="card"><h3>Use names carefully</h3><p>Collection names should identify environment, application, corpus, and embedding model family.</p></div>
+              <div class="card"><h3>Smoke test live backends</h3><p>Run opt-in smoke tests against the exact DBs planned for production.</p></div>
+            </div>
+          </section>
+
+          <section>
+            <h2>How MS-RAGS(ALL-IN-ONE) uses Vector Stores</h2>
+            <div class="grid two">
+              <div class="card"><h3>During setup</h3><p>The CLI collects connection parameters, shows a summary, tests the connection, and asks for approval before ingestion begins.</p></div>
+              <div class="card"><h3>During ingestion</h3><p>Documents are loaded, split into chunks, embedded, and written into the selected collection or index with metadata attached.</p></div>
+              <div class="card"><h3>During query</h3><p>The retriever reads from the same populated vector store used during ingestion, avoiding the rebuild bug that can create empty runtime wrappers.</p></div>
+              <div class="card"><h3>During generated-code use</h3><p>Generated pipelines can ingest new documents or connect to an existing persisted collection for query-only usage when supported.</p></div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Collection Naming Strategy</h2>
+            <p>Use names that tell future users what is inside the index.</p>
+            <pre><code>msrag_{environment}_{app}_{corpus}_{embedding}
+
+# Examples
+msrag_dev_support_docs_openai_small
+msrag_prod_policy_bge_m3
+msrag_staging_legal_parent_child_3072</code></pre>
+            <p>A good collection name reduces accidental ingestion into the wrong environment and helps users understand embedding compatibility.</p>
+          </section>
+
+          <section>
+            <h2>Backend Selection Details</h2>
+            <div class="grid two">
+              <div class="card"><h3>ChromaDB vs FAISS</h3><p>Use Chroma when you want a simple local DB with collection semantics. Use FAISS when you want fast local vector search and file-backed persistence.</p></div>
+              <div class="card"><h3>Pinecone vs Qdrant</h3><p>Use Pinecone for managed serverless simplicity. Use Qdrant when filtering, local/cloud parity, and Rust-backed performance are attractive.</p></div>
+              <div class="card"><h3>PGVector vs MongoDB Atlas</h3><p>Use PGVector when your product data is relational. Use MongoDB Atlas when source documents already live in MongoDB collections.</p></div>
+              <div class="card"><h3>Elasticsearch/OpenSearch/Azure AI Search</h3><p>Use search platforms when hybrid lexical plus vector retrieval and enterprise search operations matter.</p></div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Smoke Test Examples</h2>
+            <pre><code>MS_RAG_SMOKE_VECTOR_DBS=chroma python -m pytest tests/smoke/test_vector_db_smoke.py -q
+MS_RAG_SMOKE_VECTOR_DBS=faiss python -m pytest tests/smoke/test_vector_db_smoke.py -q
+MS_RAG_SMOKE_VECTOR_DBS=qdrant python -m pytest tests/smoke/test_vector_db_smoke.py -q</code></pre>
+          </section>
+          <div class="next-actions"><a class="button primary" href="recommendations.html">Next: Recommendations</a></div>
+        </main>
+      </div>
+    </div>
+    <script src="assets/app.js"></script>
+  </body>
+</html>
+

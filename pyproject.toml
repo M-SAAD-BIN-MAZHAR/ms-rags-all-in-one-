@@ -8,7 +8,33 @@ version = "1.0.0"
 description = "MS-RAGS(ALL-IN-ONE) — production-grade RAG framework builder terminal CLI"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Muhammad Saad bin Mazhar" },
+]
+keywords = [
+    "rag",
+    "retrieval-augmented-generation",
+    "langchain",
+    "langgraph",
+    "vector-database",
+    "llm",
+    "cli",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Code Generators",
+]
 
 dependencies = [
     # Terminal UI
@@ -113,6 +139,12 @@ dependencies = [
     "tiktoken>=0.7.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-"
+Documentation = "https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-/tree/main/docs-deploy"
+Repository = "https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-"
+Issues = "https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-/issues"
+
 [project.optional-dependencies]
 # ── Individual vector DB extras ──────────────────────────────────────────────
 pinecone = ["langchain-pinecone>=0.2.0", "pinecone-client>=4.0.0"]
@@ -140,13 +172,18 @@ ragbench = ["datasets>=2.20.0"]
 # ── Individual reranker extras ────────────────────────────────────────────────
 rerankers = ["flashrank>=0.2.0", "cohere>=5.0.0"]
 
-# ── Production — full feature support except Redis vectors ────────────────────
+# ── Production — full feature support except Redis vectors and ares-ai ────────
 # Run: pip install -e ".[production]"
 #
 # Redis is intentionally kept as a separate `redis` extra. The latest
 # langchain-redis release (0.2.5) pins hf-xet<1.2.1, which conflicts with the
 # modern HuggingFace stack used for local/hosted HF embeddings. Install Redis
 # separately only when your environment is prepared for that upstream conflict.
+#
+# ares-ai is also intentionally kept as a separate `ares` extra because current
+# releases pin old OpenAI/Anthropic clients that conflict with the modern
+# provider stack used by MS-RAGS(ALL-IN-ONE). The framework still exposes
+# ARES-compatible local scoring without requiring the package.
 production = [
     # All vector DBs
     "langchain-pinecone>=0.2.0",
@@ -177,7 +214,6 @@ production = [
     "trulens-apps-langchain>=1.0.0",
     "langsmith>=0.1.0",
     "langfuse>=3.0.0",
-    "ares-ai>=0.5.0",
     "datasets>=2.20.0",
     # Rerankers
     "flashrank>=0.2.0",

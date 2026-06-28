@@ -33,7 +33,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md requirements.txt constraints-production.txt ./
+COPY pyproject.toml README.md LICENSE MANIFEST.in requirements.txt constraints-production.txt ./
 COPY ms_rag ./ms_rag
 
 RUN if [ -n "$PIP_EXTRA_INDEX_URL" ]; then \
