@@ -49,7 +49,7 @@ class TelemetryConfig:
     """Runtime tracing settings for one MS_RAG session."""
 
     enabled: bool = False
-    service_name: str = "ms-rag"
+    service_name: str = "ms-rags-all-in-one"
     environment: str = "development"
     otlp_endpoint: str = ""
     otlp_headers: dict[str, str] = field(default_factory=dict)
@@ -76,7 +76,7 @@ def _config_from_env() -> TelemetryConfig:
 
     return TelemetryConfig(
         enabled=enabled,
-        service_name=os.getenv("OTEL_SERVICE_NAME", "ms-rag"),
+        service_name=os.getenv("OTEL_SERVICE_NAME", "ms-rags-all-in-one"),
         environment=os.getenv("OTEL_ENVIRONMENT", "development"),
         otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
         otlp_headers=headers,

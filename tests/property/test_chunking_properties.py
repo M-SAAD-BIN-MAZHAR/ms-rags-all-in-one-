@@ -140,6 +140,22 @@ class TestChunkingEngineDispatch:
                     f"Strategy {sid!r} raised ValueError unexpectedly: {exc}"
                 )
 
+    def test_semantic_chunker_defers_until_embeddings_are_bound(self) -> None:
+        engine = ChunkingEngine()
+        splitter = engine.get_splitter(
+            ChunkingConfig(strategy="semantic", chunk_size=0, chunk_overlap=0)
+        )
+        assert hasattr(splitter, "with_embeddings")
+
+    def test_agentic_chunker_requires_llm_instead_of_silent_fallback(self) -> None:
+        engine = ChunkingEngine()
+        splitter = engine.get_splitter(
+            ChunkingConfig(strategy="agentic", chunk_size=500, chunk_overlap=0)
+        )
+        assert hasattr(splitter, "with_llm")
+        with pytest.raises(RuntimeError, match="Agentic chunking requires"):
+            splitter.split_documents([])
+
 
 class TestChunkingDefaults:
     def test_recursive_character_default_overlap_less_than_size(self) -> None:

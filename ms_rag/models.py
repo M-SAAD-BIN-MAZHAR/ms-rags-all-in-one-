@@ -139,6 +139,16 @@ class KeywordStoreConfig:
 
 
 @dataclass
+class GraphStoreConfig:
+    """Persistent graph store used by full GraphRAG."""
+
+    store_type: str                     # local_json | neo4j | kuzu
+    connection_params: dict[str, str]
+    graph_name: str = "ms_rag_graph"
+    query_mode: str = "hybrid"          # local | global | hybrid
+
+
+@dataclass
 class RetrievalConfig:
     """Parameters for the selected retrieval strategy."""
 
@@ -179,6 +189,14 @@ class EvaluationConfig:
     evaluators: list[str]  # e.g. ["ragas", "deepeval", "langsmith"]
     # Metric thresholds for CI/CD gate evaluation (metric_name -> min_score)
     cicd_thresholds: dict[str, float] | None = None
+
+
+@dataclass
+class AgentToolConfig:
+    """Permission-gated external tools for Agentic RAG."""
+
+    enabled_tools: list[str] = field(default_factory=list)
+    tool_settings: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
@@ -249,6 +267,7 @@ class PipelineConfig:
     # Step 11 — Retrieval
     retrieval: RetrievalConfig | None = None
     keyword_store: KeywordStoreConfig | None = None
+    graph_store: GraphStoreConfig | None = None
 
     # Step 12 — Reranking
     reranking: RerankingConfig | None = None
@@ -264,6 +283,9 @@ class PipelineConfig:
     # Step 15 — Evaluation
     evaluation: EvaluationConfig | None = None
     evaluation_enabled: bool = False
+
+    # Agentic RAG tools — only configured when the user explicitly opts in.
+    agent_tools: AgentToolConfig | None = None
 
     # ---------------------------------------------------------------------------
     # Serialisation helpers
@@ -287,6 +309,13 @@ class PipelineConfig:
                 for key, value in self.keyword_store.connection_params.items()
             }
             data["keyword_store"] = keyword_store_data
+        if self.graph_store is not None:
+            graph_store_data = asdict(self.graph_store)
+            graph_store_data["connection_params"] = {
+                key: key if _is_sensitive_connection_field(key) else value
+                for key, value in self.graph_store.connection_params.items()
+            }
+            data["graph_store"] = graph_store_data
         return json.dumps(data, indent=2, ensure_ascii=False)
 
     @classmethod
@@ -353,6 +382,11 @@ class PipelineConfig:
                 return None
             return KeywordStoreConfig(**d)
 
+        def _graph_store(d: dict | None) -> GraphStoreConfig | None:
+            if d is None:
+                return None
+            return GraphStoreConfig(**d)
+
         def _retrieval(d: dict | None) -> RetrievalConfig | None:
             if d is None:
                 return None
@@ -376,6 +410,11 @@ class PipelineConfig:
             if d is None:
                 return None
             return EvaluationConfig(**d)
+
+        def _agent_tools(d: dict | None) -> AgentToolConfig | None:
+            if d is None:
+                return None
+            return AgentToolConfig(**d)
 
         def _ingestion_result(d: dict | None) -> IngestionResult | None:
             if d is None:
@@ -403,6 +442,7 @@ class PipelineConfig:
             hyde_llm_provider=data.get("hyde_llm_provider"),
             retrieval=_retrieval(data.get("retrieval")),
             keyword_store=_keyword_store(data.get("keyword_store")),
+            graph_store=_graph_store(data.get("graph_store")),
             reranking=_reranking(data.get("reranking")),
             reranking_enabled=data.get("reranking_enabled", False),
             compression=_compression(data.get("compression")),
@@ -410,6 +450,7 @@ class PipelineConfig:
             system_prompt=data.get("system_prompt", ""),
             evaluation=_evaluation(data.get("evaluation")),
             evaluation_enabled=data.get("evaluation_enabled", False),
+            agent_tools=_agent_tools(data.get("agent_tools")),
         )
 
 

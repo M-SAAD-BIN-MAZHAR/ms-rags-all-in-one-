@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ms_rag.llm.llm_integration import (
+    _answer_from_merged_queries,
     build_langgraph_workflow,
     build_rag_chain,
     get_llm,
@@ -24,8 +25,10 @@ from ms_rag.llm.llm_integration import (
 from ms_rag.models import (
     CredentialStore,
     PipelineConfig,
+    RAGTypeConfig,
     SessionState,
 )
+from ms_rag.query.query_enhancer import QueryEnhancer
 from ms_rag.workflow.rag_type_selector import LANGGRAPH_TYPES
 
 
@@ -210,6 +213,22 @@ class TestBuildLangGraphWorkflow:
             except Exception:
                 pass  # other runtime errors acceptable
 
+    def test_langgraph_runtime_contains_full_advanced_rag_flows(self) -> None:
+        """Advanced RAG types must have real graph branches, not labels only."""
+        import inspect  # noqa: PLC0415
+        import ms_rag.llm.llm_integration as mod  # noqa: PLC0415
+
+        source = inspect.getsource(mod.build_langgraph_workflow)
+        assert "decide_retrieval_need" in source
+        assert "check_hallucination" in source
+        assert "corrective_web_fallback" in source
+        assert "query_analysis" in source
+        assert "route_agent_action" in source
+        assert "run_approved_tools" in source
+        assert "deep_retrieve" in source
+        assert '"direct": "direct_answer"' in source
+        assert '"deep": "deep_retrieve"' in source
+
 
 # ---------------------------------------------------------------------------
 # process_query
@@ -268,3 +287,59 @@ class TestInvokeRagChain:
         answer = invoke_rag_chain(mock_chain, "What is RAG?", requires_langgraph=False)
         assert answer == "Direct answer."
         mock_chain.invoke.assert_called_once_with("What is RAG?")
+
+
+def test_required_hyde_rag_enhancement_fails_instead_of_silent_fallback() -> None:
+    config = PipelineConfig()
+    config.rag_type = RAGTypeConfig(
+        rag_type="hyde_rag",
+        display_name="HyDE RAG",
+        description="test",
+        requires_langgraph=False,
+    )
+    config.query_enhancement = ["hyde"]
+    session = SessionState(
+        config=config,
+        credentials=CredentialStore(),
+        vector_store=None,
+        retriever=MagicMock(),
+        llm=None,
+        rag_chain=MagicMock(),
+    )
+
+    with pytest.raises(RuntimeError, match="Required query enhancement 'hyde' failed"):
+        process_query("What is RAG?", session, query_enhancer=QueryEnhancer())
+
+
+def test_rag_fusion_uses_reciprocal_rank_fusion_ordering() -> None:
+    from langchain_core.documents import Document
+    from langchain_core.runnables import RunnableLambda
+
+    retriever = MagicMock()
+    doc_a = Document(page_content="A", metadata={"source": "a"})
+    doc_b = Document(page_content="B", metadata={"source": "b"})
+    retriever.invoke.side_effect = [
+        [doc_a, doc_b],
+        [doc_b],
+        [doc_b],
+    ]
+    captured = {}
+
+    def fake_llm(prompt_value: object) -> str:
+        captured["prompt"] = str(prompt_value)
+        return "answer"
+
+    llm = RunnableLambda(fake_llm)
+
+    answer = _answer_from_merged_queries(
+        original_query="question",
+        retrieval_queries=["q1", "q2", "q3"],
+        retriever=retriever,
+        llm=llm,
+        system_prompt="system",
+        use_reciprocal_rank_fusion=True,
+    )
+
+    assert answer == "answer"
+    rendered = captured["prompt"]
+    assert rendered.find("B") < rendered.find("A")

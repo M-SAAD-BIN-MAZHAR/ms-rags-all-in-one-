@@ -247,6 +247,80 @@ class TestGetVectorStoreDispatch:
         assert mock_client.call_args.kwargs["api_key"] == "qdrant-secret"
         assert mock_store.called
 
+    def test_qdrant_missing_collection_is_created_with_dimension(self) -> None:
+        connector = VectorDBConnector()
+        config = VectorDBConfig(
+            db_type="qdrant",
+            connection_params={"QDRANT_URL": "https://qdrant.example"},
+            collection_name="new_collection",
+            dimension=768,
+        )
+
+        with patch("qdrant_client.QdrantClient") as mock_client_cls, \
+             patch("langchain_qdrant.QdrantVectorStore") as mock_store:
+            mock_client = mock_client_cls.return_value
+            mock_client.collection_exists.return_value = False
+            connector.get_vector_store(config, MagicMock())
+
+        mock_client.create_collection.assert_called_once()
+        vectors_config = mock_client.create_collection.call_args.kwargs["vectors_config"]
+        assert vectors_config.size == 768
+        assert mock_store.called
+
+    def test_milvus_cloud_token_is_forwarded(self) -> None:
+        connector = VectorDBConnector()
+        config = VectorDBConfig(
+            db_type="milvus",
+            connection_params={
+                "MILVUS_URI": "https://milvus.example",
+                "MILVUS_TOKEN": "token",
+            },
+            collection_name="test_collection",
+        )
+
+        with patch("langchain_milvus.Milvus") as mock_milvus:
+            connector.get_vector_store(config, MagicMock())
+
+        assert mock_milvus.call_args is not None
+        assert mock_milvus.call_args.kwargs["connection_args"]["token"] == "token"
+
+    def test_mongodb_connection_string_alias_is_supported(self) -> None:
+        connector = VectorDBConnector()
+        config = VectorDBConfig(
+            db_type="mongodb_atlas",
+            connection_params={
+                "MONGODB_ATLAS_CONNECTION_STRING": "mongodb+srv://example",
+                "MONGODB_ATLAS_DB_NAME": "db",
+                "MONGODB_ATLAS_COLLECTION_NAME": "docs",
+            },
+            collection_name="docs",
+        )
+
+        with patch("pymongo.MongoClient") as mock_client, \
+             patch("langchain_mongodb.MongoDBAtlasVectorSearch") as mock_store:
+            connector.get_vector_store(config, MagicMock())
+
+        mock_client.assert_called_once_with("mongodb+srv://example")
+        assert mock_store.called
+
+    def test_azure_search_api_key_alias_is_supported(self) -> None:
+        connector = VectorDBConnector()
+        config = VectorDBConfig(
+            db_type="azure_ai_search",
+            connection_params={
+                "AZURE_SEARCH_ENDPOINT": "https://search.example",
+                "AZURE_SEARCH_API_KEY": "key",
+                "AZURE_SEARCH_INDEX_NAME": "idx",
+            },
+            collection_name="idx",
+        )
+
+        with patch("langchain_community.vectorstores.AzureSearch") as mock_search:
+            connector.get_vector_store(config, MagicMock())
+
+        assert mock_search.call_args is not None
+        assert mock_search.call_args.kwargs["azure_search_key"] == "key"
+
 
 def test_connection_reselect_preserves_embedding_model_for_dimension() -> None:
     """Connection failure recovery must pass embedding model into DB re-selection."""

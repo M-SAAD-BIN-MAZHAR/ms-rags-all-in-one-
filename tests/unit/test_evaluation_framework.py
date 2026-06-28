@@ -3,7 +3,7 @@
 Tests (Requirement 16.4, 16.5):
 - Credential-required evaluator stays selected when user cancels credential input.
 - CI/CD threshold validation for out-of-range values.
-- All 12 evaluators defined.
+- All 11 evaluators defined.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from ms_rag.evaluation.evaluation_framework import (
     EVALUATORS,
     EvaluationFramework,
 )
+from ms_rag.evaluation import evaluator_runners
 from ms_rag.models import CredentialStore, EvaluationConfig
 from ms_rag.utils.exceptions import ValidationError
 from ms_rag.utils.validation import validate_numeric
@@ -32,13 +33,13 @@ from ms_rag.utils.validation import validate_numeric
 
 
 class TestEvaluatorListCompleteness:
-    def test_exactly_12_evaluators_defined(self) -> None:
-        assert len(EVALUATORS) == 12
+    def test_exactly_11_evaluators_defined(self) -> None:
+        assert len(EVALUATORS) == 11
 
     def test_all_required_evaluators_present(self) -> None:
         required = {
             "ragas", "deepeval", "trulens", "langsmith", "langfuse",
-            "arize_phoenix", "ares", "ragbench", "rageval",
+            "arize_phoenix", "ares", "ragbench",
             "cicd_gate", "langgraph_trace", "monitoring_export",
         }
         defined = set(EVALUATOR_IDS)
@@ -61,7 +62,7 @@ class TestEvaluatorListCompleteness:
         assert "arize_phoenix" in CREDENTIAL_REQUIRED_EVALUATORS
 
     def test_non_credential_evaluators_not_in_set(self) -> None:
-        for eid in ["ragas", "deepeval", "trulens", "ares", "ragbench", "rageval",
+        for eid in ["ragas", "deepeval", "trulens", "ares", "ragbench",
                     "cicd_gate", "langgraph_trace", "monitoring_export"]:
             assert eid not in CREDENTIAL_REQUIRED_EVALUATORS
 
@@ -208,9 +209,35 @@ class TestEvaluateRuntime:
         assert "ares_faithfulness" in scores or "ares_context_recall" in scores
         assert any(k.startswith("ragbench_") for k in scores)
 
+    def test_zero_claim_gap_evaluator_descriptions_are_precise(self) -> None:
+        assert "package-backed" in EVALUATOR_MAP["ares"].description
+        assert "compatible" in EVALUATOR_MAP["ragbench"].description
+        assert "OpenInference" in EVALUATOR_MAP["arize_phoenix"].description
+        assert "package validation" in EVALUATOR_MAP["trulens"].description
+
+    def test_ares_package_path_is_used_when_available(self) -> None:
+        fake_ares = MagicMock()
+        with patch.dict("sys.modules", {"ares": fake_ares}):
+            scores = evaluator_runners.run_ares(
+                "what is rag",
+                ["rag uses retrieval"],
+                "rag uses retrieval",
+            )
+        assert scores["ares_package_available"] == 1.0
+
+    def test_ragbench_marks_dataset_tooling_when_available(self) -> None:
+        fake_datasets = MagicMock()
+        with patch.dict("sys.modules", {"datasets": fake_datasets}):
+            scores = evaluator_runners.run_ragbench(
+                "what is rag",
+                ["rag uses retrieval"],
+                "rag uses retrieval",
+            )
+        assert scores["ragbench_datasets_package_available"] == 1.0
+
     def test_evaluate_uses_config_override(self) -> None:
         framework = EvaluationFramework()
-        config = EvaluationConfig(evaluators=["rageval"])
+        config = EvaluationConfig(evaluators=["ragbench"])
         from langchain_core.documents import Document  # noqa: PLC0415
 
         scores = framework.evaluate(
@@ -220,6 +247,7 @@ class TestEvaluateRuntime:
             config=config,
         )
         assert scores
+        assert any(key.startswith("ragbench_") for key in scores)
 
     def test_evaluate_merges_runner_scores(self) -> None:
         mock_deepeval = MagicMock(return_value={"answer_relevancy": 0.91})

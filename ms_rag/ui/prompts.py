@@ -245,7 +245,7 @@ def prompt_telemetry_configuration(
 
     service_name = prompt_text(
         "  Service name:",
-        default="ms-rag",
+        default="ms-rags-all-in-one",
         required=True,
         console=con,
     )
@@ -276,7 +276,7 @@ def prompt_telemetry_configuration(
 
     return TelemetryConfig(
         enabled=True,
-        service_name=str(service_name).strip() or "ms-rag",
+        service_name=str(service_name).strip() or "ms-rags-all-in-one",
         environment=str(environment).strip() or "development",
         otlp_endpoint=str(endpoint).strip(),
         otlp_headers=headers,

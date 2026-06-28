@@ -22,11 +22,14 @@ from ms_rag.codegen.code_generator import CodeGenerator
 from ms_rag.models import (
     ChunkingConfig,
     EmbeddingModelConfig,
+    GraphStoreConfig,
     LLMModelConfig,
     PipelineConfig,
     RAGTypeConfig,
     RetrievalConfig,
     VectorDBConfig,
+    AgentToolConfig,
+    EvaluationConfig,
 )
 from ms_rag.workflow.rag_type_selector import LANGGRAPH_TYPES
 
@@ -138,6 +141,140 @@ def test_langgraph_usage_for_agentic_rag_types(rag_type: str) -> None:
     assert "StateGraph" in code, (
         f"Agentic RAG type {rag_type!r} must instantiate StateGraph."
     )
+
+
+def test_generated_langgraph_preserves_distinct_advanced_rag_flows() -> None:
+    """Generated LangGraph pipelines must preserve advanced RAG behavior."""
+    for rag_type in ["self_rag", "corrective_rag", "agentic_rag", "adaptive_rag"]:
+        config = _make_config(rag_type_id=rag_type)
+        code = CodeGenerator().generate(config).python_code
+        assert "StateGraph" in code
+
+        if rag_type == "self_rag":
+            assert "self_retrieval_need" in code
+            assert "check_support" in code
+            assert '"direct": "direct_answer"' in code
+        elif rag_type == "corrective_rag":
+            assert "grade_documents" in code
+            assert "corrective_fallback" in code
+            assert "rewrite_query" in code
+        elif rag_type == "agentic_rag":
+            assert "agent_plan" in code
+            assert "route_agent_action" in code
+            assert '"rewrite": "rewrite_query"' in code
+            assert '"answer": "direct_answer"' in code
+        elif rag_type == "adaptive_rag":
+            assert "route_question" in code
+            assert "deep_retrieve" in code
+            assert '"deep": "deep_retrieve"' in code
+
+
+def test_generated_agentic_tools_are_standalone_and_parseable() -> None:
+    """Generated pipelines must include configured Agentic/CRAG tool helpers."""
+    for rag_type in ["corrective_rag", "agentic_rag"]:
+        config = _make_config(rag_type_id=rag_type)
+        config.agent_tools = AgentToolConfig(
+            enabled_tools=[
+                "web_search",
+                "url_fetch",
+                "file_read",
+                "api_request",
+                "memory",
+                "document_summarization",
+            ],
+            tool_settings={
+                "web_search": {"provider": "tavily"},
+                "url_fetch": {"allowed_domains": ["example.com"]},
+                "file_read": {"allowed_paths": ["."]},
+                "api_request": {
+                    "allowed_base_urls": ["https://api.example.com"],
+                    "allowed_methods": ["GET"],
+                },
+                "memory": {
+                    "memory_types": ["short_term", "long_term", "semantic"],
+                    "path": "./agent_memory/memory.json",
+                },
+            },
+        )
+        code = CodeGenerator().generate(config).python_code
+        ast.parse(code)
+        assert "AGENT_TOOLS" in code
+        assert "def run_agent_tools" in code
+        assert "TAVILY_API_KEY" in code
+        assert "allowed_domains" in code
+        assert "allowed_base_urls" in code
+        if rag_type == "corrective_rag":
+            assert "corrective_fallback" in code
+            assert "run_agent_tools(state[\"question\"], [], llm)" in code
+
+
+def test_generated_chunking_preserves_selected_strategy() -> None:
+    """Generated pipeline.py must not collapse every chunker to recursive splitting."""
+    strategies = [
+        "recursive_character",
+        "fixed_size",
+        "semantic",
+        "sentence",
+        "paragraph",
+        "token_based",
+        "markdown_aware",
+        "html_aware",
+        "code_aware",
+        "agentic",
+        "document_aware",
+    ]
+    for strategy in strategies:
+        config = _make_config()
+        config.chunking = ChunkingConfig(
+            strategy=strategy,
+            chunk_size=512 if strategy != "semantic" else 0,
+            chunk_overlap=64 if strategy != "semantic" else 0,
+            tokenizer="cl100k_base" if strategy == "token_based" else None,
+            language="python" if strategy == "code_aware" else None,
+        )
+        code = CodeGenerator().generate(config).python_code
+        ast.parse(code)
+        assert f'strategy = "{strategy}"' in code
+        if strategy == "semantic":
+            assert "SemanticChunker" in code
+        if strategy == "agentic":
+            assert "_AgenticGeneratedChunker" in code
+            assert "<MS_RAG_CHUNK>" in code
+        if strategy == "document_aware":
+            assert "_DocumentAwareGeneratedSplitter" in code
+
+
+def test_generated_evaluation_supports_all_selected_evaluators() -> None:
+    config = _make_config()
+    config.evaluation_enabled = True
+    config.evaluation = EvaluationConfig(
+        evaluators=[
+            "ragas",
+            "deepeval",
+            "trulens",
+            "langsmith",
+            "langfuse",
+            "arize_phoenix",
+            "ares",
+            "ragbench",
+            "cicd_gate",
+            "langgraph_trace",
+            "monitoring_export",
+        ],
+        cicd_thresholds={"faithfulness": 0.8},
+    )
+
+    code = CodeGenerator().generate(config).python_code
+    ast.parse(code)
+    assert "def evaluate_response" in code
+    assert "ENABLED_EVALUATORS" in code
+    assert "deepeval_answer_relevancy" in code
+    assert "trulens_package_available" in code
+    assert "phoenix_endpoint_configured" in code
+    assert "ares_package_available" in code
+    assert "ragbench_datasets_package_available" in code
+    assert "langgraph_trace_logged" in code
+    assert "monitoring_export_logged" in code
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +452,56 @@ def test_generated_local_huggingface_embedding_disables_xet_download_path() -> N
     assert 'embeddings = _local_huggingface_embeddings("sentence-transformers/all-mpnet-base-v2")' in code
 
 
+def test_generated_speculative_rag_contains_draft_then_verify_flow() -> None:
+    config = _make_config()
+    config.rag_type = RAGTypeConfig(
+        rag_type="speculative_rag",
+        display_name="Speculative RAG",
+        description="test",
+        requires_langgraph=False,
+    )
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert "def speculative(query: str) -> str:" in code
+    assert "Draft answer:" in code
+    assert "Verify the draft against the evidence" in code
+    assert "RunnableLambda(speculative)" in code
+
+
+def test_generated_graphrag_contains_full_graph_index_runtime() -> None:
+    config = _make_config()
+    config.rag_type = RAGTypeConfig(
+        rag_type="graphrag",
+        display_name="GraphRAG",
+        description="test",
+        requires_langgraph=False,
+    )
+    config.graph_store = GraphStoreConfig(
+        store_type="local_json",
+        connection_params={"GRAPH_STORE_PATH": "./graph_indexes/test_graph.json"},
+        graph_name="test_graph",
+        query_mode="hybrid",
+    )
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert "def build_graph_index(chunks: list, llm=None) -> dict:" in code
+    assert "def persist_graph_index(graph: dict) -> None:" in code
+    assert "def load_graph_index() -> dict:" in code
+    assert "def retrieve_graph_context(query: str, llm=None) -> str:" in code
+    assert "def graph_guided(query: str) -> str:" in code
+    assert "Extract key entities, topics, and relationships" in code
+    assert "graph_context = retrieve_graph_context(query, llm=llm)" in code
+    assert "Building GraphRAG knowledge graph..." in code
+    assert "persist_graph_index(graph)" in code
+    assert "RunnableLambda(graph_guided)" in code
+
+
 def test_generated_huggingface_llm_does_not_fall_back_to_openai() -> None:
     """A HuggingFace-only run must generate a HuggingFace answer model, not OpenAI."""
     config = _make_config(providers=["huggingface"])
@@ -443,7 +630,7 @@ def test_generated_vector_store_ingest_caches_keyword_corpus_texts() -> None:
     assert '[chunk.page_content for chunk in chunks if getattr(chunk, "page_content", "").strip()]' in code
 
 
-def test_generated_tfidf_retriever_falls_back_to_dense_when_corpus_is_missing() -> None:
+def test_generated_tfidf_retriever_fails_loudly_when_corpus_is_missing() -> None:
     config = _make_config()
     config.retrieval = RetrievalConfig(strategy="tfidf", top_k=7)
 
@@ -452,8 +639,8 @@ def test_generated_tfidf_retriever_falls_back_to_dense_when_corpus_is_missing() 
 
     ast.parse(code)
     assert "from langchain_community.retrievers import TFIDFRetriever" in code
-    assert "if not texts:" in code
-    assert "return _dense_retriever(vector_store, top_k=7)" in code
+    assert "_require_keyword_texts(_extract_corpus_texts(vector_store), \"TF-IDF\")" in code
+    assert "or choose dense_vector retrieval" in code
 
 
 def test_generated_ensemble_retriever_supports_keyword_and_dense_sub_retrievers() -> None:

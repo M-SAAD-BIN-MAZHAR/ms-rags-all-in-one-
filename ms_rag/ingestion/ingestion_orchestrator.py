@@ -237,6 +237,8 @@ class IngestionOrchestrator:
         embedding_model: EmbeddingModelConfig,
         vector_db: VectorDBConfig,
         vector_store: object,
+        embeddings: object | None = None,
+        llm: object | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
         youtube_language: str = "en",
     ) -> IngestionResult:
@@ -282,6 +284,21 @@ class IngestionOrchestrator:
 
         chunker = ChunkingEngine()
         splitter = chunker.get_splitter(chunking_config)
+        if chunking_config.strategy == "semantic" and hasattr(splitter, "with_embeddings"):
+            resolved_embeddings = embeddings or getattr(vector_store, "_ms_rag_embeddings", None)
+            if resolved_embeddings is None:
+                raise RuntimeError(
+                    "Semantic chunking requires the selected embeddings object. "
+                    "Re-run setup so ingestion can bind semantic chunking to the embedding model."
+                )
+            splitter = splitter.with_embeddings(resolved_embeddings)
+        if chunking_config.strategy == "agentic" and hasattr(splitter, "with_llm"):
+            if llm is None:
+                raise RuntimeError(
+                    "Agentic chunking requires the selected LLM during ingestion. "
+                    "Choose a non-agentic chunking strategy or configure a generation model."
+                )
+            splitter = splitter.with_llm(llm)
 
         total_chunks = 0
         failed_documents: list[tuple[str, str]] = []
@@ -532,19 +549,38 @@ class IngestionOrchestrator:
             from langchain_community.document_loaders.csv_loader import CSVLoader  # noqa: PLC0415
             return CSVLoader(source).load()
 
-        if loader_class_name == "UnstructuredExcelLoader":
+        if loader_class_name == "UnstructuredCSVLoader":
             from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
             return UnstructuredLoader(source).load()
+
+        if loader_class_name == "UnstructuredExcelLoader":
+            try:
+                from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
+                return UnstructuredLoader(source).load()
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"UnstructuredExcelLoader could not parse {source}; falling back to pandas: {exc}",
+                    stacklevel=2,
+                )
+                return self._load_dataframe(source)
+
+        if loader_class_name == "PandasDataFrameLoader":
+            return self._load_dataframe(source)
 
         # ── Plain text ────────────────────────────────────────────────
         if loader_class_name == "TextLoader":
             from langchain_community.document_loaders import TextLoader  # noqa: PLC0415
             return TextLoader(source, encoding="utf-8").load()
 
+        # ── PPTX ──────────────────────────────────────────────────────
+        if loader_class_name == "UnstructuredPowerPointLoader":
+            from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
+            return UnstructuredLoader(source).load()
+
         # ── HTML ──────────────────────────────────────────────────────
         if loader_class_name == "BSHTMLLoader":
             from langchain_community.document_loaders import BSHTMLLoader  # noqa: PLC0415
-            return BSHTMLLoader(source).load()
+            return BSHTMLLoader(source, open_encoding="utf-8").load()
 
         if loader_class_name == "UnstructuredHTMLLoader":
             from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
@@ -563,6 +599,34 @@ class IngestionOrchestrator:
             from langchain_community.document_loaders import FireCrawlLoader  # noqa: PLC0415
             return FireCrawlLoader(url=source, mode="scrape").load()
 
+        if loader_class_name == "ApifyWebScraper":
+            if str(source).startswith(("http://", "https://")):
+                raise RuntimeError(
+                    "ApifyWebScraper needs an Apify dataset ID or a project-specific actor workflow, "
+                    "not a direct URL. Use WebBaseLoader/FireCrawlLoader for direct URLs, or pass an "
+                    "Apify dataset ID produced by your approved actor."
+                )
+            from langchain_community.document_loaders import ApifyDatasetLoader  # noqa: PLC0415
+            from langchain_core.documents import Document  # noqa: PLC0415
+            return ApifyDatasetLoader(
+                dataset_id=source,
+                dataset_mapping_function=lambda item: Document(
+                    page_content=str(item.get("text") or item.get("content") or item),
+                    metadata={"source": source, "loader": "ApifyWebScraper"},
+                ),
+            ).load()
+
+        if loader_class_name == "LlamaParseLoader":
+            try:
+                from llama_parse import LlamaParse  # type: ignore[import-not-found]  # noqa: PLC0415
+            except ImportError as exc:
+                raise ImportError(
+                    "LlamaParseLoader requires the llama-parse package. "
+                    "Install it with `pip install llama-parse` and set LLAMA_CLOUD_API_KEY."
+                ) from exc
+            parser = LlamaParse(result_type="markdown")
+            return parser.load_data(source)
+
         # ── YouTube ───────────────────────────────────────────────────
         if loader_class_name == "YoutubeLoader":
             from langchain_community.document_loaders import YoutubeLoader  # noqa: PLC0415
@@ -574,13 +638,28 @@ class IngestionOrchestrator:
 
         # ── Markdown ──────────────────────────────────────────────────
         if loader_class_name == "UnstructuredMarkdownLoader":
-            from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
-            return UnstructuredLoader(source).load()
+            try:
+                from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
+                return UnstructuredLoader(source).load()
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"UnstructuredMarkdownLoader could not parse {source}; falling back to TextLoader: {exc}",
+                    stacklevel=2,
+                )
+                from langchain_community.document_loaders import TextLoader  # noqa: PLC0415
+                return TextLoader(source, encoding="utf-8").load()
 
         # ── JSON ──────────────────────────────────────────────────────
         if loader_class_name == "JSONLoader":
-            from langchain_community.document_loaders import JSONLoader  # noqa: PLC0415
-            return JSONLoader(file_path=source, jq_schema=".", text_content=False).load()
+            try:
+                from langchain_community.document_loaders import JSONLoader  # noqa: PLC0415
+                return JSONLoader(file_path=source, jq_schema=".", text_content=False).load()
+            except ImportError as exc:
+                warnings.warn(
+                    f"JSONLoader dependency jq is unavailable; using built-in JSON fallback: {exc}",
+                    stacklevel=2,
+                )
+                return self._load_json_fallback(source)
 
         # ── XML ───────────────────────────────────────────────────────
         if loader_class_name == "UnstructuredXMLLoader":
@@ -589,6 +668,11 @@ class IngestionOrchestrator:
 
         # ── Images / OCR ──────────────────────────────────────────────
         if loader_class_name == "UnstructuredImageLoader":
+            from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
+            return UnstructuredLoader(source).load()
+
+        # ── eBook / RTF ───────────────────────────────────────────────
+        if loader_class_name in {"UnstructuredEPubLoader", "UnstructuredRTFLoader"}:
             from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
             return UnstructuredLoader(source).load()
 
@@ -613,6 +697,49 @@ class IngestionOrchestrator:
         # ── Fallback: plain text ──────────────────────────────────────
         from langchain_community.document_loaders import TextLoader  # noqa: PLC0415
         return TextLoader(source, encoding="utf-8").load()
+
+    @staticmethod
+    def _load_dataframe(source: str) -> list:
+        import pandas as pd  # noqa: PLC0415
+        from langchain_community.document_loaders import DataFrameLoader  # noqa: PLC0415
+
+        if str(source).lower().endswith(".csv"):
+            frame = pd.read_csv(source)
+        else:
+            frame = pd.read_excel(source)
+        frame = frame.fillna("").astype(str)
+        text_column = str(frame.columns[0])
+        return DataFrameLoader(frame, page_content_column=text_column).load()
+
+    @staticmethod
+    def _load_json_fallback(source: str) -> list:
+        import json  # noqa: PLC0415
+        from langchain_core.documents import Document  # noqa: PLC0415
+
+        with open(source, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, list):
+            return [
+                Document(
+                    page_content=json.dumps(item, ensure_ascii=False),
+                    metadata={"source": source, "row": index},
+                )
+                for index, item in enumerate(data)
+            ]
+        if isinstance(data, dict):
+            return [
+                Document(
+                    page_content=json.dumps(value, ensure_ascii=False),
+                    metadata={"source": source, "key": str(key)},
+                )
+                for key, value in data.items()
+            ]
+        return [
+            Document(
+                page_content=json.dumps(data, ensure_ascii=False),
+                metadata={"source": source},
+            )
+        ]
 
     @staticmethod
     def _extract_youtube_id(url: str) -> str:

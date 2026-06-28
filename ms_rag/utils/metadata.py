@@ -13,6 +13,7 @@ from datetime import date, datetime
 from typing import Any
 
 _SCALAR_TYPES = (str, int, float, bool)
+_RESERVED_METADATA_KEYS = {"text", "vector", "pk"}
 
 
 def _json_default(value: object) -> str:
@@ -21,13 +22,22 @@ def _json_default(value: object) -> str:
     return str(value)
 
 
+def _safe_key(key: object) -> str:
+    normalized = str(key)
+    if normalized in _RESERVED_METADATA_KEYS:
+        return f"ms_rag_metadata_{normalized}"
+    return normalized
+
+
 def sanitize_metadata(metadata: dict[str, Any]) -> dict[str, str | int | float | bool]:
     """Return a copy of *metadata* safe for ChromaDB and similar vector stores."""
     sanitized: dict[str, str | int | float | bool] = {}
 
-    for key, value in metadata.items():
+    for raw_key, value in metadata.items():
         if value is None:
             continue
+
+        key = _safe_key(raw_key)
 
         if isinstance(value, _SCALAR_TYPES):
             sanitized[key] = value

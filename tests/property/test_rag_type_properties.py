@@ -139,3 +139,33 @@ class TestRAGTypeContent:
             assert "best for" in lower, (
                 f"RAG type '{r.rag_type}' description missing 'Best for' guidance"
             )
+
+    def test_advanced_rag_descriptions_match_runtime_claims(self) -> None:
+        """Advanced RAG labels must describe implemented workflows, not paper-only variants."""
+        agentic = RAG_TYPE_MAP["agentic_rag"].description.lower()
+        assert "plan whether to retrieve" in agentic
+        assert "rewrite the query" in agentic
+        assert "call approved tools" in agentic
+        assert "permission-gated" in agentic
+
+        self_rag = RAG_TYPE_MAP["self_rag"].description.lower()
+        assert "retrieval need" in self_rag
+        assert "grades retrieved evidence" in self_rag
+        assert "supported" in self_rag
+
+        corrective = RAG_TYPE_MAP["corrective_rag"].description.lower()
+        assert "rewrites weak queries" in corrective
+        assert "approved web search" in corrective
+        assert "corpus is insufficient" in corrective
+
+        graphrag = RAG_TYPE_MAP["graphrag"].description.lower()
+        assert "during ingestion" in graphrag
+        assert "persistent graph" in graphrag
+        assert "community summaries" in graphrag
+        assert "without requiring users to operate a separate graph database" not in graphrag
+
+        adaptive = RAG_TYPE_MAP["adaptive_rag"].description.lower()
+        assert "query complexity" in adaptive
+        assert "directly to generation" in adaptive
+        assert "use retrieval" in adaptive
+        assert "rewrite-plus-retrieval" in adaptive

@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Production Readiness - MS_RAG Docs</title>
+    <title>Production Readiness - MS-RAGS(ALL-IN-ONE) Docs</title>
     <link rel="stylesheet" href="assets/styles.css">
   </head>
   <body>
     <div class="site">
       <aside class="sidebar">
-        <a class="brand" href="index.html"><strong>MS_RAG</strong><span>Production RAG framework builder</span></a>
+        <a class="brand" href="index.html"><strong>MS-RAGS(ALL-IN-ONE)</strong><span>Production RAG framework builder</span></a>
         <div class="nav-title">Start</div>
         <a href="index.html">Overview</a><a href="getting-started.html">Getting started</a><a href="recommendations.html">Recommendations</a>
         <div class="nav-title">Core Concepts</div>
@@ -19,11 +19,11 @@
         <div class="nav-title">Project</div><a href="https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-" rel="noopener">GitHub repository</a>
       </aside>
       <div class="content">
-        <div class="mobile-bar"><strong>MS_RAG Docs</strong><button type="button" data-mobile-toggle>Menu</button></div>
+        <div class="mobile-bar"><strong>MS-RAGS(ALL-IN-ONE) Docs</strong><button type="button" data-mobile-toggle>Menu</button></div>
         <header class="page-header">
           <p class="eyebrow">Production</p>
           <h1>Production Readiness</h1>
-          <p>MS_RAG gives you production-shaped wiring, but real production readiness also needs live smoke tests, monitoring, evaluation, and operational discipline.</p>
+          <p>MS-RAGS(ALL-IN-ONE) gives you production-shaped wiring, but real production readiness also needs live smoke tests, monitoring, evaluation, and operational discipline.</p>
         </header>
         <main>
           <section>
@@ -42,7 +42,7 @@
           <section>
             <h2>Production Gate Checklist</h2>
             <p class="lead">
-              Use this as the final review before giving MS_RAG-generated code to
+              Use this as the final review before giving MS-RAGS(ALL-IN-ONE)-generated code to
               production users. A pipeline is ready only when the code works, the
               data path is understood, the selected third-party services are verified,
               and failures are observable.
@@ -56,7 +56,7 @@
                   <tr><td>Vector DB</td><td>Run a live add/query smoke test against the exact production backend and collection.</td><td>Wrong credentials, missing index, dimension mismatch, network or region errors.</td></tr>
                   <tr><td>Retrieval quality</td><td>Test real user questions and inspect retrieved chunks before judging final answers.</td><td>Good LLM response hiding poor retrieval.</td></tr>
                   <tr><td>Observability</td><td>Confirm JSON logs and OpenTelemetry traces include ingestion, retrieval, generation, and failure events.</td><td>No way to debug latency, empty context, provider errors, or poor answer quality.</td></tr>
-                  <tr><td>Generated code</td><td>Install generated <code>requirements.txt</code> in a clean environment and run ingest plus query.</td><td>Hidden dependency on the MS_RAG development checkout.</td></tr>
+                  <tr><td>Generated code</td><td>Install generated <code>requirements.txt</code> in a clean environment and run ingest plus query.</td><td>Hidden dependency on the MS-RAGS(ALL-IN-ONE) development checkout.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -80,7 +80,7 @@
           <section>
             <h2>What "Production Ready" Means Here</h2>
             <p class="lead">
-              MS_RAG can generate production-shaped code, but a RAG system is only
+              MS-RAGS(ALL-IN-ONE) can generate production-shaped code, but a RAG system is only
               production-ready after it has been tested against the exact providers,
               vector databases, documents, prompts, credentials, and deployment
               environment your users will rely on.
@@ -103,7 +103,7 @@
             <h2>Logs And OpenTelemetry</h2>
             <p>At startup, the CLI asks whether to enable <a href="https://opentelemetry.io/" rel="noopener">OpenTelemetry</a>. Users can decline and continue with structured logging only.</p>
             <pre><code>MS_RAG_OTEL_ENABLED=1
-OTEL_SERVICE_NAME=ms-rag
+OTEL_SERVICE_NAME=ms-rags-all-in-one
 OTEL_ENVIRONMENT=production
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer your-token</code></pre>
@@ -118,10 +118,28 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer your-token</code></pre>
                   <tr><td>Unit/property tests</td><td>Model serialization, validation, prompt flow, code generation, factory wiring.</td><td>Live cloud credentials or production DB availability.</td></tr>
                   <tr><td>Integration tests</td><td>End-to-end local runtime wiring and rebuild behavior.</td><td>Every hosted backend's operational behavior.</td></tr>
                   <tr><td>Vector DB smoke tests</td><td>Real add/query cycle for selected vector backends.</td><td>Full answer quality across your corpus.</td></tr>
-                  <tr><td>Generated pipeline test</td><td>Exported code can ingest and query outside the MS_RAG package.</td><td>Long-term monitoring or scaling behavior.</td></tr>
+                  <tr><td>Generated pipeline test</td><td>Exported code can ingest and query outside the MS-RAGS(ALL-IN-ONE) package.</td><td>Long-term monitoring or scaling behavior.</td></tr>
                 </tbody>
               </table>
             </div>
+          </section>
+
+          <section>
+            <h2>Docker Production Checklist</h2>
+            <p>MS-RAGS(ALL-IN-ONE) includes a Dockerfile for teams that want a repeatable CLI runtime, CI smoke-test container, or production-style build environment.</p>
+            <ol class="steps">
+              <li>Build the production image with <code>docker build --build-arg INSTALL_EXTRAS=production -t ms-rags-all-in-one:production .</code>.</li>
+              <li>Pass secrets at runtime through <code>--env-file</code>, Docker secrets, or the deployment platform secret manager.</li>
+              <li>Mount document input and output folders instead of copying private data into the image.</li>
+              <li>Mount persistence folders for local Chroma, FAISS, graph stores, keyword SQLite, generated code, and agent memory when needed.</li>
+              <li>If using host Ollama from Docker Desktop, set <code>OLLAMA_BASE_URL=http://host.docker.internal:11434</code>.</li>
+              <li>For Redis vectors, build a Redis-focused image separately because the upstream Redis/HuggingFace dependency families currently conflict.</li>
+            </ol>
+            <pre><code>docker run --rm -it \
+  --env-file .env \
+  -v "${PWD}/SmokeDocs:/app/SmokeDocs:ro" \
+  -v "${PWD}/output:/app/output" \
+  ms-rags-all-in-one:production</code></pre>
           </section>
 
           <section>
@@ -134,7 +152,7 @@ python pipeline.py --query "What does the policy say?"
 
 # Interactive loop
 python pipeline.py</code></pre>
-            <p>Generated code reads secrets from environment variables and should be smoke-tested separately from the MS_RAG CLI.</p>
+            <p>Generated code reads secrets from environment variables and should be smoke-tested separately from the MS-RAGS(ALL-IN-ONE) CLI.</p>
           </section>
 
           <section>

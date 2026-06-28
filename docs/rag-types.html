@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>RAG Types - MS_RAG Docs</title>
+    <title>RAG Types - MS-RAGS(ALL-IN-ONE) Docs</title>
     <link rel="stylesheet" href="assets/styles.css">
   </head>
   <body>
     <div class="site">
       <aside class="sidebar">
-        <a class="brand" href="index.html"><strong>MS_RAG</strong><span>Production RAG framework builder</span></a>
+        <a class="brand" href="index.html"><strong>MS-RAGS(ALL-IN-ONE)</strong><span>Production RAG framework builder</span></a>
         <div class="nav-title">Start</div>
         <a href="index.html">Overview</a>
         <a href="getting-started.html">Getting started</a>
@@ -23,7 +23,7 @@
         <div class="nav-title">Project</div><a href="https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-" rel="noopener">GitHub repository</a>
       </aside>
       <div class="content">
-        <div class="mobile-bar"><strong>MS_RAG Docs</strong><button type="button" data-mobile-toggle>Menu</button></div>
+        <div class="mobile-bar"><strong>MS-RAGS(ALL-IN-ONE) Docs</strong><button type="button" data-mobile-toggle>Menu</button></div>
         <header class="page-header">
           <p class="eyebrow">Concepts</p>
           <h1>RAG Types</h1>
@@ -44,11 +44,11 @@
                 <tbody>
                   <tr><td>First working baseline</td><td>Naive RAG</td><td>Simple, fast, easy to debug.</td></tr>
                   <tr><td>Production support bot</td><td>Advanced RAG</td><td>Adds quality controls around retrieval.</td></tr>
-                  <tr><td>Complex tool-using tasks</td><td>Agentic RAG</td><td>Uses <a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a> to plan and act.</td></tr>
+                  <tr><td>Complex tool-using tasks</td><td>Agentic RAG</td><td>Uses <a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a> to plan retrieval, query rewriting, direct answering, and approved tool use.</td></tr>
                   <tr><td>Long documents</td><td>Parent-Child RAG</td><td>Small chunks retrieve, larger parent passages answer.</td></tr>
                   <tr><td>Cross-document analysis</td><td>GraphRAG</td><td>Uses relationships, entities, and communities.</td></tr>
                   <tr><td>Ambiguous questions</td><td>Multi-Query RAG or RAG-Fusion</td><td>Searches multiple phrasings.</td></tr>
-                  <tr><td>Strict grounding</td><td>Self-RAG or Corrective RAG</td><td>Reflects on relevance and support.</td></tr>
+                  <tr><td>Strict grounding</td><td>Self-RAG or Corrective RAG</td><td>Grades retrieved evidence, checks answer support, or uses approved corrective fallback.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -68,9 +68,9 @@
                   <tr><td>Naive RAG</td><td>First baseline and simple Q&A.</td><td>Documents are clean, questions are direct, and you need a working system quickly.</td><td>Questions are ambiguous, multi-hop, or answers need strict verification.</td><td>Recursive chunking, Dense Vector retrieval, top_k 4-8.</td></tr>
                   <tr><td>Advanced RAG</td><td>Default production starting point.</td><td>The baseline works but retrieval quality, grounding, or answer consistency must improve.</td><td>You have not inspected retrieved chunks yet.</td><td>Query rewriting, hybrid retrieval, reranking, RAGAS/DeepEval checks.</td></tr>
                   <tr><td>Modular RAG</td><td>Custom architecture with replaceable stages.</td><td>Different content types need different retrievers, prompts, or routing paths.</td><td>A single simple pipeline is enough.</td><td>Clear module boundaries, structured logs, evaluation per module.</td></tr>
-                  <tr><td>Agentic RAG</td><td>Tool-using or multi-step workflows.</td><td>The system must plan, decide whether to retrieve, call tools, rewrite queries, or route tasks.</td><td>Latency must be predictable or the question is a simple lookup.</td><td>LangGraph traces, conservative tools, strict permissions.</td></tr>
-                  <tr><td>Self-RAG</td><td>Strict grounded answers.</td><td>You need the model to reflect on retrieval need, relevance, answer support, and usefulness.</td><td>You cannot afford extra LLM checks.</td><td>High-quality embeddings, lower top_k, faithfulness metrics.</td></tr>
-                  <tr><td>Corrective RAG</td><td>Corpus coverage is uncertain.</td><td>Retrieved chunks may be wrong, missing, stale, or incomplete and the system needs fallback behavior.</td><td>Your corpus is complete and retrieval is already strong.</td><td>Document grading, fallback logging, source-quality review.</td></tr>
+                  <tr><td>Agentic RAG</td><td>Tool-using or multi-step workflows.</td><td>The system should retrieve, optionally call user-approved tools through explicit triggers, use approved memory, and then answer with traceable steps.</td><td>Latency must be predictable or the question is a simple lookup.</td><td>LangGraph traces, conservative tools, strict permissions.</td></tr>
+                  <tr><td>Self-RAG</td><td>Strict grounded answers.</td><td>You need relevance grading on retrieved documents and an answer support check before returning.</td><td>You cannot afford extra LLM checks.</td><td>High-quality embeddings, lower top_k, faithfulness metrics.</td></tr>
+                  <tr><td>Corrective RAG</td><td>Corpus coverage is uncertain.</td><td>Retrieved chunks may be wrong, missing, stale, or incomplete, and the system may need an approved Web Search fallback.</td><td>Your corpus is complete and retrieval is already strong.</td><td>Document grading, fallback logging, source-quality review.</td></tr>
                   <tr><td>Speculative RAG</td><td>Hypothesis-first retrieval.</td><td>A draft answer or hypothesis can help find better evidence.</td><td>The model is likely to invent unsupported claims.</td><td>Reranking, strict grounding prompt, answer verification.</td></tr>
                   <tr><td>GraphRAG</td><td>Cross-document relationship analysis.</td><td>Questions depend on entities, relationships, communities, or facts spread across many documents.</td><td>Your documents are small or relationship extraction is unnecessary.</td><td>Entity extraction, graph metadata, analytical evaluation queries.</td></tr>
                   <tr><td>HyDE RAG</td><td>Query wording differs from document wording.</td><td>User questions are abstract but the corpus uses different technical language.</td><td>The generated hypothetical answer may drift too far from the corpus.</td><td>Strong generation model, reranking, drift checks.</td></tr>
@@ -78,7 +78,7 @@
                   <tr><td>RAG-Fusion</td><td>Multiple retrieval paths need merged ranking.</td><td>You want better recall and ranking from several rewritten queries.</td><td>A single retrieval call already returns strong context.</td><td>Reciprocal rank fusion, hybrid retrieval, top_k tuning.</td></tr>
                   <tr><td>Step-Back RAG</td><td>Questions need background principles.</td><td>The answer needs both general concepts and specific source facts.</td><td>Questions are direct factual lookups.</td><td>Broad query generation, original query retrieval, final synthesis prompt.</td></tr>
                   <tr><td>Parent-Child RAG</td><td>Long documents need surrounding context.</td><td>Small chunks retrieve the right location but answers need the larger section around it.</td><td>Documents are already short and self-contained.</td><td>Child chunks 300-600 tokens, parent chunks 1200-2500 tokens.</td></tr>
-                  <tr><td>Adaptive RAG</td><td>Mixed simple and complex workloads.</td><td>Some questions are easy lookups while others require deeper retrieval or reasoning.</td><td>You cannot reliably route query complexity.</td><td>Routing prompts, LangGraph traces, per-route evaluation.</td></tr>
+                  <tr><td>Adaptive RAG</td><td>Mixed simple and retrieval-heavy workloads.</td><td>Some questions can be answered directly while others should retrieve corpus evidence first.</td><td>You cannot reliably route query complexity.</td><td>Routing prompts, LangGraph traces, per-route evaluation.</td></tr>
                   <tr><td>Contextual Compression RAG</td><td>Retrieved chunks are long or noisy.</td><td>Relevant chunks contain too much irrelevant text and the final prompt overflows.</td><td>Chunks are already short and clean.</td><td>Embeddings filters first, LLM extraction only when necessary.</td></tr>
                 </tbody>
               </table>
@@ -113,19 +113,38 @@
               <div class="card"><span class="tag">Default baseline</span><h3>Naive RAG</h3><p><strong>How it works:</strong> query embedding, top-k vector retrieval, context inserted into prompt, answer generated.</p><p><strong>Use when:</strong> documents are clean and the user needs straightforward Q&A.</p><p><strong>Tradeoff:</strong> weak on ambiguous, multi-hop, or noisy queries.</p></div>
               <div class="card"><span class="tag">Production default</span><h3>Advanced RAG</h3><p><strong>How it works:</strong> adds query rewriting, HyDE, reranking, or compression around the basic RAG flow.</p><p><strong>Use when:</strong> quality matters more than raw latency.</p><p><strong>Tradeoff:</strong> more moving parts and more model calls.</p></div>
               <div class="card"><h3>Modular RAG</h3><p><strong>How it works:</strong> treats routing, retrieval, fusion, memory, and generation as replaceable modules.</p><p><strong>Use when:</strong> teams need full control over each stage.</p><p><strong>Tradeoff:</strong> more architecture decisions for users.</p></div>
-              <div class="card"><span class="tag warn"><a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a></span><h3>Agentic RAG</h3><p><strong>How it works:</strong> a LangGraph loop decides whether to retrieve, rewrite, call tools, or answer.</p><p><strong>Use when:</strong> tasks require planning or multi-step reasoning.</p><p><strong>Tradeoff:</strong> less predictable latency and cost.</p></div>
-              <div class="card"><span class="tag warn"><a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a></span><h3>Self-RAG</h3><p><strong>How it works:</strong> the model reflects on retrieval need, relevance, answer support, and answer usefulness.</p><p><strong>Use when:</strong> hallucination control matters.</p><p><strong>Tradeoff:</strong> slower than simple RAG.</p></div>
-              <div class="card"><span class="tag warn"><a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a></span><h3>Corrective RAG (CRAG)</h3><p><strong>How it works:</strong> grades retrieved chunks, removes irrelevant content, and can fall back when the corpus is insufficient.</p><p><strong>Use when:</strong> corpus coverage is uncertain.</p><p><strong>Tradeoff:</strong> needs additional relevance checks.</p></div>
+              <div class="card"><span class="tag warn"><a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a></span><h3>Agentic RAG</h3><p><strong>How it works:</strong> plans whether to retrieve, rewrite, call approved tools, or answer directly, then follows the selected graph path.</p><p><strong>Use when:</strong> tasks need approved tools, memory, URL reading, file reading, API reads, or multi-step reasoning.</p><p><strong>Tradeoff:</strong> less predictable latency and cost.</p></div>
+              <div class="card"><span class="tag warn"><a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a></span><h3>Self-RAG</h3><p><strong>How it works:</strong> reflects on retrieval need, grades retrieved document relevance, generates, and checks whether the final answer is supported by context.</p><p><strong>Use when:</strong> hallucination control matters.</p><p><strong>Tradeoff:</strong> slower than simple RAG.</p></div>
+              <div class="card"><span class="tag warn"><a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a></span><h3>Corrective RAG (CRAG)</h3><p><strong>How it works:</strong> grades retrieved chunks, removes irrelevant content, rewrites weak queries, and can use approved Web Search fallback when the corpus is insufficient.</p><p><strong>Use when:</strong> corpus coverage is uncertain.</p><p><strong>Tradeoff:</strong> needs additional relevance checks.</p></div>
               <div class="card"><h3>Speculative RAG</h3><p><strong>How it works:</strong> drafts an answer first, then retrieves evidence to verify or improve it.</p><p><strong>Use when:</strong> a hypothesis can guide retrieval.</p><p><strong>Tradeoff:</strong> early guesses must be carefully grounded.</p></div>
-              <div class="card"><h3>GraphRAG</h3><p><strong>How it works:</strong> retrieves through entity and relationship structure rather than flat chunks only.</p><p><strong>Use when:</strong> questions span many documents.</p><p><strong>Tradeoff:</strong> graph construction and maintenance add complexity.</p></div>
+              <div class="card"><h3>GraphRAG</h3><p><strong>How it works:</strong> extracts entities and relationships during ingestion, stores a persistent graph, builds community summaries, then combines graph context with hybrid evidence retrieval.</p><p><strong>Use when:</strong> questions span many documents and entity names or relationships matter.</p><p><strong>Requirement:</strong> configure a graph store and keyword store.</p></div>
               <div class="card"><h3>HyDE RAG</h3><p><strong>How it works:</strong> creates a hypothetical ideal answer document, embeds it, and retrieves real chunks close to it.</p><p><strong>Use when:</strong> query wording differs from document wording.</p><p><strong>Tradeoff:</strong> hypothetical content can drift.</p></div>
               <div class="card"><h3>Multi-Query RAG</h3><p><strong>How it works:</strong> generates multiple query variants and retrieves for each variant.</p><p><strong>Use when:</strong> one query phrasing misses good context.</p><p><strong>Tradeoff:</strong> multiple retrieval calls.</p></div>
               <div class="card"><h3>RAG-Fusion</h3><p><strong>How it works:</strong> retrieves from multiple generated queries and merges rankings with reciprocal rank fusion.</p><p><strong>Use when:</strong> ranking quality is more important than speed.</p><p><strong>Tradeoff:</strong> more retrieval work per question.</p></div>
               <div class="card"><h3>Step-Back RAG</h3><p><strong>How it works:</strong> asks a broader conceptual question, retrieves background principles, then combines with original context.</p><p><strong>Use when:</strong> questions need theory plus facts.</p><p><strong>Tradeoff:</strong> not needed for simple lookup.</p></div>
               <div class="card"><h3>Parent-Child RAG</h3><p><strong>How it works:</strong> indexes small child chunks, stores parent document state, then returns the larger parent context for generation.</p><p><strong>Use when:</strong> legal, research, policy, or book-length documents need surrounding context.</p><p><strong>Requirement:</strong> original sources must remain available for saved-session rebuilds.</p></div>
-              <div class="card"><span class="tag warn"><a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a></span><h3>Adaptive RAG</h3><p><strong>How it works:</strong> routes simple and complex queries through different retrieval depths.</p><p><strong>Use when:</strong> workloads mix easy lookups and hard reasoning.</p><p><strong>Tradeoff:</strong> requires reliable routing logic.</p></div>
+              <div class="card"><span class="tag warn"><a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a></span><h3>Adaptive RAG</h3><p><strong>How it works:</strong> routes simple prompts to direct generation, standard questions to retrieval, and complex analytical questions to rewrite-plus-retrieval.</p><p><strong>Use when:</strong> workloads mix easy prompts and corpus-grounded questions.</p><p><strong>Tradeoff:</strong> requires reliable routing logic.</p></div>
               <div class="card"><h3>Contextual Compression RAG</h3><p><strong>How it works:</strong> retrieves chunks, then filters or extracts only relevant parts before generation.</p><p><strong>Use when:</strong> chunks are verbose or noisy.</p><p><strong>Tradeoff:</strong> compression adds latency.</p></div>
             </div>
+          </section>
+
+          <section>
+            <h2>Agentic And Corrective Tools</h2>
+            <p>Agentic RAG can use all configured tools. Corrective RAG can use the Web Search tool as an approved fallback. MS-RAGS(ALL-IN-ONE) keeps tools permission-gated: the runtime cannot read a URL, local file, memory store, or API unless the user enabled that tool during setup and approved the required allowlist or credential.</p>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Tool</th><th>When to use it</th><th>Permission required</th><th>Runtime trigger</th></tr></thead>
+                <tbody>
+                  <tr><td>Web Search</td><td>The private corpus has no matching context and the answer needs current public information.</td><td>Tavily or Brave Search API key, max result count, timeout.</td><td>Automatic fallback only when retrieval returns no documents.</td></tr>
+                  <tr><td>Memory Systems</td><td>The agent should remember approved session facts, long-term facts, semantic notes, episodic events, or user profile preferences.</td><td>Enabled memory types and a JSON memory path that can be mounted in production.</td><td>Automatic memory recall for Agentic RAG queries.</td></tr>
+                  <tr><td>URL Fetch / Web Page Reader</td><td>The user asks the agent to inspect a specific docs page, blog, changelog, or official URL.</td><td>Allowed domains, timeout, max page size.</td><td>Include a visible <code>https://...</code> URL in the query.</td></tr>
+                  <tr><td>File System Read</td><td>The user wants the agent to compare or summarize changing local files.</td><td>Strict path allowlist and max file size.</td><td>Use <code>file:&lt;approved-path&gt;</code> in the query.</td></tr>
+                  <tr><td>Document Summarization</td><td>Tool output is too long to pass directly to the answer prompt.</td><td>Uses the selected LLM; no extra key.</td><td>Automatic when enabled and tool output is large.</td></tr>
+                  <tr><td>API Request</td><td>The agent must read a safe business API such as status, tickets, inventory, or metrics.</td><td>Allowed base URLs, allowed HTTP methods, optional auth env var and credential.</td><td>Use <code>api GET https://api.example.com/v1/status</code>.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>For deployment, keep secrets in environment variables or the interactive credential prompt, mount persistent memory storage, and keep URL/file/API allowlists narrow. If a selected tool is missing approval or credentials, MS-RAGS(ALL-IN-ONE) raises a clear runtime error instead of silently pretending the tool worked.</p>
           </section>
 
           <section>
@@ -137,10 +156,10 @@
                   <tr><td>Naive RAG</td><td><code>query -> embed -> vector search -> prompt -> LLM</code></td><td>Recursive chunking, Dense Vector retrieval, top_k 4-8.</td></tr>
                   <tr><td>Advanced RAG</td><td><code>query enhancement -> retrieval -> reranking/compression -> LLM</code></td><td>Query rewriting, hybrid retrieval, Cohere/BGE reranker, RAGAS evaluation.</td></tr>
                   <tr><td>Modular RAG</td><td><code>router -> selected modules -> retriever/fusion -> generator</code></td><td>Use when users need different retrievers or prompts per content type.</td></tr>
-                  <tr><td>Agentic RAG</td><td><code>agent state -> decide action -> retrieve/tool/rewrite -> answer</code></td><td><a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a> tracing, conservative tool access, evaluation on full traces.</td></tr>
-                  <tr><td>Self-RAG</td><td><code>retrieve decision -> relevance check -> support check -> answer utility check</code></td><td>Use lower top_k, high-quality embeddings, and strict faithfulness metrics.</td></tr>
-                  <tr><td>Corrective RAG</td><td><code>retrieve -> grade chunks -> refine or fallback -> answer</code></td><td>Use when documents may be incomplete; log fallback events.</td></tr>
-                  <tr><td>GraphRAG</td><td><code>extract entities -> build relationships -> retrieve graph communities -> summarize</code></td><td>Best with structured corpora, entity metadata, and analytical queries.</td></tr>
+                  <tr><td>Agentic RAG</td><td><code>plan -> retrieve/rewrite/tools/direct answer -> generate</code></td><td><a href="https://langchain-ai.github.io/langgraph/" rel="noopener">LangGraph</a> tracing, conservative tool access, evaluation on full traces.</td></tr>
+                  <tr><td>Self-RAG</td><td><code>retrieval-need reflection -> retrieve/direct -> relevance check -> generate -> support check</code></td><td>Use lower top_k, high-quality embeddings, and strict faithfulness metrics.</td></tr>
+                  <tr><td>Corrective RAG</td><td><code>retrieve -> grade chunks -> rewrite/retry or approved web fallback -> answer</code></td><td>Use when documents may be incomplete; log fallback events.</td></tr>
+                  <tr><td>GraphRAG</td><td><code>ingest -> extract entities/relations -> graph store -> community summaries -> local/global graph retrieval -> hybrid evidence -> grounded answer</code></td><td>Best with Neo4j/Aura, Kuzu, or Local JSON graph store plus a keyword store.</td></tr>
                   <tr><td>HyDE RAG</td><td><code>query -> hypothetical document -> embed hypothetical -> retrieve real chunks</code></td><td>Use with good generation model and reranking to prevent drift.</td></tr>
                   <tr><td>Parent-Child RAG</td><td><code>retrieve small child -> return larger parent context -> answer</code></td><td>Use child chunks around 300-600 tokens and parent chunks around 1200-2500 tokens.</td></tr>
                   <tr><td>Contextual Compression RAG</td><td><code>retrieve -> filter/extract relevant spans -> prompt</code></td><td>Use embeddings filter first; add LLM extraction only when needed.</td></tr>

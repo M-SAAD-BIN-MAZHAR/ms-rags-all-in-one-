@@ -54,7 +54,7 @@ class QueryLoop:
         """
         Args:
             query_pipeline:  A callable or object with a `process(query, session)` method.
-                             If None, a placeholder response is returned.
+                             If None, live queries fail loudly until runtime is built.
             session_manager: SessionManager instance for /save handling.
         """
         self._pipeline = query_pipeline
@@ -260,6 +260,12 @@ class QueryLoop:
             else "—",
         )
         table.add_row(
+            "Graph Store",
+            f"{cfg.graph_store.store_type} / {cfg.graph_store.graph_name} / mode={cfg.graph_store.query_mode}"
+            if cfg.graph_store
+            else "—",
+        )
+        table.add_row(
             "Query Enhancement",
             ", ".join(cfg.query_enhancement) or "None",
         )
@@ -319,14 +325,14 @@ class QueryLoop:
             print_error(console, f"Save failed: {exc}")
 
     def _process_query(self, query: str, session_state: SessionState) -> str:
-        """Route query to the pipeline or return placeholder."""
+        """Route query to the initialized runtime pipeline."""
         if self._pipeline is not None:
             if hasattr(self._pipeline, "process"):
                 return self._pipeline.process(query, session_state)  # type: ignore[union-attr]
             if callable(self._pipeline):
                 return self._pipeline(query, session_state)  # type: ignore[operator]
 
-        return (
-            "[dim italic]Pipeline not yet initialised. "
-            "Complete Steps 11-16 to enable live querying.[/dim italic]"
+        raise RuntimeError(
+            "Live query runtime is not initialized. Complete setup and build the "
+            "retriever, LLM, and RAG chain before entering query mode."
         )

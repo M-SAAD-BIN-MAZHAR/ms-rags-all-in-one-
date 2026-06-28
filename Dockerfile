@@ -60,5 +60,5 @@ RUN useradd --create-home --shell /bin/bash msrag \
 USER msrag
 WORKDIR /workspace
 
-ENTRYPOINT ["ms-rag"]
+ENTRYPOINT ["ms-rags"]
 CMD []

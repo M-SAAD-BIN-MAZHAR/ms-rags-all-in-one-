@@ -1,9 +1,9 @@
-"""MS_RAG ASCII banner display module.
+"""MS-RAGS(ALL-IN-ONE) ASCII banner display module.
 
 Renders the branded ASCII art banner and tagline on CLI startup.
 
 Behaviour (Requirement 1):
-- Displays full-width ASCII art containing "MS_RAG" before any other output.
+- Displays full-width ASCII art containing "MS-RAGS(ALL-IN-ONE)" before any other output.
 - Prints a one-line tagline immediately below the banner.
 - Uses ANSI colour on colour-capable terminals via Rich.
 - Falls back to plain print() if Rich raises any exception.
@@ -13,22 +13,22 @@ Behaviour (Requirement 1):
 from __future__ import annotations
 
 MS_RAG_BANNER = r"""
-███╗   ███╗███████╗      ██████╗  █████╗  ██████╗
-████╗ ████║██╔════╝      ██╔══██╗██╔══██╗██╔════╝
-██╔████╔██║███████╗      ██████╔╝███████║██║  ███╗
-██║╚██╔╝██║╚════██║      ██╔══██╗██╔══██║██║   ██║
-██║ ╚═╝ ██║███████║      ██║  ██║██║  ██║╚██████╔╝
-╚═╝     ╚═╝╚══════╝      ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝
-                      MS_RAG
+███╗   ███╗███████╗      ██████╗  █████╗  ██████╗ ███████╗
+████╗ ████║██╔════╝      ██╔══██╗██╔══██╗██╔════╝ ██╔════╝
+██╔████╔██║███████╗      ██████╔╝███████║██║  ███╗███████╗
+██║╚██╔╝██║╚════██║      ██╔══██╗██╔══██║██║   ██║╚════██║
+██║ ╚═╝ ██║███████║      ██║  ██║██║  ██║╚██████╔╝███████║
+╚═╝     ╚═╝╚══════╝      ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝
+                    MS-RAGS(ALL-IN-ONE)
 """
 
 TAGLINE = "Production-Grade RAG Framework Builder"
-VERSION_LINE = "v0.1.0  |  Powered by LangChain & LangGraph"
+VERSION_LINE = "v1.0.0  |  Powered by LangChain & LangGraph"
 SEPARATOR = "─" * 60
 
 
 def display_banner(console: object | None = None) -> None:  # type: ignore[type-arg]
-    """Render the MS_RAG ASCII banner and tagline to the terminal.
+    """Render the MS-RAGS(ALL-IN-ONE) ASCII banner and tagline to the terminal.
 
     Args:
         console: A ``rich.console.Console`` instance.  If *None*, one is

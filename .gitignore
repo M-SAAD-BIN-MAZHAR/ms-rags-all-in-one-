@@ -66,6 +66,7 @@ model_cache/
 sentence-transformers/
 
 # Runtime telemetry / evaluation artifacts
+.live_smoke/
 .deepeval/
 ms_rag_metrics.jsonl
 ms_rag_traces.jsonl
@@ -88,3 +89,4 @@ Resume/
 
 # Kiro internal (keep specs visible but not workspace settings)
 .kiro/settings/
+SmokeDocs

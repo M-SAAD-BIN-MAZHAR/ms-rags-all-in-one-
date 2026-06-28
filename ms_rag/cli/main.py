@@ -1,7 +1,7 @@
-"""MS_RAG CLI main entry point.
+"""MS-RAGS(ALL-IN-ONE) CLI main entry point.
 
 Wires together all 16 workflow steps and the code generator.
-Launched via `ms-rag` or `python -m ms_rag`.
+Launched via `ms-rags`, `ms-rag`, or `python -m ms_rag`.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from ms_rag.utils.telemetry import TelemetryReporter
     help="Load a previously saved session config JSON and skip to the query loop.",
 )
 def run(load_path: str | None = None) -> None:
-    """MS_RAG — Production-Grade RAG Framework Builder.
+    """MS-RAGS(ALL-IN-ONE) — Production-Grade RAG Framework Builder.
 
     Run interactively to build a complete RAG pipeline step by step,
     or use --load to resume a saved session.
@@ -42,7 +42,7 @@ def run(load_path: str | None = None) -> None:
     display_banner(console)
     telemetry_config = prompt_telemetry_configuration(console=console)
     telemetry = TelemetryReporter(telemetry_config)
-    telemetry.record_event("cli.start", "MS_RAG CLI started")
+    telemetry.record_event("cli.start", "MS-RAGS(ALL-IN-ONE) CLI started")
 
     credential_store = CredentialStore()
 
@@ -118,6 +118,32 @@ def run(load_path: str | None = None) -> None:
                             credential_store.set(config.keyword_store.store_type, field_name, str(value))
                     config.keyword_store.connection_params = params
                     KeywordStoreConnector(credential_store).test_connection(config.keyword_store)
+            if config.graph_store:
+                from ms_rag.ingestion.graph_store import GRAPH_STORE_MAP, GraphStoreConnector  # noqa: PLC0415
+
+                graph_info = GRAPH_STORE_MAP.get(config.graph_store.store_type)
+                if graph_info and graph_info.credential_fields:
+                    console.print(
+                        "[bold cyan]  Re-enter graph database credentials for this saved session.[/bold cyan]"
+                    )
+                    config.graph_store = GraphStoreConnector(credential_store).reprompt_credentials(config.graph_store)
+            if config.agent_tools:
+                from ms_rag.ui.prompts import prompt_text  # noqa: PLC0415
+
+                if "web_search" in config.agent_tools.enabled_tools:
+                    web_settings = config.agent_tools.tool_settings.get("web_search", {})
+                    provider = web_settings.get("provider", "tavily")
+                    key_name = "TAVILY_API_KEY" if provider == "tavily" else "BRAVE_SEARCH_API_KEY"
+                    console.print("[bold cyan]  Re-enter web search credentials for agent tools.[/bold cyan]")
+                    value = prompt_text(f"  {key_name}:", required=True, secret=True, console=console)
+                    credential_store.set("web_search", key_name, str(value))
+                if "api_request" in config.agent_tools.enabled_tools:
+                    api_settings = config.agent_tools.tool_settings.get("api_request", {})
+                    auth_env = str(api_settings.get("auth_env_var") or "")
+                    if auth_env:
+                        console.print("[bold cyan]  Re-enter API Request Tool credential.[/bold cyan]")
+                        value = prompt_text(f"  {auth_env}:", required=True, secret=True, console=console)
+                        credential_store.set("api_request", auth_env, str(value))
             telemetry.record_event("session.load", "Session loaded", load_path=load_path)
             with telemetry.span("session.rebuild", load_path=load_path):
                 runtime = rebuild_session_runtime(config, credential_store)
@@ -156,6 +182,7 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
     """Run Steps 2-16 interactively and return the complete PipelineConfig."""
     from ms_rag.config.credential_manager import CredentialManager  # noqa: PLC0415
     from ms_rag.workflow.rag_type_selector import RAGTypeSelector  # noqa: PLC0415
+    from ms_rag.workflow.rag_presets import get_rag_preset  # noqa: PLC0415
     from ms_rag.ingestion.document_type_selector import DocumentTypeSelector  # noqa: PLC0415
     from ms_rag.ingestion.loader_selector import LoaderSelector  # noqa: PLC0415
     from ms_rag.workflow.chunking_configurator import ChunkingConfigurator  # noqa: PLC0415
@@ -219,7 +246,34 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
     with telemetry.span("setup.rag_type"):
         rag_selector = RAGTypeSelector()
         config.rag_type = rag_selector.display_and_select()
+        rag_preset = get_rag_preset(config.rag_type.rag_type if config.rag_type else None)
+        con.print(f"[cyan]  Preset applied:[/cyan] {rag_preset.summary}")
+        for note in rag_preset.notes:
+            con.print(f"[yellow]  Note:[/yellow] {note}")
         telemetry.record_event("rag_type.selected", "RAG type selected", rag_type=config.rag_type.rag_type if config.rag_type else "")
+
+    if config.rag_type and config.rag_type.rag_type in {"agentic_rag", "corrective_rag"}:
+        from ms_rag.agent.tool_configurator import AgentToolConfigurator  # noqa: PLC0415
+
+        with telemetry.span("setup.agent_tools"):
+            config.agent_tools = AgentToolConfigurator(credential_store).configure()
+            telemetry.record_event(
+                "agent_tools.configured",
+                "Agentic tools configured",
+                tools=config.agent_tools.enabled_tools if config.agent_tools else [],
+            )
+
+    if config.rag_type and config.rag_type.rag_type == "graphrag":
+        from ms_rag.ingestion.graph_store import GraphStoreConnector  # noqa: PLC0415
+
+        with telemetry.span("setup.graph_store"):
+            config.graph_store = GraphStoreConnector(credential_store).prompt_and_configure()
+            telemetry.record_event(
+                "graph_store.configured",
+                "GraphRAG graph store configured",
+                store_type=config.graph_store.store_type,
+                query_mode=config.graph_store.query_mode,
+            )
 
     # Step 4: Document Types
     doc_selector = DocumentTypeSelector()
@@ -295,16 +349,58 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
         failed_documents=len(ingestion_result.failed_documents),
     )
 
+    if config.rag_type and config.rag_type.rag_type == "graphrag":
+        from ms_rag.ingestion.graph_store import GraphStoreConnector  # noqa: PLC0415
+        from ms_rag.llm.llm_integration import get_llm  # noqa: PLC0415
+
+        with telemetry.span("setup.graphrag_index"):
+            if config.graph_store is None:
+                raise click.ClickException("GraphRAG requires a configured graph store.")
+            if config.llm_model is None:
+                raise click.ClickException("GraphRAG requires a selected generation LLM for graph extraction.")
+            con.print("[cyan]  Building persistent GraphRAG knowledge graph...[/cyan]")
+            graph_llm = get_llm(
+                config.llm_model.provider,
+                config.llm_model.model_id,
+                credential_store=credential_store,
+            )
+            graph_connector = GraphStoreConnector(credential_store)
+            graph = graph_connector.build_graph_index(
+                getattr(vector_store, "_ms_rag_chunk_documents", []) or [],
+                llm=graph_llm,
+            )
+            graph_connector.persist_graph(config.graph_store, graph)
+            setattr(vector_store, "_ms_rag_graph_index", graph)
+            print_success(
+                con,
+                f"GraphRAG graph built: {len(graph.get('nodes', []))} entities, "
+                f"{len(graph.get('edges', []))} relationships, {len(graph.get('communities', []))} communities",
+            )
+
     # Step 10: Query Enhancement (configured before query, applied at query time)
     with telemetry.span("setup.query_enhancement"):
         query_enhancer = QueryEnhancer()
-        config.query_enhancement = query_enhancer.configure(config.configured_providers)
-        config.hyde_llm_provider = query_enhancer.hyde_llm_provider
+        if rag_preset.allow_query_enhancement_prompt:
+            config.query_enhancement = query_enhancer.configure(config.configured_providers)
+            config.hyde_llm_provider = query_enhancer.hyde_llm_provider
+        else:
+            config.query_enhancement = list(rag_preset.query_enhancement or [])
+            if "hyde" in config.query_enhancement and config.llm_model:
+                config.hyde_llm_provider = config.llm_model.provider
+            if config.query_enhancement:
+                print_success(con, f"Query enhancement preset: {', '.join(config.query_enhancement)}")
+            else:
+                con.print("  [dim]Query enhancement skipped by selected RAG preset.[/dim]")
 
     # Step 11: Retrieval Strategy
     with telemetry.span("setup.retrieval"):
         retrieval_module = RetrievalStrategyModule()
-        config.retrieval = retrieval_module.configure()
+        if rag_preset.allow_retrieval_prompt:
+            config.retrieval = retrieval_module.configure()
+        else:
+            config.retrieval = rag_preset.retrieval
+            if config.retrieval:
+                print_success(con, f"Retrieval preset: {config.retrieval.strategy} | top_k={config.retrieval.top_k}")
         if retrieval_needs_keyword_store(config.retrieval):
             keyword_connector = KeywordStoreConnector(credential_store=credential_store)
             production_recommended = bool(config.vector_db and config.vector_db.db_type not in {"chroma", "faiss"})
@@ -323,16 +419,26 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
 
     # Step 12: Reranking
     with telemetry.span("setup.reranking"):
-        reranking_module = RerankingModule(credential_store=credential_store)
-        reranking_config = reranking_module.configure(config.retrieval.top_k)
-        if reranking_config:
-            config.reranking = reranking_config
-            config.reranking_enabled = True
+        if rag_preset.allow_reranking_prompt:
+            reranking_module = RerankingModule(credential_store=credential_store)
+            reranking_config = reranking_module.configure(config.retrieval.top_k)
+            if reranking_config:
+                config.reranking = reranking_config
+                config.reranking_enabled = True
+        else:
+            con.print("  [dim]Reranking skipped by selected RAG preset.[/dim]")
 
     # Step 13: Context Compression
     with telemetry.span("setup.compression"):
         compressor = ContextCompressor()
-        compression_config = compressor.configure(config.configured_providers)
+        if rag_preset.allow_compression_prompt:
+            compression_config = compressor.configure(config.configured_providers)
+        else:
+            compression_config = rag_preset.compression
+            if compression_config:
+                print_success(con, f"Compression preset: {', '.join(compression_config.techniques)}")
+            else:
+                con.print("  [dim]Context compression skipped by selected RAG preset.[/dim]")
         if compression_config:
             config.compression = compression_config
             config.compression_enabled = True
@@ -516,6 +622,17 @@ def _run_ingestion_with_recovery(
             console.print("[bold cyan]  Preparing embeddings and vector store...[/bold cyan]")  # type: ignore[union-attr]
             embeddings = vectorization.get_embeddings(config.embedding_model, credential_store)  # type: ignore[union-attr,arg-type]
             vector_store = db_connector.get_vector_store(config.vector_db, embeddings)  # type: ignore[union-attr,arg-type]
+            chunking_llm = None
+            if config.chunking and config.chunking.strategy == "agentic":
+                from ms_rag.llm.llm_integration import get_llm  # noqa: PLC0415
+
+                if not config.llm_model:
+                    raise RuntimeError("Agentic chunking requires a selected generation model.")
+                chunking_llm = get_llm(
+                    config.llm_model.provider,
+                    config.llm_model.model_id,
+                    credential_store=credential_store,
+                )
             console.print("[bold cyan]  Loading, chunking, embedding, and storing documents...[/bold cyan]")  # type: ignore[union-attr]
             ingestion_result = orchestrator.ingest(  # type: ignore[union-attr]
                 sources=config.document_sources,
@@ -524,6 +641,8 @@ def _run_ingestion_with_recovery(
                 embedding_model=config.embedding_model,
                 vector_db=config.vector_db,
                 vector_store=vector_store,
+                embeddings=embeddings,
+                llm=chunking_llm,
             )
             return embeddings, vector_store, ingestion_result
         except Exception as exc:  # noqa: BLE001

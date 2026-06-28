@@ -174,7 +174,7 @@ class CredentialManager:
             console.print(
                 "[dim]  Ollama Cloud currently supports chat models only. "
                 "Embedding models must use a local or self-hosted Ollama base URL. "
-                "If you paste https://ollama.com/v1, MS_RAG will normalize it for chat use.[/dim]"
+                "If you paste https://ollama.com/v1, MS-RAGS(ALL-IN-ONE) will normalize it for chat use.[/dim]"
             )
 
         for field in required_fields:

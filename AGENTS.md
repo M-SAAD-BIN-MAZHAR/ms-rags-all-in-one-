@@ -1,4 +1,4 @@
-# MS_RAG — Agent Handoff Document
+# MS-RAGS(ALL-IN-ONE) — Agent Handoff Document
 
 This file is for any AI coding agent (Kiro, Codex, Claude Code, Cursor, Gemini CLI, etc.)
 picking up this project. Read this fully before touching any code or spec files.
@@ -7,7 +7,7 @@ picking up this project. Read this fully before touching any code or spec files.
 
 ## What This Project Is
 
-**MS_RAG** is a production-grade, terminal-based interactive CLI framework for building
+**MS-RAGS(ALL-IN-ONE)** is a production-grade, terminal-based interactive CLI framework for building
 complete RAG (Retrieval-Augmented Generation) pipelines. Inspired by OpenClaw's UX, it
 guides users step-by-step through every layer of a RAG system and then generates a
 standalone, deployable Python file tailored to their choices.
@@ -42,7 +42,7 @@ pytest tests/ -v
 
 ### Recent Runtime Fix — Vector Store Rebuild Crash
 
-**Issue observed:** Running `ms-rag` with FAISS local vector DB could ingest documents successfully, then crash before the live query loop with:
+**Issue observed:** Running `ms-rags` with FAISS local vector DB could ingest documents successfully, then crash before the live query loop with:
 
 ```text
 RuntimeError: FAISS store has no documents yet.
@@ -56,7 +56,15 @@ RuntimeError: FAISS store has no documents yet.
 
 **Retriever hardening across databases:** Keyword-dependent retrieval strategies no longer depend only on backend-specific `vector_store.get()` behavior. Ingestion now caches a backend-independent `_ms_rag_keyword_corpus` from chunk text, runtime rebuilds can reconstruct that corpus from the original sources when needed, FAISS docstore text is read directly, and generated pipelines mirror the same behavior. This protects BM25, TF-IDF, hybrid, and ensemble retrieval across FAISS, Chroma, Pinecone, Qdrant, Weaviate, Milvus, Redis, PGVector, Elasticsearch, OpenSearch, Azure AI Search, and MongoDB Atlas. Parent-Child, Multi-Vector, and Time-Weighted retrieval now have dedicated runtime state: ingestion attaches parent documents, child chunks, source IDs, and timestamps; saved-session rebuilds reconstruct that state; generated pipelines carry equivalent standalone state. The interactive UI explains required state/models and asks for confirmation before advanced retrieval is selected. Runtime build uses strict advanced mode, so missing advanced state raises a clear setup error instead of silently degrading to dense retrieval.
 
+**RAG type preset enforcement:** Step 3 is now a real workflow router, not just a label. `ms_rag/workflow/rag_presets.py` maps every RAG type to required downstream behavior. Naive, HyDE, Multi-Query, RAG-Fusion, Step-Back, Parent-Child, GraphRAG, Speculative, Agentic, Self-RAG, Corrective, Adaptive, and Contextual Compression RAG now auto-apply or skip relevant query enhancement, retrieval, reranking, and compression steps so users only see relevant choices. Advanced and Modular RAG intentionally keep the full module prompts available. Runtime has distinct non-LangGraph flows for Speculative RAG and full persistent GraphRAG graph retrieval, Adaptive RAG now actually routes before retrieval, and multi-query/fusion query variants are retrieved and merged instead of only using the first generated query.
+
 **Persistent keyword store for production hybrid retrieval:** Hybrid, BM25, TF-IDF, and ensembles containing keyword retrievers now require a `KeywordStoreConfig`. After retrieval selection, the CLI asks where to persist raw chunk text: SQLite, PostgreSQL, Elasticsearch, OpenSearch, or memory-only for development. This is required for cloud vector DBs such as Pinecone because they store/search vectors while the keyword store persists searchable text. Saved-session JSON sanitizes keyword-store secrets, and `--load` re-prompts for keyword-store credentials before rebuilding retrieval.
+
+**Agentic tools:** Agentic RAG has an optional Step 3b powered by `ms_rag/agent/tool_configurator.py` and `ms_rag/agent/tools.py`. Supported tools are Web Search, Memory Systems, URL Fetch, File System Read, Document Summarization, and API Request. These tools are deny-by-default: web/API credentials are prompted and stored only in `CredentialStore`, URL fetch requires domain allowlists, file read requires path allowlists, API calls require method/base URL allowlists, and memory persists to a user-approved JSON path. Runtime wiring lives in `build_langgraph_workflow()` and uses explicit triggers: visible URLs for URL Fetch, `file:<path>` for File Read, and `api GET|POST|PUT|PATCH <url>` for API Request. Do not add LLM-invented arbitrary tool calls without a permission preview and allowlist check.
+
+**RAG behavior hardening:** Corrective RAG now also offers Step 3b tool setup so users can enable an approved Web Search fallback. Self-RAG/CRAG support checks must not loop indefinitely; return with a visible warning rather than re-generating the same answer forever. Keyword-dependent runtime retrieval (BM25, TF-IDF, Hybrid, keyword Ensemble, GraphRAG preset) must fail loudly if the keyword corpus cannot be loaded from the keyword store, runtime cache, or original sources. Generated LangGraph pipelines must preserve distinct Self/Corrective, Adaptive, and general Agentic graph shapes rather than emitting one generic graph for every LangGraph RAG type.
+
+**Full GraphRAG:** GraphRAG now requires a `GraphStoreConfig` and builds a persistent knowledge graph from ingested chunks. The graph pipeline extracts entities/relationships during ingestion, persists nodes/edges/community summaries to Local JSON, Neo4j/Aura, or Kuzu, supports local/global/hybrid query modes, and combines graph context with hybrid vector+keyword evidence retrieval. Generated standalone pipelines now include the same GraphRAG graph build/load/query helpers and build the graph during `--ingest`; keep live runtime and generated-code parity. Do not regress GraphRAG back to query-only entity expansion. RAG-Fusion must use reciprocal-rank fusion, not only query deduplication. Advanced and Modular RAG are intentionally user-composable modes, while preset RAGs must lock their required downstream features.
 
 **Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\property\test_codegen_properties.py tests\integration\test_rebuild_session_runtime.py tests\integration\test_end_to_end.py tests\unit\test_vectordb_connector.py -q` passed with 41 tests.
 
@@ -292,7 +300,7 @@ class SessionState:
 6. **Rich** for all terminal output; **questionary** for all interactive prompts
 7. **Never embed credentials** in `PipelineConfig` JSON — only store env var names
 8. **Property-based tests** with Hypothesis for all 29 correctness properties (see design.md)
-9. **Generated code is standalone** — zero runtime dependency on `ms_rag` package itself
+9. **Generated code is standalone** — zero runtime dependency on `MS-RAGS(ALL-IN-ONE)` package itself
 10. **Session Manager** handles `/save` (JSON) and `--load` CLI arg — `schema_version="1.0"`
 
 ---
@@ -300,7 +308,7 @@ class SessionState:
 ## The 16-Step Workflow at a Glance
 
 ```
-Step 1  → Banner (ASCII art "MS_RAG")
+Step 1  → Banner (ASCII art "MS-RAGS(ALL-IN-ONE)")
 Optional → OpenTelemetry startup prompt (user can enable tracing for the session)
 Step 2  → LLM Provider credentials (12 providers, encrypted persistence)
 Step 3  → RAG type selection (15 types; 4 require LangGraph)
@@ -315,9 +323,9 @@ Step 11 → Retrieval strategy (10 strategies including TF-IDF separate from BM2
 Step 12 → Reranking (6 rerankers, local model prompt for cross-encoder/BGE/ColBERT)
 Step 13 → Context compression (6 techniques, ordered, LLM-dependency check)
 Step 14 → System prompt (5 testable properties, 10k char limit for replace)
-Step 15 → Evaluation (12 frameworks including TruLens, RAGAS, DeepEval, LangSmith)
+Step 15 → Evaluation (11 frameworks including TruLens, RAGAS, DeepEval, LangSmith)
 Step 16 → Runtime build + LIVE query loop (/exit confirm, /config structured, /save, unknown cmd error)
-→ Code Generator → pipeline.py + requirements.txt (standalone, no MS_RAG dependency)
+→ Code Generator → pipeline.py + requirements.txt (standalone, no MS-RAGS(ALL-IN-ONE) dependency)
 ```
 
 ---
@@ -335,5 +343,5 @@ Step 16 → Runtime build + LIVE query loop (/exit confirm, /config structured, 
 
 **Last Updated**: June 27, 2026  
 **Completed by**: Kiro  
-**Status**: ✅ FULLY IMPLEMENTED — 423 tests passing, all 24 tasks complete  
-**Next action**: Install full dependencies (`pip install -e ".[dev,pinecone,qdrant,ragas,deepeval,langsmith]"`) and run `ms-rag`
+**Status**: ✅ FULLY IMPLEMENTED — 506 tests passing, all 24 tasks complete  
+**Next action**: Install full dependencies (`pip install -e ".[dev,pinecone,qdrant,ragas,deepeval,langsmith]"`) and run `ms-rags`

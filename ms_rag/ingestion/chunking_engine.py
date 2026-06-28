@@ -285,14 +285,10 @@ class ChunkingEngine:
             )
 
         if strategy == "html_aware":
-            from langchain_text_splitters import HTMLSectionSplitter  # noqa: PLC0415
-            headers_to_split_on = [
-                ("h1", "Header 1"),
-                ("h2", "Header 2"),
-                ("h3", "Header 3"),
-                ("h4", "Header 4"),
-            ]
-            return HTMLSectionSplitter(headers_to_split_on=headers_to_split_on)
+            return _HTMLAwareChunker(
+                chunk_size=config.chunk_size,
+                chunk_overlap=config.chunk_overlap,
+            )
 
         if strategy == "code_aware":
             from langchain_text_splitters import Language, RecursiveCharacterTextSplitter  # noqa: PLC0415
@@ -355,18 +351,100 @@ class _AgenticChunker:
     def __init__(self, chunk_size: int = 1000) -> None:
         self.chunk_size = chunk_size
         self.strategy_id = "agentic"
+        self.llm: object | None = None
+
+    def with_llm(self, llm: object) -> "_AgenticChunker":
+        self.llm = llm
+        return self
 
     def split_documents(self, documents: list) -> list:
-        """Split documents using LLM-identified boundaries.
-
-        Fallback: uses RecursiveCharacterTextSplitter if LLM not available.
-        """
+        """Split documents using LLM-identified boundaries."""
+        if self.llm is None:
+            raise RuntimeError(
+                "Agentic chunking requires the selected LLM. "
+                "Configure a generation model before ingestion or choose a non-agentic chunking strategy."
+            )
+        from langchain_core.documents import Document  # noqa: PLC0415
         from langchain_text_splitters import RecursiveCharacterTextSplitter  # noqa: PLC0415
-        fallback = RecursiveCharacterTextSplitter(
+
+        window_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.chunk_size * 4,
+            chunk_overlap=min(200, max(0, self.chunk_size // 5)),
+        )
+        size_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=0,
         )
-        return fallback.split_documents(documents)
+        windows = window_splitter.split_documents(documents)
+        result: list[Document] = []
+        marker = "<MS_RAG_CHUNK>"
+        prompt = (
+            "You are chunking a document for retrieval. Insert the marker "
+            f"{marker} between semantically complete sections. Keep all original text, "
+            "do not summarize, and do not add commentary. Target chunks should be under "
+            f"{self.chunk_size} characters when possible.\n\nTEXT:\n"
+        )
+        for window in windows:
+            text = getattr(window, "page_content", "")
+            try:
+                response = self.llm.invoke(prompt + text)  # type: ignore[attr-defined]
+                marked = getattr(response, "content", str(response))
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(f"Agentic chunking LLM boundary detection failed: {exc}") from exc
+            parts = [part.strip() for part in marked.split(marker) if part.strip()]
+            if not parts:
+                raise RuntimeError("Agentic chunking LLM returned no chunk boundaries/content.")
+            for part in parts:
+                oversized = size_splitter.split_documents([
+                    Document(page_content=part, metadata=dict(getattr(window, "metadata", {}) or {}))
+                ])
+                result.extend(oversized)
+        return result
+
+
+class _HTMLAwareChunker:
+    """HTML heading splitter with a recursive fallback for non-HTML inputs."""
+
+    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 100) -> None:
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        self.strategy_id = "html_aware"
+
+    def split_documents(self, documents: list) -> list:
+        from langchain_text_splitters import HTMLSectionSplitter, RecursiveCharacterTextSplitter  # noqa: PLC0415
+
+        html_splitter = HTMLSectionSplitter(
+            headers_to_split_on=[
+                ("h1", "Title"),
+                ("h2", "Header 2"),
+                ("h3", "Header 3"),
+                ("h4", "Header 4"),
+            ]
+        )
+        recursive = RecursiveCharacterTextSplitter(
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
+        )
+        result = []
+        for doc in documents:
+            text = getattr(doc, "page_content", "")
+            metadata = dict(getattr(doc, "metadata", {}) or {})
+            if "<" not in text or ">" not in text:
+                result.extend(recursive.split_documents([doc]))
+                continue
+            try:
+                splits = html_splitter.split_text(text)
+                for split in splits:
+                    split.metadata.update(metadata)
+                result.extend(recursive.split_documents(splits))
+            except Exception:  # noqa: BLE001
+                result.extend(recursive.split_documents([doc]))
+        return result
+
+    def split_text(self, text: str) -> list[str]:
+        from langchain_core.documents import Document  # noqa: PLC0415
+
+        return [doc.page_content for doc in self.split_documents([Document(page_content=text)])]
 
 
 class _DocumentAwareChunker:

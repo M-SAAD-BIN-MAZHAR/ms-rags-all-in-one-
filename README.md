@@ -1,6 +1,6 @@
 <div align="center">
 
-# MS\_RAG — Production-Grade RAG Framework Builder
+# MS-RAGS(ALL-IN-ONE) — Production-Grade RAG Framework Builder
 
 ```
 ███╗   ███╗███████╗      ██████╗  █████╗  ██████╗
@@ -9,7 +9,7 @@
 ██║╚██╔╝██║╚════██║      ██╔══██╗██╔══██║██║   ██║
 ██║ ╚═╝ ██║███████║      ██║  ██║██║  ██║╚██████╔╝
 ╚═╝     ╚═╝╚══════╝      ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝
-                      MS_RAG
+                      MS-RAGS(ALL-IN-ONE)
 ```
 
 **The OpenClaw-inspired terminal CLI for building production RAG pipelines — end to end.**
@@ -27,15 +27,15 @@
 
 ## Overview
 
-MS\_RAG is a **production-grade, terminal-based interactive CLI framework** that guides you step-by-step through configuring every layer of a RAG (Retrieval-Augmented Generation) system — from credential setup and document ingestion through retrieval, reranking, context compression, LLM integration, evaluation, and final code generation.
+MS-RAGS(ALL-IN-ONE) is a **production-grade, terminal-based interactive CLI framework** that guides you step-by-step through configuring every layer of a RAG (Retrieval-Augmented Generation) system — from credential setup and document ingestion through retrieval, reranking, context compression, LLM integration, evaluation, and final code generation.
 
-Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generator**:
+Inspired by OpenClaw's UX, MS-RAGS(ALL-IN-ONE) acts as a **live RAG workbench + code generator**:
 
 - You configure interactively through 16 guided steps
 - You can optionally enable OpenTelemetry tracing from the terminal at startup
 - Your documents are ingested and indexed live during Step 9
 - The live query loop starts after the full setup flow and runtime build complete
-- At the end, MS\_RAG generates a **standalone `pipeline.py`** you own completely — no runtime dependency on MS\_RAG
+- At the end, MS-RAGS(ALL-IN-ONE) generates a **standalone `pipeline.py`** you own completely — no runtime dependency on MS-RAGS(ALL-IN-ONE)
 
 ---
 
@@ -54,7 +54,7 @@ Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generat
 | **Retrieval Strategies** | 10 strategies — Dense Vector, BM25, TF-IDF, Hybrid, MMR, Ensemble, Parent-Child, Multi-Vector, Self-Query, Time-weighted |
 | **Rerankers** | 6 — Cross-Encoder, Cohere, BGE, LLM-based, ColBERT, FlashRank |
 | **Context Compression** | 6 techniques — LLM Chain Extraction, Embeddings Filter, Redundancy Removal, Document Compressor Pipeline, Contextual Compression, Summary Compression |
-| **Evaluation Frameworks** | 12 — RAGAS, DeepEval, TruLens, LangSmith, Langfuse, Arize Phoenix, ARES, RAGBench, RAGEval, CI/CD Gate, LangGraph Trace, Monitoring Export |
+| **Evaluation Options** | 11 — RAGAS, DeepEval, TruLens, LangSmith, Langfuse, Arize Phoenix, ARES, RAGBench, CI/CD Gate, LangGraph Trace, Monitoring Export |
 
 ---
 
@@ -62,9 +62,9 @@ Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generat
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                      MS_RAG CLI                          │
+│                      MS-RAGS(ALL-IN-ONE) CLI                          │
 ├──────────────┬──────────────────────────────────────────┤
-│ Step 1       │ ASCII Banner (MS_RAG)                    │
+│ Step 1       │ ASCII Banner (MS-RAGS(ALL-IN-ONE))                    │
 │ Optional     │ OpenTelemetry tracing prompt             │
 │ Step 2       │ LLM Provider Credentials (12 providers)  │
 │ Step 3       │ RAG Architecture Selection (15 types)    │
@@ -78,12 +78,12 @@ Inspired by OpenClaw's UX, MS\_RAG acts as a **live RAG workbench + code generat
 │ Step 12      │ Reranking (6 rerankers)                  │
 │ Step 13      │ Context Compression (6 techniques)       │
 │ Step 14      │ System Prompt Configuration              │
-│ Step 15      │ Evaluation Frameworks (12 frameworks)    │
+│ Step 15      │ Evaluation Frameworks (11 frameworks)    │
 │ Step 16      │ Runtime build + interactive query loop   │
 ├──────────────┴──────────────────────────────────────────┤
 │              CODE GENERATOR                              │
 │         pipeline.py + requirements.txt                   │
-│         (standalone — no MS_RAG dependency)             │
+│         (standalone — no MS-RAGS(ALL-IN-ONE) dependency)             │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -119,22 +119,23 @@ source .venv/bin/activate
 pip install -e ".[production]"
 
 # 4. Run
-ms-rag
+ms-rags
 ```
 
 That's it for the standard production feature set. The `[production]` extra includes:
 - All 12 LLM providers
 - ChromaDB, FAISS, Pinecone, Qdrant, Weaviate, Milvus, PGVector, Elasticsearch, OpenSearch, MongoDB Atlas, and AWS/Azure-compatible vector integrations
-- All 12 evaluation frameworks with **live runtime scoring** (RAGAS, DeepEval, TruLens, LangSmith, Langfuse, etc.)
+- All 11 evaluation options are explicit about their runtime mode: package-backed scoring for RAGAS/DeepEval, modern TruLens package validation plus groundedness scores, LangSmith/Langfuse tracing, Phoenix OpenInference export, ARES package availability plus compatible scores, RAGBench dataset-compatible scoring, CI/CD gates, LangGraph trace export, and monitoring export.
 - All rerankers (FlashRank, Cohere)
-- All document loaders (PDF, DOCX, CSV, HTML, YouTube, images, etc.)
+- All document loaders (PDF, DOCX, CSV, Excel, PPTX, HTML, Markdown, JSON, XML, YouTube, images/OCR, ePub, RTF, code, SQL, MongoDB, etc.)
+- Production parser extras include Unstructured support for PPTX, Markdown, image OCR, ePub, and RTF, plus `jq`, `msoffcrypto-tool`, `python-pptx`, and `pypandoc-binary`.
 - Aligned `grpcio` pins for Weaviate compatibility (`grpcio>=1.59.5,<1.80.0`)
 
 ### Important Redis Install Note
 
 Redis vector support is available, but it is **not included in `[production]`**
 right now because the latest `langchain-redis==0.2.5` package pins
-`hf-xet<1.2.1`, while the modern HuggingFace stack used by MS\_RAG requires
+`hf-xet<1.2.1`, while the modern HuggingFace stack used by MS-RAGS(ALL-IN-ONE) requires
 `hf-xet>=1.4.3`. Installing both in the same fresh environment causes pip to
 fail with a dependency conflict.
 
@@ -148,7 +149,7 @@ pip install -e ".[redis]"
 For Docker:
 
 ```bash
-docker build --build-arg USE_CONSTRAINTS=0 --build-arg INSTALL_EXTRAS=redis -t ms-rag:redis .
+docker build --build-arg USE_CONSTRAINTS=0 --build-arg INSTALL_EXTRAS=redis -t ms-rags-all-in-one:redis .
 ```
 
 Use this Redis-specific path only when Redis is the vector DB you plan to test.
@@ -172,7 +173,7 @@ pip install -e ".[pinecone,qdrant,ragas,langsmith,rerankers]"
 
 ## Docker Usage
 
-MS\_RAG can also run inside a Docker container. This is useful when users want a
+MS-RAGS(ALL-IN-ONE) can also run inside a Docker container. This is useful when users want a
 repeatable CLI environment without installing Python dependencies directly on
 their machine.
 
@@ -180,34 +181,34 @@ their machine.
 
 | Command | What it installs | Recommended for |
 |---------|------------------|-----------------|
-| `docker build -t ms-rag:1.0.0 .` | Core MS\_RAG package and required base dependencies | Fast local testing, basic CLI walkthroughs, lightweight images |
-| `docker build --build-arg INSTALL_EXTRAS=production -t ms-rag:production .` | Core MS\_RAG plus production providers, vector DB clients except Redis, evaluators, rerankers, telemetry, and loader dependencies | Production-style usage and full feature testing |
-| `docker build --build-arg INSTALL_EXTRAS=pinecone,qdrant,ragas,rerankers,telemetry -t ms-rag:custom .` | Only the optional extras you name | Smaller images for teams that support a fixed stack |
-| `docker build --build-arg USE_CONSTRAINTS=0 --build-arg INSTALL_EXTRAS=redis -t ms-rag:redis .` | Redis vector support path | Redis-only testing while the upstream Redis/HuggingFace dependency conflict exists |
+| `docker build -t ms-rags-all-in-one:1.0.0 .` | Core MS-RAGS(ALL-IN-ONE) package and required base dependencies | Fast local testing, basic CLI walkthroughs, lightweight images |
+| `docker build --build-arg INSTALL_EXTRAS=production -t ms-rags-all-in-one:production .` | Core MS-RAGS(ALL-IN-ONE) plus production providers, vector DB clients except Redis, evaluators, rerankers, telemetry, and loader dependencies | Production-style usage and full feature testing |
+| `docker build --build-arg INSTALL_EXTRAS=pinecone,qdrant,ragas,rerankers,telemetry -t ms-rags-all-in-one:custom .` | Only the optional extras you name | Smaller images for teams that support a fixed stack |
+| `docker build --build-arg USE_CONSTRAINTS=0 --build-arg INSTALL_EXTRAS=redis -t ms-rags-all-in-one:redis .` | Redis vector support path | Redis-only testing while the upstream Redis/HuggingFace dependency conflict exists |
 
 If you want **all dependencies**, use the production build argument:
 
 ```bash
-docker build --build-arg INSTALL_EXTRAS=production -t ms-rag:production .
+docker build --build-arg INSTALL_EXTRAS=production -t ms-rags-all-in-one:production .
 ```
 
-The plain `ms-rag:1.0.0` image is intentionally smaller. It is valid, but it does
+The plain `ms-rags-all-in-one:1.0.0` image is intentionally smaller. It is valid, but it does
 not install every optional integration.
 
 Production Docker builds use `constraints-production.txt`. That file pins the
-known-compatible dependency family from the tested MS\_RAG environment so pip
+known-compatible dependency family from the tested MS-RAGS(ALL-IN-ONE) environment so pip
 does not spend a long time trying incompatible dependency combinations.
 It intentionally leaves platform-sensitive scientific wheels to pip so the same
 file can resolve cleanly on Windows and Linux Docker builds.
 
 ### Build The Image
 
-The default image installs the core MS\_RAG package. This keeps Docker builds
+The default image installs the Core MS-RAGS(ALL-IN-ONE) package. This keeps Docker builds
 faster and avoids pulling every optional evaluator/reranker package unless the
 user asks for them.
 
 ```bash
-docker build -t ms-rag:1.0.0 .
+docker build -t ms-rags-all-in-one:1.0.0 .
 ```
 
 To build the full production image with every optional provider, vector
@@ -215,13 +216,13 @@ database except Redis, evaluator, reranker, OpenTelemetry exporter, document
 loader, OCR/PDF tool, and local embedding dependency:
 
 ```bash
-docker build --build-arg INSTALL_EXTRAS=production -t ms-rag:production .
+docker build --build-arg INSTALL_EXTRAS=production -t ms-rags-all-in-one:production .
 ```
 
 For a custom feature set, pass any optional-extra group from `pyproject.toml`:
 
 ```bash
-docker build --build-arg INSTALL_EXTRAS=pinecone,qdrant,ragas,rerankers,telemetry -t ms-rag:custom .
+docker build --build-arg INSTALL_EXTRAS=pinecone,qdrant,ragas,rerankers,telemetry -t ms-rags-all-in-one:custom .
 ```
 
 Redis is the exception. Use the Redis-specific Docker command from the
@@ -229,18 +230,18 @@ Redis is the exception. Use the Redis-specific Docker command from the
 dependency currently conflicts with the modern HuggingFace dependency family.
 
 If Docker fails while resolving or downloading from `files.pythonhosted.org`, it
-is a Docker network/DNS issue rather than an MS\_RAG code error. Retry the build
+is a Docker network/DNS issue rather than an MS-RAGS(ALL-IN-ONE) code error. Retry the build
 after Docker networking is healthy, or pass your internal package index:
 
 ```bash
-docker build --build-arg PIP_INDEX_URL=https://pypi.org/simple -t ms-rag:1.0.0 .
+docker build --build-arg PIP_INDEX_URL=https://pypi.org/simple -t ms-rags-all-in-one:1.0.0 .
 ```
 
 If Docker fails with `resolution-too-deep`, make sure the build context includes
 `constraints-production.txt` and rebuild without cache:
 
 ```bash
-docker build --no-cache --build-arg INSTALL_EXTRAS=production -t ms-rag:production .
+docker build --no-cache --build-arg INSTALL_EXTRAS=production -t ms-rags-all-in-one:production .
 ```
 
 ### Local Equivalent
@@ -268,7 +269,7 @@ temporary container filesystem.
 docker run --rm -it \
   --env-file .env \
   -v "%cd%:/workspace" \
-  ms-rag:1.0.0
+  ms-rags-all-in-one:1.0.0
 ```
 
 Linux/macOS:
@@ -277,7 +278,7 @@ Linux/macOS:
 docker run --rm -it \
   --env-file .env \
   -v "$PWD:/workspace" \
-  ms-rag:1.0.0
+  ms-rags-all-in-one:1.0.0
 ```
 
 Windows PowerShell:
@@ -286,7 +287,7 @@ Windows PowerShell:
 docker run --rm -it `
   --env-file .env `
   -v "${PWD}:/workspace" `
-  ms-rag:1.0.0
+  ms-rags-all-in-one:1.0.0
 ```
 
 ### Resume A Saved Session
@@ -295,7 +296,7 @@ docker run --rm -it `
 docker run --rm -it \
   --env-file .env \
   -v "$PWD:/workspace" \
-  ms-rag:1.0.0 --load session.json
+  ms-rags-all-in-one:1.0.0 --load session.json
 ```
 
 ### Docker Notes
@@ -315,13 +316,13 @@ docker run --rm -it \
 
 ```bash
 # Interactive mode — starts the guided workflow
-ms-rag
+ms-rags
 
 # Or using Python directly
 python -m ms_rag
 
 # Resume a previously saved session (re-prompts credentials, rebuilds runtime)
-ms-rag --load session.json
+ms-rags --load session.json
 ```
 
 Saved sessions rebuild the live vector store connection, retriever stack, LLM, and RAG chain via `rebuild_session_runtime()`. Your vector DB data must still exist on disk or at the configured endpoint.
@@ -333,7 +334,7 @@ At startup, the CLI also asks whether you want to enable OpenTelemetry tracing f
 ## Deployable Documentation
 
 This repository includes a public, multi-page static documentation site in `docs/`.
-It is designed for Vercel and covers the MS_RAG value proposition, setup, every
+It is designed for Vercel and covers the MS-RAGS(ALL-IN-ONE) value proposition, setup, every
 RAG type, loaders/extractors, chunking strategies, embedding choices, vector
 databases, retrieval, reranking, compression, evaluation, observability,
 generated code, production recommendations, and deployment notes.
@@ -354,7 +355,7 @@ enough to deploy the docs.
 
 ### Step-by-Step Workflow
 
-When you run `ms-rag`, you will be guided through these steps:
+When you run `ms-rags`, you will be guided through these steps:
 
 **Step 2 — LLM Provider Credentials**
 Select one or more providers and enter your API keys. Keys are stored in memory and optionally encrypted to disk for reuse.
@@ -389,17 +390,52 @@ Choose your RAG variant. Types marked `[LangGraph]` use a StateGraph agentic loo
  8. GraphRAG
 ```
 
+MS-RAGS(ALL-IN-ONE) does not treat these as labels only. Preset RAG types lock the downstream steps they need: HyDE uses HyDE query generation, Multi-Query uses multi-query retrieval, RAG-Fusion uses reciprocal-rank fusion, Parent-Child uses parent-child retrieval state, Contextual Compression uses contextual compression, and GraphRAG builds a persistent knowledge graph plus hybrid evidence retrieval. Advanced RAG and Modular RAG intentionally leave the module choices open so expert users can compose their own pipeline.
+
+**GraphRAG graph store choices**
+When GraphRAG is selected, MS-RAGS(ALL-IN-ONE) asks where to store the extracted knowledge graph:
+
+| Graph store | Use when | Credentials |
+|-------------|----------|-------------|
+| Local JSON | Local apps, Docker, portable deployments, CI smoke tests. | No credential; provide a mounted graph path for production. |
+| Neo4j / Neo4j Aura | Managed production graph database. | `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, optional `NEO4J_DATABASE`. |
+| Kuzu | Embedded graph database for local/server deployments. | No cloud credential; provide `KUZU_DATABASE_PATH`. |
+
+GraphRAG also asks for a query mode: `local` entity-neighborhood retrieval, `global` community-summary retrieval, or `hybrid` combining both.
+
+**Step 3b — Agentic / Corrective Tools**
+If you choose Agentic RAG, MS-RAGS(ALL-IN-ONE) asks whether you want to enable permission-gated tools. If you choose Corrective RAG, MS-RAGS(ALL-IN-ONE) can also ask for Web Search so CRAG has an approved fallback when retrieved context is not relevant. Every tool is opt-in and deny-by-default.
+
+| Tool | What it does | Required user permission |
+|------|--------------|--------------------------|
+| Web Search | Searches the public web through Tavily or Brave Search. | Provider API key plus max-results limit. |
+| Memory Systems | Stores short-term, long-term, semantic, episodic, and user profile memories. | Enabled memory types and a JSON memory path such as `./agent_memory/memory.json`. |
+| URL Fetch / Web Page Reader | Reads a specific URL for the agent. | Allowed domains, timeout, and max page size. |
+| File System Read | Reads selected local files. | Explicit file/folder allowlist and max file size. |
+| Document Summarization | Summarizes large tool results before generation. | Uses the selected LLM; no separate credential. |
+| API Request | Calls a safe external REST API. | Allowed base URLs, allowed methods, optional auth env var, and credential prompt. |
+
+Agentic tool usage in the query loop is explicit:
+
+```text
+Summarize this page: https://docs.example.com/release-notes
+Compare my local notes with retrieval context file:"C:\approved notes\notes.txt"
+Check the customer API api GET https://api.example.com/v1/status
+```
+
+For deployment, mount/persist `./agent_memory/` if you enable persistent memory, provide the same API keys as environment variables or through the terminal prompts, and keep allowlists narrow. MS-RAGS(ALL-IN-ONE) will fail loudly if a selected tool cannot run because a credential, URL domain, file path, or API method was not approved.
+
 **Startup Prompt — Optional Tracing**
-Right after the banner, MS\_RAG can ask whether you want OpenTelemetry tracing for the current session. This is optional and does not affect normal usage if you decline it.
+Right after the banner, MS-RAGS(ALL-IN-ONE) can ask whether you want OpenTelemetry tracing for the current session. This is optional and does not affect normal usage if you decline it.
 
 **Step 9 — Live Ingestion**
-After selecting your vector DB and entering credentials, MS\_RAG runs a connection test, shows a final ingestion review, asks for confirmation, then ingests your documents with a real-time progress bar.
+After selecting your vector DB and entering credentials, MS-RAGS(ALL-IN-ONE) runs a connection test, shows a final ingestion review, asks for confirmation, then ingests your documents with a real-time progress bar.
 
 **Step 10–15 — Query Pipeline Configuration**
 Query enhancement, retrieval, reranking, compression, system prompt, and evaluation are configured before the live runtime starts.
 
 **Advanced retrieval guardrails**
-When you choose Parent-Child, Multi-Vector, Time-Weighted, or an Ensemble containing them, MS_RAG shows the required runtime state before continuing and asks for confirmation.
+When you choose Parent-Child, Multi-Vector, Time-Weighted, or an Ensemble containing them, MS-RAGS(ALL-IN-ONE) shows the required runtime state before continuing and asks for confirmation.
 
 | Strategy | Required state/model | Production behavior |
 |----------|----------------------|---------------------|
@@ -407,10 +443,10 @@ When you choose Parent-Child, Multi-Vector, Time-Weighted, or an Ensemble contai
 | Multi-Vector | Selected embedding model + chunk documents + local FAISS representation index | Builds a separate in-memory representation index and returns original chunks. It does not write synthetic vectors into your production vector DB. |
 | Time-Weighted | `ms_rag_ingested_at` timestamp metadata | Blends semantic relevance with recency. Runtime fails clearly if timestamp metadata is missing. |
 
-For saved sessions, keep original document sources available so MS_RAG can rebuild advanced retrieval state during `--load`.
+For saved sessions, keep original document sources available so MS-RAGS(ALL-IN-ONE) can rebuild advanced retrieval state during `--load`.
 
 **Persistent keyword stores for cloud vector DBs**
-Cloud vector DBs such as Pinecone, Qdrant, Weaviate, Milvus, and MongoDB Atlas are primarily vector stores. When you select Hybrid, BM25, TF-IDF, or an Ensemble containing keyword retrieval, MS_RAG now asks where to persist raw chunk text for keyword search:
+Cloud vector DBs such as Pinecone, Qdrant, Weaviate, Milvus, and MongoDB Atlas are primarily vector stores. When you select Hybrid, BM25, TF-IDF, or an Ensemble containing keyword retrieval, MS-RAGS(ALL-IN-ONE) now asks where to persist raw chunk text for keyword search:
 
 | Keyword store | Use when |
 |----------------|----------|
@@ -420,10 +456,10 @@ Cloud vector DBs such as Pinecone, Qdrant, Weaviate, Milvus, and MongoDB Atlas a
 | OpenSearch | AWS/OpenSearch production search |
 | Memory only | Development/testing only |
 
-At runtime, the dense side can use Pinecone while the keyword side loads chunk text from the selected keyword store. If credentials are needed, MS_RAG prompts for them, tests the connection, and stores only sanitized env-var markers in saved session JSON.
+At runtime, the dense side can use Pinecone while the keyword side loads chunk text from the selected keyword store. If credentials are needed, MS-RAGS(ALL-IN-ONE) prompts for them, tests the connection, and stores only sanitized env-var markers in saved session JSON.
 
 **Runtime notices and logs**
-MS_RAG renders fallback/degradation warnings as visible terminal notices and also emits structured JSON logs with fields such as `event`, `component`, `reason`, and `action`. If a feature has to degrade, the terminal tells you what happened and what to check instead of hiding it.
+MS-RAGS(ALL-IN-ONE) renders fallback/degradation warnings as visible terminal notices and also emits structured JSON logs with fields such as `event`, `component`, `reason`, and `action`. If a feature has to degrade, the terminal tells you what happened and what to check instead of hiding it.
 
 **Step 16 — Live Query Loop**
 Once the runtime is built, you can type natural language questions. Available commands:
@@ -450,19 +486,19 @@ Save config to file path: my_session.json
 
 Resume it later (re-enters credentials and rebuilds the live pipeline):
 ```bash
-ms-rag --load my_session.json
+ms-rags --load my_session.json
 ```
 
 ---
 
 ## Generated Code
 
-At the end of the workflow, MS\_RAG generates a **complete, standalone Python pipeline**:
+At the end of the workflow, MS-RAGS(ALL-IN-ONE) generates a **complete, standalone Python pipeline**:
 
 ```bash
 # Saved to your chosen directory:
 ./ms_rag_output/
-├── pipeline.py        # Full RAG pipeline — no MS_RAG dependency
+├── pipeline.py        # Full RAG pipeline — no MS-RAGS(ALL-IN-ONE) dependency
 └── requirements.txt   # All required packages
 ```
 
@@ -482,7 +518,7 @@ python pipeline.py
 
 ## Environment Variables
 
-MS\_RAG reads credentials from environment variables. You can create a `.env` file:
+MS-RAGS(ALL-IN-ONE) reads credentials from environment variables. You can create a `.env` file:
 
 ```bash
 # .env (never commit this file)
@@ -510,7 +546,7 @@ LANGFUSE_SECRET_KEY=...
 
 # Optional OpenTelemetry fallback for non-interactive runs
 MS_RAG_OTEL_ENABLED=1
-OTEL_SERVICE_NAME=ms-rag
+OTEL_SERVICE_NAME=ms-rags-all-in-one
 OTEL_ENVIRONMENT=production
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer your-token
@@ -521,7 +557,7 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer your-token
 ## Project Structure
 
 ```
-MS-RAG-ALL-IN-ONE-/
+MS-RAGS-ALL-IN-ONE/
 ├── ms_rag/
 │   ├── cli/
 │   │   ├── main.py                   # 16-step wiring + entry point
@@ -531,7 +567,7 @@ MS-RAG-ALL-IN-ONE-/
 │   ├── codegen/
 │   │   └── code_generator.py         # pipeline.py + requirements.txt generator
 │   ├── evaluation/
-│   │   ├── evaluation_framework.py   # 12 evaluation frameworks + live scoring
+│   │   ├── evaluation_framework.py   # 11 evaluation frameworks + live scoring
 │   │   └── evaluator_runners.py      # RAGAS, DeepEval, LangSmith, Langfuse, etc.
 │   ├── ingestion/
 │   │   ├── chunking_engine.py        # 11 chunking strategies
@@ -625,9 +661,12 @@ When evaluation is enabled in Step 15, metrics are computed **live after each qu
 
 | Evaluator | Runtime behaviour |
 |-----------|-------------------|
-| RAGAS / DeepEval / TruLens | Full framework when installed; lexical fallback otherwise |
+| RAGAS / DeepEval | Package-backed scoring when installed; lexical fallback with visible warning otherwise |
+| TruLens | Modern TruLens package validation plus TruLens-prefixed groundedness scores |
 | LangSmith / Langfuse | Logs trace/run when credentials are configured |
-| ARES / RAGBench / RAGEval | Lexical grounding scores (context recall, faithfulness) |
+| Arize Phoenix | OpenInference/Phoenix trace export when `PHOENIX_COLLECTOR_ENDPOINT` is configured; Phoenix-prefixed scores otherwise |
+| ARES | Uses `ares-ai` package availability path when installed plus ARES-compatible retrieval/generation scores |
+| RAGBench | Uses Hugging Face `datasets` tooling when installed plus RAGBench-compatible single-query scores |
 | CI/CD Gate | Checks thresholds against aggregated metrics via `check_cicd_thresholds()` |
 | LangGraph Trace | Appends to `MS_RAG_TRACE_LOG` (default: `./ms_rag_traces.jsonl`) |
 | Monitoring Export | Appends metrics to `MS_RAG_METRICS_EXPORT` (default: `./ms_rag_metrics.jsonl`) |
@@ -644,7 +683,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.llms import Ollama
 from trulens_eval import TruChain
 
-# ✅ CURRENT — what MS_RAG uses
+# ✅ CURRENT — What MS-RAGS(ALL-IN-ONE) uses
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_huggingface import HuggingFaceEndpointEmbeddings
 from langchain_ollama import ChatOllama

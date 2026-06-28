@@ -63,8 +63,9 @@ RAG_TYPES: list[RAGTypeConfig] = [
         display_name="Agentic RAG",
         description=(
             "Agentic RAG wraps the RAG pipeline in a LangGraph agent loop that can "
-            "decide whether to retrieve, rewrite the query, call external tools, or "
-            "generate an answer based on intermediate results. "
+            "plan whether to retrieve, rewrite the query, call approved tools, or "
+            "answer directly based on intermediate results. External tools remain "
+            "strictly permission-gated and allowlisted. "
             "Best for complex, multi-step reasoning tasks where a single retrieval pass "
             "is insufficient. Requires LangGraph."
         ),
@@ -74,9 +75,9 @@ RAG_TYPES: list[RAGTypeConfig] = [
         rag_type="self_rag",
         display_name="Self-RAG",
         description=(
-            "Self-RAG teaches the LLM to reflect on its own retrieval and generation "
-            "by predicting special tokens (Retrieve, ISREL, ISSUP, ISUSE) to decide "
-            "when to retrieve and whether the generated output is grounded. "
+            "Self-RAG reflects on retrieval need, grades retrieved evidence for "
+            "relevance, generates from grounded context, and checks whether the answer "
+            "is supported before returning it. "
             "Best for high-accuracy tasks where hallucination must be minimised. "
             "Requires LangGraph."
         ),
@@ -86,10 +87,9 @@ RAG_TYPES: list[RAGTypeConfig] = [
         rag_type="corrective_rag",
         display_name="Corrective RAG (CRAG)",
         description=(
-            "Corrective RAG adds a relevance-grading step after retrieval: if all "
-            "retrieved documents are judged irrelevant, it falls back to a web search "
-            "before generating. A knowledge-refinement step strips irrelevant content "
-            "from the context window. "
+            "Corrective RAG grades retrieved chunks, removes irrelevant chunks from the "
+            "context, rewrites weak queries, and can fall back to approved Web Search "
+            "before generating when the corpus is insufficient. "
             "Best for open-domain QA where the document corpus may not cover the query. "
             "Requires LangGraph."
         ),
@@ -110,11 +110,11 @@ RAG_TYPES: list[RAGTypeConfig] = [
         rag_type="graphrag",
         display_name="GraphRAG",
         description=(
-            "GraphRAG builds a knowledge graph from the document corpus and retrieves "
-            "graph communities and entity relationships rather than flat text chunks. "
-            "It supports global summarisation queries across the entire corpus that "
-            "vector search cannot answer. "
-            "Best for analytical questions requiring cross-document reasoning."
+            "GraphRAG in MS-RAGS(ALL-IN-ONE) extracts entities and relationships during ingestion, "
+            "stores a persistent graph, builds community summaries, and combines "
+            "local/global graph context with hybrid evidence retrieval. "
+            "Best for analytical questions requiring cross-document entity and "
+            "relationship context."
         ),
         requires_langgraph=False,
     ),
@@ -182,9 +182,9 @@ RAG_TYPES: list[RAGTypeConfig] = [
         rag_type="adaptive_rag",
         display_name="Adaptive RAG",
         description=(
-            "Adaptive RAG routes queries to the most appropriate retrieval strategy "
-            "based on query complexity: simple queries go directly to retrieval, "
-            "complex queries trigger iterative or web-augmented retrieval. "
+            "Adaptive RAG routes queries to the most appropriate path based on query "
+            "complexity: simple prompts go directly to generation, standard questions "
+            "use retrieval, and complex analytical questions use rewrite-plus-retrieval. "
             "Best for mixed workloads where different query types need different "
             "pipeline depths. Requires LangGraph."
         ),

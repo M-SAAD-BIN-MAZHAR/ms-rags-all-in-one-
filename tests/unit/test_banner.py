@@ -2,7 +2,7 @@
 
 Tests (Requirement 1.1, 1.2, 1.3):
 - display_banner() does not raise on a non-terminal console.
-- Banner text contains "MS_RAG".
+- Banner text contains "MS-RAGS(ALL-IN-ONE)".
 - Tagline is printed immediately after the banner.
 - Falls back to plain text when Rich raises.
 - Continues silently when both display methods fail.
@@ -28,9 +28,9 @@ from ms_rag.ui.banner import (
 class TestBannerContent:
     """Verify the banner constants contain required text."""
 
-    def test_banner_contains_ms_rag(self) -> None:
-        """Requirement 1.1: banner must contain the literal text 'MS_RAG'."""
-        assert "MS_RAG" in MS_RAG_BANNER
+    def test_banner_contains_ms_rags_all_in_one(self) -> None:
+        """Requirement 1.1: banner must contain the visible product name."""
+        assert "MS-RAGS(ALL-IN-ONE)" in MS_RAG_BANNER
 
     def test_tagline_is_non_empty(self) -> None:
         """Requirement 1.2: tagline must be a non-empty string."""

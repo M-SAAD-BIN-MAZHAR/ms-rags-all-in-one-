@@ -9,6 +9,7 @@ Requirement 17.3: generated code uses LangGraph for agentic RAG types
 
 from __future__ import annotations
 
+import re
 from typing import Any
 import warnings
 
@@ -211,6 +212,9 @@ def build_rag_chain(
     retriever: object,
     llm: object,
     system_prompt: str,
+    rag_type: str = "naive_rag",
+    graph_store_config: object | None = None,
+    credential_store: object | None = None,
 ) -> object:
     """Build a standard LCEL RAG chain.
 
@@ -235,7 +239,7 @@ def build_rag_chain(
     """
     from langchain_core.prompts import ChatPromptTemplate  # noqa: PLC0415
     from langchain_core.output_parsers import StrOutputParser  # noqa: PLC0415
-    from langchain_core.runnables import RunnablePassthrough  # noqa: PLC0415
+    from langchain_core.runnables import RunnableLambda, RunnablePassthrough  # noqa: PLC0415
     telemetry = TelemetryReporter()
 
     def format_docs(docs: list) -> str:
@@ -250,6 +254,65 @@ def build_rag_chain(
     ])
 
     with telemetry.span("rag.chain.build"):
+        if rag_type == "speculative_rag":
+            draft_prompt = ChatPromptTemplate.from_messages([
+                ("system", "Draft a concise tentative answer. It may be incomplete; evidence will be retrieved next."),
+                ("human", "{question}"),
+            ])
+            final_prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                (
+                    "human",
+                    "Draft answer:\n{draft}\n\nEvidence passages:\n{context}\n\n"
+                    "Question: {question}\n\nVerify the draft against the evidence. Correct it if needed.",
+                ),
+            ])
+            draft_chain = draft_prompt | llm | StrOutputParser()  # type: ignore[operator]
+            final_chain = final_prompt | llm | StrOutputParser()  # type: ignore[operator]
+
+            def speculative(query: str) -> str:
+                draft = draft_chain.invoke({"question": query})
+                docs = retriever.invoke(f"{query}\nDraft answer: {draft}")  # type: ignore[union-attr]
+                return final_chain.invoke({
+                    "question": query,
+                    "draft": draft,
+                    "context": format_docs(docs),
+                })
+
+            return RunnableLambda(speculative)
+
+        if rag_type == "graphrag":
+            from ms_rag.ingestion.graph_store import GraphStoreConnector  # noqa: PLC0415
+
+            entity_prompt = ChatPromptTemplate.from_messages([
+                ("system", "Extract key entities, topics, and relationships as a short comma-separated query expansion."),
+                ("human", "{question}"),
+            ])
+            entity_chain = entity_prompt | llm | StrOutputParser()  # type: ignore[operator]
+            final_chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
+
+            def graph_guided(query: str) -> str:
+                entities = entity_chain.invoke({"question": query})
+                docs = retriever.invoke(f"{query}\nEntities and relationships: {entities}")  # type: ignore[union-attr]
+                graph_context = ""
+                if graph_store_config is not None:
+                    graph_context = GraphStoreConnector(credential_store).retrieve_graph_context(
+                        graph_store_config,  # type: ignore[arg-type]
+                        query,
+                        llm=llm,
+                    )
+                context = "\n\n".join(
+                    part for part in (graph_context, format_docs(docs)) if part.strip()
+                )
+                if not context.strip():
+                    raise RuntimeError(
+                        "GraphRAG could not retrieve graph or vector context. "
+                        "Rebuild the graph index and verify the graph store/keyword store configuration."
+                    )
+                return final_chain.invoke({"question": query, "context": context})
+
+            return RunnableLambda(graph_guided)
+
         rag_chain = (
             {
                 "context": retriever | format_docs,  # type: ignore[operator]
@@ -399,6 +462,12 @@ def build_session_runtime_from_vector_store(
                     f"keyword retrieval may degrade: {exc}",
                     stacklevel=2,
                 )
+        if not keyword_corpus:
+            raise RuntimeError(
+                f"{config.retrieval.strategy} retrieval requires a keyword corpus, but no keyword texts "
+                "were available from the persistent keyword store, runtime cache, or original sources. "
+                "Re-ingest documents and configure a keyword store before using this retrieval mode."
+            )
 
     if _retrieval_uses_advanced_state(config.retrieval):
         has_parent_state = bool(getattr(vector_store, "_ms_rag_parent_documents", None))
@@ -418,6 +487,32 @@ def build_session_runtime_from_vector_store(
                     f"the selected retriever may degrade: {exc}",
                     stacklevel=2,
                 )
+
+    if config.rag_type and config.rag_type.rag_type == "graphrag":
+        if config.graph_store is None:
+            raise RuntimeError("GraphRAG requires a configured graph store.")
+        try:
+            from ms_rag.ingestion.graph_store import GraphStoreConnector  # noqa: PLC0415
+
+            graph_connector = GraphStoreConnector(credential_store)
+            graph = graph_connector.load_graph(config.graph_store)
+            setattr(vector_store, "_ms_rag_graph_index", graph)
+        except Exception as exc:  # noqa: BLE001
+            if config.document_sources and config.loader_map and config.chunking is not None:
+                state = IngestionOrchestrator().build_retrieval_state(
+                    sources=config.document_sources,
+                    loader_map=config.loader_map,
+                    chunking_config=config.chunking,
+                )
+                chunks = state.get("chunk_documents", [])
+                graph_connector = GraphStoreConnector(credential_store)
+                graph = graph_connector.build_graph_index(chunks, llm=llm)
+                graph_connector.persist_graph(config.graph_store, graph)
+                setattr(vector_store, "_ms_rag_graph_index", graph)
+            else:
+                raise RuntimeError(
+                    f"Could not load GraphRAG graph index and original sources are unavailable for rebuild: {exc}"
+                ) from exc
 
     retrieval_module = RetrievalStrategyModule()
     base_retriever = retrieval_module.get_retriever(
@@ -446,9 +541,18 @@ def build_session_runtime_from_vector_store(
             retriever,
             llm,
             config.system_prompt,
+            agent_tools_config=config.agent_tools,
+            credential_store=credential_store,
         )
     else:
-        rag_chain = build_rag_chain(retriever, llm, config.system_prompt)
+        rag_chain = build_rag_chain(
+            retriever,
+            llm,
+            config.system_prompt,
+            config.rag_type.rag_type if config.rag_type else "naive_rag",
+            graph_store_config=config.graph_store,
+            credential_store=credential_store,
+        )
 
     return {
         "vector_store": vector_store,
@@ -509,6 +613,8 @@ def build_langgraph_workflow(
     retriever: object,
     llm: object,
     system_prompt: str,
+    agent_tools_config: object | None = None,
+    credential_store: object | None = None,
 ) -> object:
     """Build a LangGraph StateGraph for agentic RAG variants.
 
@@ -540,12 +646,18 @@ def build_langgraph_workflow(
     from typing import TypedDict  # noqa: PLC0415
     from langchain_core.prompts import ChatPromptTemplate  # noqa: PLC0415
     from langchain_core.output_parsers import StrOutputParser  # noqa: PLC0415
+    from ms_rag.agent.tools import AgentToolRuntime, ToolExecutionError  # noqa: PLC0415
 
     class GraphState(TypedDict):
         question: str
         generation: str
         documents: list
         rewrite_count: int
+        tool_results: list[str]
+        action: str
+        route: str
+
+    tool_runtime = AgentToolRuntime(agent_tools_config, credential_store, llm)
 
     # ── Shared nodes ──────────────────────────────────────────────────
 
@@ -553,10 +665,22 @@ def build_langgraph_workflow(
         docs = retriever.invoke(state["question"])  # type: ignore[union-attr]
         return {"documents": docs}
 
+    def direct_answer(state: GraphState) -> dict:
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", "{question}"),
+        ])
+        chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
+        answer = chain.invoke({"question": state["question"]})
+        return {"generation": answer, "documents": list(state.get("documents", []))}
+
     def generate(state: GraphState) -> dict:
         context = "\n\n".join(
-            d.page_content for d in state["documents"]
+            d.page_content for d in state.get("documents", [])
         )
+        tool_context = "\n\n".join(state.get("tool_results", []))
+        if tool_context:
+            context = f"{context}\n\nTool results:\n{tool_context}".strip()
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
             ("human", f"Context:\n\n{context}\n\nQuestion: {{question}}"),
@@ -576,6 +700,22 @@ def build_langgraph_workflow(
             "question": new_q.strip(),
             "rewrite_count": state.get("rewrite_count", 0) + 1,
         }
+
+    def _contains_any(text: str, words: set[str]) -> bool:
+        lower = text.lower()
+        return any(word in lower for word in words)
+
+    def _llm_choice(prompt_messages: list[tuple[str, str]], values: dict[str, object], allowed: set[str], default: str) -> str:
+        prompt = ChatPromptTemplate.from_messages(prompt_messages)
+        chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
+        try:
+            raw = chain.invoke(values).strip().lower()
+        except Exception as exc:
+            raise RuntimeError(f"LangGraph routing LLM call failed: {exc}") from exc
+        for item in allowed:
+            if item in raw:
+                return item
+        return default
 
     def grade_documents(state: GraphState) -> dict:
         """Grade each document for relevance — keep only relevant ones."""
@@ -605,7 +745,7 @@ def build_langgraph_workflow(
         return "rewrite_query"
 
     def check_hallucination(state: GraphState) -> str:
-        """Check if generation is grounded in documents."""
+        """Check if generation is grounded in documents without creating runaway loops."""
         if not state["documents"]:
             return "end"
         check_prompt = ChatPromptTemplate.from_messages([
@@ -618,7 +758,13 @@ def build_langgraph_workflow(
             "context": context,
             "answer": state["generation"],
         }).lower()
-        return "end" if "yes" in result else "generate"
+        if "yes" not in result:
+            warnings.warn(
+                "Self-RAG support check marked the answer as not fully grounded. "
+                "Returning the answer with a visible warning instead of looping indefinitely.",
+                stacklevel=2,
+            )
+        return "end"
 
     # ── Build graph ────────────────────────────────────────────────────
 
@@ -626,18 +772,69 @@ def build_langgraph_workflow(
 
     if rag_type in ("self_rag", "corrective_rag"):
         # Self-RAG / CRAG: retrieve → grade → generate → check hallucination
+        def decide_retrieval_need(state: GraphState) -> str:
+            if rag_type != "self_rag":
+                return "retrieve"
+            question = state["question"]
+            route = _llm_choice(
+                [
+                    (
+                        "system",
+                        "Decide if this question needs the private document corpus. "
+                        "Answer exactly retrieve or direct.",
+                    ),
+                    ("human", "{question}"),
+                ],
+                {"question": question},
+                {"retrieve", "direct"},
+                "retrieve",
+            )
+            return route
+
+        def corrective_web_fallback(state: GraphState) -> dict:
+            if rag_type != "corrective_rag" or state.get("documents"):
+                return {"tool_results": list(state.get("tool_results", []))}
+            if not tool_runtime.enabled("web_search"):
+                return {"tool_results": list(state.get("tool_results", []))}
+            try:
+                web_results = tool_runtime.web_search(state["question"])
+                if tool_runtime.enabled("document_summarization") and len(web_results) > 4000:
+                    web_results = tool_runtime.summarize(web_results)
+            except ToolExecutionError as exc:
+                raise RuntimeError(f"Configured CRAG Web Search fallback failed: {exc}") from exc
+            return {"tool_results": list(state.get("tool_results", [])) + [f"CRAG web fallback:\n{web_results}"]}
+
+        def decide_after_grade(state: GraphState) -> str:
+            if state["documents"]:
+                return "generate"
+            if rag_type == "corrective_rag" and tool_runtime.enabled("web_search"):
+                return "web_fallback"
+            if state.get("rewrite_count", 0) >= 2:
+                return "generate"
+            return "rewrite_query"
+
         workflow.add_node("retrieve", retrieve)
+        workflow.add_node("direct_answer", direct_answer)
         workflow.add_node("grade_documents", grade_documents)
+        workflow.add_node("web_fallback", corrective_web_fallback)
         workflow.add_node("generate", generate)
         workflow.add_node("rewrite_query", rewrite_query)
 
-        workflow.set_entry_point("retrieve")
+        workflow.add_node("decide_retrieval_need", lambda state: {})
+        workflow.set_entry_point("decide_retrieval_need")
+        workflow.add_conditional_edges(
+            "decide_retrieval_need",
+            decide_retrieval_need,
+            {"retrieve": "retrieve", "direct": "direct_answer"},
+        )
+        workflow.add_edge("direct_answer", END)
         workflow.add_edge("retrieve", "grade_documents")
         workflow.add_conditional_edges(
             "grade_documents",
-            decide_to_generate,
-            {"generate": "generate", "rewrite_query": "rewrite_query"},
+            decide_after_grade,
+            {"generate": "generate", "rewrite_query": "rewrite_query", "web_fallback": "web_fallback"},
         )
+        workflow.add_edge("web_fallback", "generate")
         workflow.add_conditional_edges(
             "generate",
             check_hallucination,
@@ -646,37 +843,184 @@ def build_langgraph_workflow(
         workflow.add_edge("rewrite_query", "retrieve")
 
     elif rag_type == "agentic_rag":
-        # Agentic: query analysis → retrieve → generate
+        # Agentic: LLM plan → retrieve/rewrite/tools/generate with hard allowlists.
         def query_analysis(state: GraphState) -> dict:
-            return {}  # pass through — routing is done by LLM in full implementation
+            question = state["question"]
+            tool_names = set(getattr(tool_runtime.config, "enabled_tools", []) or [])
+            trigger_notes: list[str] = []
+            if "url_fetch" in tool_names and re.search(r"https?://", question):
+                trigger_notes.append("url_fetch")
+            if "file_read" in tool_names and re.search(r"file:", question, flags=re.IGNORECASE):
+                trigger_notes.append("file_read")
+            if "api_request" in tool_names and re.search(r"api\s+(GET|POST|PUT|PATCH)\s+https?://", question, flags=re.IGNORECASE):
+                trigger_notes.append("api_request")
+            if "memory" in tool_names:
+                trigger_notes.append("memory")
+            if "web_search" in tool_names:
+                trigger_notes.append("web_search_when_retrieval_empty")
+            planner_action = _llm_choice(
+                [
+                    (
+                        "system",
+                        "You are routing an approved RAG agent. Choose exactly one action: "
+                        "retrieve, rewrite, tools, or answer. Use tools only if an approved "
+                        "tool trigger exists. Use rewrite for unclear questions. Use retrieve "
+                        "when private corpus evidence is needed. Use answer for simple general "
+                        "conversation.",
+                    ),
+                    (
+                        "human",
+                        "Question: {question}\nApproved tool triggers: {triggers}\nAction:",
+                    ),
+                ],
+                {"question": question, "triggers": ", ".join(trigger_notes) or "none"},
+                {"retrieve", "rewrite", "tools", "answer"},
+                "retrieve",
+            )
+            if planner_action == "tools" and not trigger_notes:
+                planner_action = "retrieve"
+            return {"tool_results": [], "action": planner_action}
+
+        def route_agent_action(state: GraphState) -> str:
+            action = str(state.get("action") or "retrieve")
+            if action == "rewrite" and state.get("rewrite_count", 0) >= 2:
+                return "retrieve"
+            return action if action in {"retrieve", "rewrite", "tools", "answer"} else "retrieve"
+
+        def _maybe_summarize(text: str) -> str:
+            if tool_runtime.enabled("document_summarization") and len(text) > 4000:
+                return tool_runtime.summarize(text)
+            return text
+
+        def run_approved_tools(state: GraphState) -> dict:
+            results = list(state.get("tool_results", []))
+            question = state["question"]
+            if tool_runtime.enabled("memory"):
+                memory = tool_runtime.recall_memory(question)
+                if memory:
+                    results.append(f"Memory recall:\n{memory}")
+            if tool_runtime.enabled("url_fetch"):
+                urls = re.findall(r"https?://[^\s)>\"]+", question)
+                for url in urls[:3]:
+                    clean_url = url.rstrip(".,")
+                    fetched = tool_runtime.fetch_url(clean_url)
+                    results.append(f"URL fetch result for {clean_url}:\n{_maybe_summarize(fetched)}")
+            if tool_runtime.enabled("file_read"):
+                quoted_files = re.findall(r"file:\"([^\"]+)\"", question, flags=re.IGNORECASE)
+                bare_files = re.findall(r"file:([^\s\"]+)", question, flags=re.IGNORECASE)
+                file_matches = quoted_files + bare_files
+                for file_path in file_matches[:3]:
+                    clean_path = file_path.strip()
+                    content = tool_runtime.read_file(clean_path)
+                    results.append(f"File read result for {clean_path}:\n{_maybe_summarize(content)}")
+            if tool_runtime.enabled("api_request"):
+                api_matches = re.findall(
+                    r"api\s+(GET|POST|PUT|PATCH)\s+(https?://\S+)",
+                    question,
+                    flags=re.IGNORECASE,
+                )
+                for method, url in api_matches[:2]:
+                    clean_url = url.rstrip(".,")
+                    response = tool_runtime.api_request(method.upper(), clean_url)
+                    results.append(f"API response for {method.upper()} {clean_url}:\n{_maybe_summarize(response)}")
+            if tool_runtime.enabled("web_search") and not state.get("documents"):
+                try:
+                    web_results = tool_runtime.web_search(question)
+                    web_results = _maybe_summarize(web_results)
+                    results.append(f"Web search results:\n{web_results}")
+                except ToolExecutionError as exc:
+                    raise RuntimeError(f"Configured Web Search Tool failed: {exc}") from exc
+            return {"tool_results": results}
 
         workflow.add_node("query_analysis", query_analysis)
         workflow.add_node("retrieve", retrieve)
+        workflow.add_node("run_approved_tools", run_approved_tools)
         workflow.add_node("generate", generate)
+        workflow.add_node("direct_answer", direct_answer)
         workflow.add_node("rewrite_query", rewrite_query)
 
         workflow.set_entry_point("query_analysis")
-        workflow.add_edge("query_analysis", "retrieve")
-        workflow.add_edge("retrieve", "generate")
+        workflow.add_conditional_edges(
+            "query_analysis",
+            route_agent_action,
+            {
+                "retrieve": "retrieve",
+                "rewrite": "rewrite_query",
+                "tools": "run_approved_tools",
+                "answer": "direct_answer",
+            },
+        )
+        workflow.add_edge("rewrite_query", "query_analysis")
+        workflow.add_edge("direct_answer", END)
+        workflow.add_edge("retrieve", "run_approved_tools")
+        workflow.add_edge("run_approved_tools", "generate")
         workflow.add_edge("generate", END)
 
     elif rag_type == "adaptive_rag":
-        # Adaptive: route simple queries to direct generation, complex to retrieval
+        # Adaptive: direct, standard retrieval, or deeper rewrite+retrieval route.
         def route_question(state: GraphState) -> str:
-            route_prompt = ChatPromptTemplate.from_messages([
-                ("system", "Is this a simple factual question (answer: simple) "
-                           "or does it require document retrieval (answer: retrieve)?"),
-                ("human", "{question}"),
-            ])
-            chain = route_prompt | llm | StrOutputParser()  # type: ignore[operator]
-            result = chain.invoke({"question": state["question"]}).lower()
-            return "retrieve" if "retrieve" in result else "generate"
+            question = state["question"]
+            heuristic_deep = _contains_any(
+                question,
+                {"compare", "analyze", "relationship", "relationships", "across", "multi-hop", "why", "explain"},
+            )
+            route = _llm_choice(
+                [
+                    (
+                        "system",
+                        "Route this query. Answer exactly direct, retrieve, or deep. "
+                        "direct means no private corpus needed. retrieve means one corpus "
+                        "retrieval pass. deep means rewrite/decompose then retrieve for "
+                        "multi-hop, comparison, analysis, or relationship questions.",
+                    ),
+                    ("human", "{question}"),
+                ],
+                {"question": question},
+                {"direct", "retrieve", "deep"},
+                "deep" if heuristic_deep else "retrieve",
+            )
+            if heuristic_deep and route == "retrieve":
+                return "deep"
+            return route
+
+        def deep_retrieve(state: GraphState) -> dict:
+            original_question = state["question"]
+            rewritten = rewrite_query(state)
+            rewritten_question = str(rewritten.get("question") or original_question)
+            original_docs = retriever.invoke(original_question)  # type: ignore[union-attr]
+            rewritten_docs = retriever.invoke(rewritten_question)  # type: ignore[union-attr]
+            seen: set[tuple[str, str]] = set()
+            merged = []
+            for doc in list(original_docs) + list(rewritten_docs):
+                key = (
+                    getattr(doc, "page_content", ""),
+                    str(getattr(doc, "metadata", {}).get("source", "")),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(doc)
+            return {
+                "documents": merged,
+                "question": rewritten_question,
+                "rewrite_count": state.get("rewrite_count", 0) + 1,
+            }
 
         workflow.add_node("retrieve", retrieve)
+        workflow.add_node("deep_retrieve", deep_retrieve)
         workflow.add_node("generate", generate)
+        workflow.add_node("direct_answer", direct_answer)
+        workflow.add_node("route_question", lambda state: {})
 
-        workflow.set_entry_point("retrieve")
+        workflow.set_entry_point("route_question")
+        workflow.add_conditional_edges(
+            "route_question",
+            route_question,
+            {"direct": "direct_answer", "retrieve": "retrieve", "deep": "deep_retrieve"},
+        )
         workflow.add_edge("retrieve", "generate")
+        workflow.add_edge("deep_retrieve", "generate")
+        workflow.add_edge("direct_answer", END)
         workflow.add_edge("generate", END)
 
     return workflow.compile()
@@ -708,6 +1052,7 @@ def process_query(
         The generated answer string.
     """
     from ms_rag.models import SessionState  # noqa: PLC0415
+    from ms_rag.workflow.rag_presets import get_rag_preset  # noqa: PLC0415
     telemetry = TelemetryReporter()
 
     ss: SessionState = session_state  # type: ignore[assignment]
@@ -717,14 +1062,23 @@ def process_query(
         # Step 1: Query Enhancement
         enhanced_queries = [query]
         if query_enhancer and cfg.query_enhancement:
+            preset = get_rag_preset(cfg.rag_type.rag_type if cfg.rag_type else None)
+            strict_enhancement = (
+                bool(preset.query_enhancement)
+                and list(preset.query_enhancement) == list(cfg.query_enhancement)
+                and not preset.allow_query_enhancement_prompt
+            )
             try:
                 enhanced_queries = query_enhancer.enhance(  # type: ignore[union-attr]
                     query=query,
                     techniques=cfg.query_enhancement,
                     llm=ss.llm,
                     hyde_provider=cfg.hyde_llm_provider,
+                    strict=strict_enhancement,
                 )
             except Exception as exc:  # noqa: BLE001
+                if strict_enhancement:
+                    raise
                 warnings.warn(
                     f"Query enhancement failed; using the original query: {exc}",
                     stacklevel=2,
@@ -742,11 +1096,27 @@ def process_query(
             requires_langgraph = bool(
                 cfg.rag_type and cfg.rag_type.requires_langgraph
             )
-            answer = invoke_rag_chain(
-                ss.rag_chain,
-                primary_query,
-                requires_langgraph=requires_langgraph,
-            )
+            if (
+                len(enhanced_queries) > 1
+                and not requires_langgraph
+                and ss.retriever is not None
+                and ss.llm is not None
+            ):
+                use_reciprocal_rank_fusion = "rag_fusion" in set(cfg.query_enhancement or [])
+                answer = _answer_from_merged_queries(
+                    original_query=query,
+                    retrieval_queries=enhanced_queries,
+                    retriever=ss.retriever,
+                    llm=ss.llm,
+                    system_prompt=cfg.system_prompt,
+                    use_reciprocal_rank_fusion=use_reciprocal_rank_fusion,
+                )
+            else:
+                answer = invoke_rag_chain(
+                    ss.rag_chain,
+                    primary_query,
+                    requires_langgraph=requires_langgraph,
+                )
         except Exception as exc:  # noqa: BLE001
             raise exc  # re-raise so QueryLoop can handle it
 
@@ -768,4 +1138,60 @@ def process_query(
                     stacklevel=2,
                 )
 
-        return answer
+    return answer
+
+
+def _answer_from_merged_queries(
+    *,
+    original_query: str,
+    retrieval_queries: list[str],
+    retriever: object,
+    llm: object,
+    system_prompt: str,
+    use_reciprocal_rank_fusion: bool = False,
+) -> str:
+    """Retrieve over multiple query variants, rank/dedupe docs, and answer once."""
+    from langchain_core.prompts import ChatPromptTemplate  # noqa: PLC0415
+    from langchain_core.output_parsers import StrOutputParser  # noqa: PLC0415
+
+    docs_by_key: dict[tuple[str, str], object] = {}
+    scores: dict[tuple[str, str], float] = {}
+    first_seen: dict[tuple[str, str], int] = {}
+    order = 0
+    rrf_k = 60
+    for retrieval_query in retrieval_queries:
+        for rank, doc in enumerate(retriever.invoke(retrieval_query)):  # type: ignore[union-attr]
+            metadata = getattr(doc, "metadata", {}) or {}
+            key = (
+                str(metadata.get("source", "")),
+                str(getattr(doc, "page_content", ""))[:500],
+            )
+            docs_by_key.setdefault(key, doc)
+            first_seen.setdefault(key, order)
+            order += 1
+            if use_reciprocal_rank_fusion:
+                scores[key] = scores.get(key, 0.0) + (1.0 / (rrf_k + rank + 1))
+            else:
+                scores.setdefault(key, 1.0 / (rank + 1))
+
+    ranked_keys = sorted(
+        docs_by_key,
+        key=lambda key: (-scores.get(key, 0.0), first_seen.get(key, 0)),
+    )
+    docs = [docs_by_key[key] for key in ranked_keys]
+
+    context = "\n\n".join(
+        f"[Source: {getattr(doc, 'metadata', {}).get('source', f'chunk_{i}')}]"
+        f"\n{getattr(doc, 'page_content', '')}"
+        for i, doc in enumerate(docs)
+    )
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        (
+            "human",
+            "The following context was retrieved from multiple query variants.\n\n"
+            "{context}\n\nOriginal question: {question}",
+        ),
+    ])
+    chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
+    return chain.invoke({"context": context, "question": original_query})

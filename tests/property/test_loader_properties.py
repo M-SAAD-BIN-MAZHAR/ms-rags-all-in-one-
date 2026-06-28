@@ -296,3 +296,29 @@ class TestLoaderListCompleteness:
 
     def test_loader_map_matches_all_loaders(self) -> None:
         assert set(LOADER_MAP.keys()) == {lo.loader_class for lo in ALL_LOADERS}
+
+    def test_live_ingestion_has_branch_for_every_registered_loader(self) -> None:
+        """Every selectable loader must have explicit live-runtime handling."""
+        import inspect  # noqa: PLC0415
+        from ms_rag.ingestion.ingestion_orchestrator import IngestionOrchestrator  # noqa: PLC0415
+
+        source = inspect.getsource(IngestionOrchestrator._invoke_loader)
+        missing = [
+            loader.loader_class
+            for loader in ALL_LOADERS
+            if loader.loader_class not in source
+        ]
+        assert not missing, f"Registered loaders missing live branches: {missing}"
+
+    def test_generated_pipeline_has_branch_for_every_registered_loader(self) -> None:
+        """Standalone generated pipelines must preserve loader choices."""
+        import inspect  # noqa: PLC0415
+        from ms_rag.codegen.code_generator import CodeGenerator  # noqa: PLC0415
+
+        source = inspect.getsource(CodeGenerator._render_loader_function)
+        missing = [
+            loader.loader_class
+            for loader in ALL_LOADERS
+            if loader.loader_class not in source
+        ]
+        assert not missing, f"Registered loaders missing generated branches: {missing}"

@@ -103,7 +103,7 @@ DATA_TYPES: list[str] = ["string", "integer", "float", "date"]
 ADVANCED_STATE_STRATEGIES = {"parent_child", "multi_vector", "time_weighted"}
 ADVANCED_REQUIREMENTS: dict[str, str] = {
     "parent_child": (
-        "Needs parent documents plus child chunk IDs. MS_RAG creates this during ingestion "
+        "Needs parent documents plus child chunk IDs. MS-RAGS(ALL-IN-ONE) creates this during ingestion "
         "and rebuilds it from original sources when loading a saved session."
     ),
     "multi_vector": (
@@ -111,7 +111,7 @@ ADVANCED_REQUIREMENTS: dict[str, str] = {
         "index built at runtime. This does not write synthetic vectors into your production DB."
     ),
     "time_weighted": (
-        "Needs ingestion timestamps on chunks. MS_RAG adds ms_rag_ingested_at metadata during ingestion."
+        "Needs ingestion timestamps on chunks. MS-RAGS(ALL-IN-ONE) adds ms_rag_ingested_at metadata during ingestion."
     ),
 }
 

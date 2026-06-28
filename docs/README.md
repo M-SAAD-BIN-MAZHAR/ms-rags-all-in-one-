@@ -1,6 +1,6 @@
-# MS_RAG Docs Site
+# MS-RAGS(ALL-IN-ONE) Docs Site
 
-This folder contains the deployable multi-page documentation site for MS_RAG.
+This folder contains the deployable multi-page documentation site for MS-RAGS(ALL-IN-ONE).
 
 It is intentionally static: Vercel can deploy it without installing a JavaScript
 framework or build tool.

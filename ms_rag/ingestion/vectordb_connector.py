@@ -356,10 +356,19 @@ class VectorDBConnector:
         if db_type == "qdrant":
             from langchain_qdrant import QdrantVectorStore  # noqa: PLC0415
             from qdrant_client import QdrantClient  # noqa: PLC0415
+            from qdrant_client.http.models import Distance, VectorParams  # noqa: PLC0415
             client = QdrantClient(
                 url=params.get("QDRANT_URL", "http://localhost:6333"),
                 api_key=params.get("QDRANT_API_KEY"),
             )
+            if not client.collection_exists(config.collection_name):
+                client.create_collection(
+                    collection_name=config.collection_name,
+                    vectors_config=VectorParams(
+                        size=int(config.dimension or 1536),
+                        distance=Distance.COSINE,
+                    ),
+                )
             return QdrantVectorStore(
                 client=client,
                 collection_name=config.collection_name,
@@ -369,15 +378,29 @@ class VectorDBConnector:
         if db_type == "weaviate":
             from langchain_weaviate import WeaviateVectorStore  # noqa: PLC0415
             import weaviate  # noqa: PLC0415
-            client = weaviate.connect_to_custom(
-                http_host=params.get("WEAVIATE_URL", "localhost").replace("http://", "").split(":")[0],
-                http_port=int(params.get("WEAVIATE_URL", "http://localhost:8080").split(":")[-1]) if ":" in params.get("WEAVIATE_URL", "") else 8080,
-                http_secure=False,
-                grpc_host="localhost",
-                grpc_port=50051,
-                grpc_secure=False,
-                auth_credentials=weaviate.auth.AuthApiKey(params.get("WEAVIATE_API_KEY", "")) if params.get("WEAVIATE_API_KEY") else None,
-            )
+            url = params.get("WEAVIATE_URL", "localhost").strip()
+            api_key = params.get("WEAVIATE_API_KEY", "").strip()
+            auth = weaviate.auth.AuthApiKey(api_key) if api_key else None
+            if "weaviate.cloud" in url:
+                cluster_url = url if url.startswith(("http://", "https://")) else f"https://{url}"
+                client = weaviate.connect_to_weaviate_cloud(
+                    cluster_url=cluster_url,
+                    auth_credentials=auth,
+                )
+            else:
+                clean = url.replace("https://", "").replace("http://", "")
+                host = clean.split(":")[0]
+                port = int(clean.split(":")[-1]) if ":" in clean else 8080
+                secure = url.startswith("https://")
+                client = weaviate.connect_to_custom(
+                    http_host=host,
+                    http_port=port,
+                    http_secure=secure,
+                    grpc_host=params.get("WEAVIATE_GRPC_HOST", host),
+                    grpc_port=int(params.get("WEAVIATE_GRPC_PORT", "50051")),
+                    grpc_secure=secure,
+                    auth_credentials=auth,
+                )
             return WeaviateVectorStore(
                 client=client,
                 index_name=config.collection_name,
@@ -395,11 +418,24 @@ class VectorDBConnector:
 
         if db_type == "milvus":
             from langchain_milvus import Milvus  # noqa: PLC0415
-            return Milvus(
+            from pymilvus import connections  # noqa: PLC0415
+            milvus_uri = params.get("MILVUS_URI", "http://localhost:19530")
+            connection_args = {
+                "uri": milvus_uri,
+                "secure": milvus_uri.startswith("https://"),
+            }
+            if params.get("MILVUS_TOKEN"):
+                connection_args["token"] = params["MILVUS_TOKEN"]
+            store = Milvus(
                 embedding_function=embeddings,  # type: ignore[arg-type]
                 collection_name=config.collection_name,
-                connection_args={"uri": params.get("MILVUS_URI", "http://localhost:19530")},
+                connection_args=connection_args,
+                text_field="page_content",
             )
+            alias = getattr(store, "alias", None)
+            if isinstance(alias, str) and not connections.has_connection(alias):
+                connections.connect(alias=alias, **connection_args)
+            return store
 
         if db_type == "elasticsearch":
             from langchain_elasticsearch import ElasticsearchStore  # noqa: PLC0415
@@ -422,13 +458,14 @@ class VectorDBConnector:
                     params.get("OPENSEARCH_USERNAME", "admin"),
                     params.get("OPENSEARCH_PASSWORD", "admin"),
                 ),
+                engine=params.get("OPENSEARCH_ENGINE", "faiss"),
             )
 
         if db_type == "azure_ai_search":
             from langchain_community.vectorstores import AzureSearch  # noqa: PLC0415
             return AzureSearch(
                 azure_search_endpoint=params.get("AZURE_SEARCH_ENDPOINT", ""),
-                azure_search_key=params.get("AZURE_SEARCH_KEY", ""),
+                azure_search_key=params.get("AZURE_SEARCH_KEY") or params.get("AZURE_SEARCH_API_KEY", ""),
                 index_name=params.get("AZURE_SEARCH_INDEX_NAME", config.collection_name),
                 embedding_function=embeddings,  # type: ignore[arg-type]
             )
@@ -436,12 +473,19 @@ class VectorDBConnector:
         if db_type == "mongodb_atlas":
             from langchain_mongodb import MongoDBAtlasVectorSearch  # noqa: PLC0415
             from pymongo import MongoClient  # noqa: PLC0415
-            client = MongoClient(params.get("MONGODB_ATLAS_CLUSTER_URI", ""))
+            client = MongoClient(
+                params.get("MONGODB_ATLAS_CLUSTER_URI")
+                or params.get("MONGODB_ATLAS_CONNECTION_STRING", "")
+            )
             db = client[params.get("MONGODB_ATLAS_DB_NAME", "ms_rag_db")]
             collection = db[params.get("MONGODB_ATLAS_COLLECTION_NAME", config.collection_name)]
             return MongoDBAtlasVectorSearch(
                 collection=collection,
                 embedding=embeddings,  # type: ignore[arg-type]
+                index_name=params.get("MONGODB_ATLAS_INDEX_NAME", "vector_index"),
+                dimensions=int(config.dimension or 1536),
+                auto_create_index=True,
+                auto_index_timeout=int(params.get("MONGODB_ATLAS_AUTO_INDEX_TIMEOUT", "120")),
             )
 
         if db_type == "redis":

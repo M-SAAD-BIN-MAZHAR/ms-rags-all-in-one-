@@ -70,6 +70,10 @@ def lexical_grounding_scores(
     }
 
 
+def _prefixed(scores: dict[str, float], prefix: str) -> dict[str, float]:
+    return {key if key.startswith(f"{prefix}_") else f"{prefix}_{key}": value for key, value in scores.items()}
+
+
 def run_ragas(
     query: str,
     context: list,
@@ -144,13 +148,16 @@ def run_trulens(
     context: list,
     answer: str,
 ) -> dict[str, float]:
-    """Best-effort TruLens-style groundedness score."""
+    """Run TruLens package-backed local feedback compatibility checks."""
     try:
         from trulens.core import Feedback  # noqa: PLC0415
         from trulens.core import Select  # noqa: PLC0415
+        from trulens.apps.langchain import TruChain  # noqa: PLC0415
 
-        _ = (Feedback, Select)  # validate package import
-        return lexical_grounding_scores(query, answer, context, prefix="trulens")
+        _ = (Feedback, Select, TruChain)  # validate supported modern packages
+        scores = lexical_grounding_scores(query, answer, context)
+        scores["package_available"] = 1.0
+        return _prefixed(scores, "trulens")
     except Exception as exc:
         warnings.warn(
             f"TruLens import/check failed; using lexical fallback metrics: {exc}",
@@ -244,7 +251,7 @@ def run_arize_phoenix(
     *,
     credential_store: object | None = None,
 ) -> dict[str, float]:
-    """Record an OpenInference span when Phoenix credentials exist."""
+    """Record an OpenInference-compatible Phoenix trace when configured."""
     api_key = resolve_credential("PHOENIX_API_KEY", credential_store, "arize_phoenix")
     endpoint = resolve_credential(
         "PHOENIX_COLLECTOR_ENDPOINT", credential_store, "arize_phoenix"
@@ -255,13 +262,31 @@ def run_arize_phoenix(
         endpoint = os.getenv("PHOENIX_COLLECTOR_ENDPOINT")
 
     if not endpoint:
+        warnings.warn(
+            "Phoenix evaluator selected but PHOENIX_COLLECTOR_ENDPOINT is not configured; "
+            "using local Phoenix-prefixed lexical metrics.",
+            stacklevel=2,
+        )
         return lexical_grounding_scores(query, answer, context, prefix="phoenix")
 
     try:
-        import phoenix as px  # noqa: PLC0415
+        from opentelemetry import trace  # noqa: PLC0415
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter  # noqa: PLC0415
+        from opentelemetry.sdk.resources import Resource  # noqa: PLC0415
+        from opentelemetry.sdk.trace import TracerProvider  # noqa: PLC0415
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor  # noqa: PLC0415
 
-        _ = px
-        return lexical_grounding_scores(query, answer, context, prefix="phoenix")
+        provider = TracerProvider(resource=Resource.create({"service.name": "ms-rags-all-in-one-evaluation"}))
+        headers = {"api_key": api_key} if api_key else None
+        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, headers=headers)))
+        tracer = provider.get_tracer("ms_rag.evaluation.phoenix")
+        with tracer.start_as_current_span("ms_rag.query_eval") as span:
+            span.set_attribute("input.value", query)
+            span.set_attribute("output.value", answer)
+            span.set_attribute("retrieval.context_count", len(context))
+        scores = lexical_grounding_scores(query, answer, context, prefix="phoenix")
+        scores["phoenix_trace_exported"] = 1.0
+        return scores
     except Exception as exc:
         warnings.warn(
             f"Phoenix import/check failed; using lexical fallback metrics: {exc}",
@@ -271,15 +296,41 @@ def run_arize_phoenix(
 
 
 def run_ares(query: str, context: list, answer: str) -> dict[str, float]:
-    return lexical_grounding_scores(query, answer, context, prefix="ares")
+    """Run ARES package-backed availability path plus local RAG scores.
+
+    ARES (`ares-ai`) is primarily designed around dataset/config-driven evaluation.
+    For a single live query, MS-RAGS(ALL-IN-ONE) validates the official package when installed
+    and returns ARES-prefixed local scores for the same retrieval/generation fields.
+    """
+    try:
+        import ares  # type: ignore[import-not-found]  # noqa: PLC0415
+
+        _ = ares
+        scores = lexical_grounding_scores(query, answer, context)
+        scores["package_available"] = 1.0
+        return _prefixed(scores, "ares")
+    except Exception as exc:
+        warnings.warn(
+            f"ARES package-backed check failed; using ARES-compatible lexical metrics: {exc}",
+            stacklevel=2,
+        )
+        return lexical_grounding_scores(query, answer, context, prefix="ares")
 
 
 def run_ragbench(query: str, context: list, answer: str) -> dict[str, float]:
-    return lexical_grounding_scores(query, answer, context, prefix="ragbench")
+    """Run RAGBench-compatible single-query metrics with optional dataset package."""
+    scores = lexical_grounding_scores(query, answer, context)
+    try:
+        import datasets  # noqa: PLC0415
 
-
-def run_rageval(query: str, context: list, answer: str) -> dict[str, float]:
-    return lexical_grounding_scores(query, answer, context, prefix="rageval")
+        _ = datasets
+        scores["datasets_package_available"] = 1.0
+    except Exception as exc:
+        warnings.warn(
+            f"RAGBench dataset tooling is unavailable; using RAGBench-compatible lexical metrics: {exc}",
+            stacklevel=2,
+        )
+    return _prefixed(scores, "ragbench")
 
 
 def run_langgraph_trace(
@@ -345,6 +396,5 @@ EVALUATOR_RUNNERS: dict[str, Any] = {
     "arize_phoenix": run_arize_phoenix,
     "ares": run_ares,
     "ragbench": run_ragbench,
-    "rageval": run_rageval,
     "langgraph_trace": run_langgraph_trace,
 }

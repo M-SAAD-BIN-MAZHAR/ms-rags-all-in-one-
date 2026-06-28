@@ -74,7 +74,7 @@ COMPRESSION_TECHNIQUES = [
 
 EVALUATOR_IDS = [
     "ragas", "deepeval", "trulens", "langsmith", "langfuse",
-    "arize_phoenix", "ares", "ragbench", "rageval",
+    "arize_phoenix", "ares", "ragbench",
     "cicd_gate", "langgraph_trace", "monitoring_export",
 ]
 

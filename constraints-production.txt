@@ -60,8 +60,13 @@ langchain-unstructured==1.0.1
 unstructured==0.23.1
 unstructured-client==0.45.0
 python-docx==1.2.0
+python-pptx==1.0.2
 docx2txt==0.9
 openpyxl==3.1.5
+pandas==2.3.3
+msoffcrypto-tool==5.4.2
+jq==1.10.0
+pypandoc-binary==1.17
 pypdf==6.14.2
 pdfplumber==0.11.10
 pdfminer.six==20260107

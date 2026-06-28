@@ -158,6 +158,7 @@ class QueryEnhancer:
         llm: object | None = None,
         hyde_provider: str | None = None,
         num_queries: int = 3,
+        strict: bool = False,
     ) -> list[str]:
         """Apply selected enhancement techniques to the query.
 
@@ -167,6 +168,7 @@ class QueryEnhancer:
             llm:          A LangChain BaseChatModel / BaseLLM instance.
             hyde_provider: Provider used for HyDE (informational).
             num_queries:   Number of variant queries for multi_query / rag_fusion.
+            strict:        Raise if a selected technique cannot run.
 
         Returns:
             List of enhanced query strings.  For most techniques this is a
@@ -178,14 +180,25 @@ class QueryEnhancer:
         result_queries: list[str] = [query]
 
         for technique in techniques:
+            before = list(result_queries)
             try:
+                if strict and llm is None and technique in TECHNIQUE_IDS:
+                    raise ValueError(f"Technique {technique!r} requires a configured LLM.")
                 result_queries = self._apply_technique(
                     technique=technique,
                     queries=result_queries,
                     llm=llm,
                     num_queries=num_queries,
                 )
+                if strict and result_queries == before:
+                    raise RuntimeError(
+                        f"Technique {technique!r} did not produce an enhanced query."
+                    )
             except Exception as exc:  # noqa: BLE001
+                if strict:
+                    raise RuntimeError(
+                        f"Required query enhancement {technique!r} failed: {format_provider_error(exc)}"
+                    ) from exc
                 # Technique failure is non-fatal — continue with current queries
                 import warnings  # noqa: PLC0415
                 warnings.warn(

@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Pipeline Components - MS_RAG Docs</title>
+    <title>Pipeline Components - MS-RAGS(ALL-IN-ONE) Docs</title>
     <link rel="stylesheet" href="assets/styles.css">
   </head>
   <body>
     <div class="site">
       <aside class="sidebar">
-        <a class="brand" href="index.html"><strong>MS_RAG</strong><span>Production RAG framework builder</span></a>
+        <a class="brand" href="index.html"><strong>MS-RAGS(ALL-IN-ONE)</strong><span>Production RAG framework builder</span></a>
         <div class="nav-title">Start</div>
         <a href="index.html">Overview</a><a href="getting-started.html">Getting started</a><a href="recommendations.html">Recommendations</a>
         <div class="nav-title">Core Concepts</div>
@@ -28,11 +28,11 @@
         <div class="nav-title">Project</div><a href="https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-" rel="noopener">GitHub repository</a>
       </aside>
       <div class="content">
-        <div class="mobile-bar"><strong>MS_RAG Docs</strong><button type="button" data-mobile-toggle>Menu</button></div>
+        <div class="mobile-bar"><strong>MS-RAGS(ALL-IN-ONE) Docs</strong><button type="button" data-mobile-toggle>Menu</button></div>
         <header class="page-header">
           <p class="eyebrow">Components</p>
           <h1>Pipeline Components</h1>
-          <p>Understand each choice MS_RAG asks the user to make: providers, embeddings, extractors, chunking, retrieval, reranking, compression, prompts, and evaluation.</p>
+          <p>Understand each choice MS-RAGS(ALL-IN-ONE) asks the user to make: providers, embeddings, extractors, chunking, retrieval, reranking, compression, prompts, and evaluation.</p>
         </header>
         <main>
           <section>
@@ -56,7 +56,7 @@
             <h2>LLM Providers</h2>
             <p class="lead">
               Providers are used for generation, query enhancement, LLM-based
-              reranking, summary compression, and some evaluation flows. MS_RAG keeps
+              reranking, summary compression, and some evaluation flows. MS-RAGS(ALL-IN-ONE) keeps
               credentials in memory during the session and never writes secret values
               into saved pipeline configs or generated source code.
             </p>
@@ -92,7 +92,7 @@
             </div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th>Provider</th><th>MS_RAG default or input</th><th>Planning context window</th><th>Recommended when</th><th>Watch out for</th></tr></thead>
+                <thead><tr><th>Provider</th><th>MS-RAGS(ALL-IN-ONE) default or input</th><th>Planning context window</th><th>Recommended when</th><th>Watch out for</th></tr></thead>
                 <tbody>
                   <tr><td><a href="https://openai.com/api/" rel="noopener">OpenAI</a></td><td><code>gpt-4o</code> by default; users can pass another OpenAI chat model in generated code.</td><td>Plan around 128k for <code>gpt-4o</code>; newer OpenAI models may differ.</td><td>Best first hosted choice, strong general QA, good tool ecosystem.</td><td>Hosted API sends prompt/context to OpenAI. Long context increases cost and latency.</td></tr>
                   <tr><td><a href="https://www.anthropic.com/" rel="noopener">Anthropic</a></td><td><code>claude-3-5-sonnet-20241022</code>.</td><td>Plan around 200k for Claude Sonnet-family RAG prompts.</td><td>Long-form answers, careful reasoning, policy/legal/research style responses.</td><td>Extra retrieval, self-checking, or compression calls can multiply cost.</td></tr>
@@ -183,6 +183,7 @@
                   <tr><td>PPTX</td><td>UnstructuredPowerPointLoader, LlamaParseLoader</td><td>Use Unstructured unless slides are complex.</td></tr>
                   <tr><td>HTML/URLs</td><td>BSHTMLLoader, UnstructuredHTMLLoader, WebBaseLoader, AsyncHtmlLoader, <a href="https://www.firecrawl.dev/" rel="noopener">FireCrawlLoader</a>, <a href="https://apify.com/" rel="noopener">ApifyWebScraper</a></td><td>Use WebBaseLoader for simple pages, FireCrawl/Apify for rendered sites.</td></tr>
                   <tr><td>Markdown/JSON/XML</td><td>UnstructuredMarkdownLoader, JSONLoader, UnstructuredXMLLoader, TextLoader</td><td>Use format-aware loaders when metadata matters.</td></tr>
+                  <tr><td>ePub/RTF</td><td>UnstructuredEPubLoader, UnstructuredRTFLoader</td><td>Use for books, manuals, rich text exports, and legacy text archives.</td></tr>
                   <tr><td>YouTube</td><td>YoutubeLoader</td><td>Use when transcripts are available and accurate.</td></tr>
                   <tr><td>Images</td><td>UnstructuredImageLoader</td><td>Verify OCR quality before production ingestion.</td></tr>
                   <tr><td>Code</td><td>GenericLoader, TextLoader</td><td>Use GenericLoader with code-aware chunking for repository search.</td></tr>
@@ -217,6 +218,8 @@
                   <tr><td>ApifyWebScraper</td><td>Actor-based cloud scraping.</td><td>Complex sites, repeatable crawl jobs, scalable scraping.</td><td>Operational web extraction platform.</td><td>Credential, cost, and site-permission considerations.</td></tr>
                   <tr><td>YoutubeLoader</td><td>Loads YouTube transcripts.</td><td>Video knowledge where transcripts are available.</td><td>Good for courses, interviews, talks.</td><td>Transcript accuracy controls answer quality.</td></tr>
                   <tr><td>UnstructuredImageLoader</td><td>OCR text from images.</td><td>Scanned images, screenshots, photographed pages.</td><td>Adds image text to RAG corpus.</td><td>OCR noise must be sampled before production.</td></tr>
+                  <tr><td>UnstructuredEPubLoader</td><td>Extracts text from ePub books and manuals.</td><td>Books, long guides, educational content, and packaged documentation.</td><td>Keeps book-style content available for chunking.</td><td>Review chapters, navigation text, and boilerplate before ingestion.</td></tr>
+                  <tr><td>UnstructuredRTFLoader</td><td>Extracts text from RTF rich text documents.</td><td>Legacy reports, exported notes, and older office documents.</td><td>Useful when the source is not DOCX or plain text.</td><td>Formatting artifacts can appear in old RTF exports.</td></tr>
                   <tr><td>GenericLoader</td><td>Language-aware source code loading.</td><td>Repository search, API docs, code understanding.</td><td>Pairs well with code-aware chunking.</td><td>Generated/vendor folders should be excluded.</td></tr>
                   <tr><td>SQLDatabaseLoader</td><td>Turns SQL rows into documents.</td><td>Knowledge lives in relational tables.</td><td>Useful for internal business data.</td><td>Do not expose sensitive columns accidentally.</td></tr>
                   <tr><td>MongoDBAtlasLoader</td><td>Loads MongoDB collection documents.</td><td>Product content or records already live in MongoDB.</td><td>Preserves document-native source shape.</td><td>Choose fields carefully and avoid private data.</td></tr>
@@ -308,9 +311,9 @@
               </table>
             </div>
             <div class="grid three">
-              <div class="card"><h3>Parent-Child state</h3><p>MS_RAG creates parent document IDs and child chunk IDs during ingestion. Saved sessions rebuild this state from original sources before runtime starts.</p></div>
+              <div class="card"><h3>Parent-Child state</h3><p>MS-RAGS(ALL-IN-ONE) creates parent document IDs and child chunk IDs during ingestion. Saved sessions rebuild this state from original sources before runtime starts.</p></div>
               <div class="card"><h3>Multi-Vector model</h3><p>Uses the selected embedding model to build a separate local FAISS representation index. Synthetic representation vectors are not written into Pinecone, Qdrant, Chroma, or other production stores.</p></div>
-              <div class="card"><h3>Time metadata</h3><p>Every chunk gets <code>ms_rag_ingested_at</code>. If timestamps are missing, MS_RAG raises a setup error instead of silently pretending time-weighted retrieval is active.</p></div>
+              <div class="card"><h3>Time metadata</h3><p>Every chunk gets <code>ms_rag_ingested_at</code>. If timestamps are missing, MS-RAGS(ALL-IN-ONE) raises a setup error instead of silently pretending time-weighted retrieval is active.</p></div>
             </div>
             <div class="table-wrap">
               <table>
@@ -385,11 +388,13 @@
                 <tbody>
                   <tr><td><a href="https://docs.ragas.io/" rel="noopener">RAGAS</a></td><td>Faithfulness, context precision, context recall, answer relevancy.</td><td>You need automated RAG quality metrics.</td><td>Detects retrieval and hallucination regressions.</td></tr>
                   <tr><td><a href="https://www.deepeval.com/" rel="noopener">DeepEval</a></td><td>Test cases and LLM evaluation metrics.</td><td>You want CI-style evals around known questions.</td><td>Blocks low-quality generated pipelines before release.</td></tr>
-                  <tr><td><a href="https://www.trulens.org/" rel="noopener">TruLens</a></td><td>Feedback functions and RAG quality analysis.</td><td>You need deeper feedback on answer/context behavior.</td><td>Helps inspect why an answer passed or failed.</td></tr>
+                  <tr><td><a href="https://www.trulens.org/" rel="noopener">TruLens</a></td><td>Modern TruLens package validation plus TruLens-prefixed groundedness scores.</td><td>You want TruLens-compatible local scoring and a path to deeper feedback workflows.</td><td>Helps inspect answer/context grounding.</td></tr>
                   <tr><td><a href="https://www.langchain.com/langsmith" rel="noopener">LangSmith</a></td><td>Trace debugging, datasets, evaluation runs.</td><td>LangChain-heavy teams need trace-level debugging.</td><td>Makes complex chains and agents observable.</td></tr>
                   <tr><td><a href="https://langfuse.com/" rel="noopener">Langfuse</a></td><td>Open-source LLM observability and prompt traces.</td><td>You want self-hostable or vendor-flexible observability.</td><td>Tracks prompts, latency, tokens, and errors.</td></tr>
-                  <tr><td><a href="https://phoenix.arize.com/" rel="noopener">Arize Phoenix</a></td><td>Tracing, evaluation, embeddings, and LLM app observability.</td><td>You need rich inspection of retrieval and model behavior.</td><td>Useful for production debugging and review.</td></tr>
-                  <tr><td><a href="https://opentelemetry.io/" rel="noopener">OpenTelemetry</a></td><td>Vendor-neutral traces and spans.</td><td>You already run observability infrastructure.</td><td>Connects MS_RAG phases to dashboards and alerts.</td></tr>
+                  <tr><td><a href="https://phoenix.arize.com/" rel="noopener">Arize Phoenix</a></td><td>OpenInference/Phoenix trace export when the collector endpoint is configured, plus Phoenix-prefixed scores.</td><td>You need rich inspection of retrieval and model behavior.</td><td>Useful for production debugging and review.</td></tr>
+                  <tr><td>ARES</td><td><code>ares-ai</code> package availability path plus ARES-compatible retrieval/generation scores.</td><td>You want ARES-style RAG quality signals for a live query.</td><td>Keeps package-backed status separate from local fallback metrics.</td></tr>
+                  <tr><td>RAGBench</td><td>Hugging Face datasets tooling check plus RAGBench-compatible single-query scores.</td><td>You want benchmark-style metrics while testing local generated pipelines.</td><td>Works without pretending to run the full external benchmark suite.</td></tr>
+                  <tr><td><a href="https://opentelemetry.io/" rel="noopener">OpenTelemetry</a></td><td>Vendor-neutral traces and spans.</td><td>You already run observability infrastructure.</td><td>Connects MS-RAGS(ALL-IN-ONE) phases to dashboards and alerts.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -407,7 +412,7 @@
 
           <section>
             <h2>Evaluation</h2>
-            <p>Use <a href="https://docs.ragas.io/" rel="noopener">RAGAS</a> for faithfulness and context metrics, <a href="https://www.deepeval.com/" rel="noopener">DeepEval</a> for test cases, <a href="https://www.trulens.org/" rel="noopener">TruLens</a> for feedback analysis, <a href="https://www.langchain.com/langsmith" rel="noopener">LangSmith</a>, <a href="https://langfuse.com/" rel="noopener">Langfuse</a>, or <a href="https://phoenix.arize.com/" rel="noopener">Arize Phoenix</a> for tracing, CI/CD gates for release protection, and monitoring export for production dashboards.</p>
+            <p>Use <a href="https://docs.ragas.io/" rel="noopener">RAGAS</a> for faithfulness and context metrics, <a href="https://www.deepeval.com/" rel="noopener">DeepEval</a> for package-backed answer checks, TruLens-compatible groundedness scores, <a href="https://www.langchain.com/langsmith" rel="noopener">LangSmith</a>, <a href="https://langfuse.com/" rel="noopener">Langfuse</a>, or <a href="https://phoenix.arize.com/" rel="noopener">Arize Phoenix</a> for tracing, ARES/RAGBench benchmark-compatible signals, CI/CD gates for release protection, and monitoring export for production dashboards.</p>
           </section>
           <div class="next-actions"><a class="button primary" href="databases.html">Next: Vector databases</a></div>
         </main>

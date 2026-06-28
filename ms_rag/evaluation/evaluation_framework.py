@@ -1,11 +1,11 @@
 """Evaluation Framework for MS_RAG.
 
-Interactive configuration and runtime evaluation using all 12 supported
+Interactive configuration and runtime evaluation using all 11 supported
 evaluation frameworks.
 
 Requirement 16:
 - Ask yes/no for evaluation (16.1)
-- Display all 12 evaluators as a checkbox (16.2)
+- Display all 11 evaluators as a checkbox (16.2)
 - Allow multi-select (16.3)
 - Prompt credentials for LangSmith/Langfuse/Arize Phoenix; keep selected on cancel (16.4)
 - Prompt CI/CD thresholds for cicd_gate (16.5)
@@ -69,7 +69,7 @@ EVALUATORS: list[EvaluatorInfo] = [
     EvaluatorInfo(
         evaluator_id="trulens",
         display_name="TruLens",
-        description="Feedback function-based evaluation with dashboard (trulens-core ≥1.0)",
+        description="Modern TruLens package validation plus TruLens-prefixed groundedness scoring",
     ),
     EvaluatorInfo(
         evaluator_id="langsmith",
@@ -90,7 +90,7 @@ EVALUATORS: list[EvaluatorInfo] = [
     EvaluatorInfo(
         evaluator_id="arize_phoenix",
         display_name="Arize Phoenix",
-        description="ML-grade RAG tracing and evaluation with OpenInference instrumentation",
+        description="OpenInference/Phoenix trace export when endpoint is configured, plus Phoenix-prefixed scores",
         requires_credentials=True,
         credential_fields=["PHOENIX_API_KEY", "PHOENIX_COLLECTOR_ENDPOINT"],
         credential_provider="arize_phoenix",
@@ -98,17 +98,12 @@ EVALUATORS: list[EvaluatorInfo] = [
     EvaluatorInfo(
         evaluator_id="ares",
         display_name="ARES",
-        description="Automated RAG Evaluation System — uses LLM-based judges for retrieval + generation",
+        description="ARES package-backed availability path plus ARES-compatible retrieval/generation scores",
     ),
     EvaluatorInfo(
         evaluator_id="ragbench",
         display_name="RAGBench",
-        description="Benchmark suite for RAG systems with standardised metrics and datasets",
-    ),
-    EvaluatorInfo(
-        evaluator_id="rageval",
-        display_name="RAGEval",
-        description="Scenario-based RAG evaluation with configurable gold-standard datasets",
+        description="RAGBench-compatible single-query scoring with optional Hugging Face datasets tooling",
     ),
     EvaluatorInfo(
         evaluator_id="cicd_gate",
