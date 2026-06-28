@@ -10,7 +10,9 @@ Validates: Requirements 9.6, 9.7, 19.2, 20.1, 20.2, 20.3
 
 from __future__ import annotations
 
+import sys
 import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -304,15 +306,33 @@ def test_tabula_loader_falls_back_to_pypdf_for_general_pdf_text() -> None:
     mock_pypdf.assert_called_once_with("Resume\\resume.pdf")
 
 
-def test_camelot_loader_falls_back_to_pypdf_for_general_pdf_text() -> None:
+def test_camelot_loader_extracts_tables_directly() -> None:
+    orchestrator = IngestionOrchestrator()
+    frame = MagicMock()
+    frame.empty = False
+    frame.to_csv.return_value = "Name,Role\nMS-RAGS,Framework\n"
+    table = SimpleNamespace(df=frame, page="2")
+    camelot_module = SimpleNamespace(read_pdf=MagicMock(return_value=[table]))
+
+    with patch.dict(sys.modules, {"camelot": camelot_module}):
+        result = orchestrator._invoke_loader("CamelotLoader", "SmokeDocs\\table.pdf")
+
+    camelot_module.read_pdf.assert_called_once_with("SmokeDocs\\table.pdf", pages="all")
+    assert len(result) == 1
+    assert result[0].page_content == "Name,Role\nMS-RAGS,Framework\n"
+    assert result[0].metadata["loader"] == "CamelotLoader"
+    assert result[0].metadata["page"] == 2
+
+
+def test_camelot_loader_without_tables_falls_back_to_pypdf_quietly() -> None:
     orchestrator = IngestionOrchestrator()
     fallback_docs = [MagicMock(page_content="resume text")]
+    camelot_module = SimpleNamespace(read_pdf=MagicMock(return_value=[]))
 
-    with pytest.warns(UserWarning, match="falling back to PyPDFLoader"), \
-         patch("langchain_community.document_loaders.CamelotPDFLoader", side_effect=RuntimeError("camelot unavailable"), create=True), \
+    with patch.dict(sys.modules, {"camelot": camelot_module}), \
          patch("langchain_community.document_loaders.PyPDFLoader") as mock_pypdf:
-            mock_pypdf.return_value.load.return_value = fallback_docs
-            result = orchestrator._invoke_loader("CamelotLoader", "Resume\\resume.pdf")
+        mock_pypdf.return_value.load.return_value = fallback_docs
+        result = orchestrator._invoke_loader("CamelotLoader", "Resume\\resume.pdf")
 
     assert result == fallback_docs
     mock_pypdf.assert_called_once_with("Resume\\resume.pdf")

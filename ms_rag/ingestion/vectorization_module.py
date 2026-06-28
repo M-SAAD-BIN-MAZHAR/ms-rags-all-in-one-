@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import shutil
+from pathlib import Path
 
 try:
     import questionary
@@ -337,11 +339,45 @@ def _hosted_hf_equivalent(model_id: str) -> EmbeddingModelInfo | None:
 
 def _prepare_local_huggingface_download(hf_token: str | None) -> None:
     """Make local HuggingFace model downloads reliable on Windows/older stacks."""
-    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
-    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+    os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+    os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
     if hf_token:
-        os.environ.setdefault("HF_TOKEN", hf_token)
-        os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", hf_token)
+        os.environ["HF_TOKEN"] = hf_token
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+
+
+def local_huggingface_cache_path(model_id: str) -> Path | None:
+    """Return the HuggingFace hub cache folder for a repo-style model id."""
+    if not model_id or model_id.startswith(_HOSTED_HF_PREFIX):
+        return None
+    model_path = Path(model_id)
+    if model_path.exists() or model_path.is_absolute() or "/" not in model_id:
+        return None
+
+    env_hub_cache = os.environ.get("HF_HUB_CACHE")
+    if env_hub_cache:
+        hub_cache = Path(env_hub_cache)
+    elif os.environ.get("HF_HOME"):
+        hub_cache = Path(str(os.environ["HF_HOME"])) / "hub"
+    else:
+        try:
+            from huggingface_hub import constants as hf_constants  # noqa: PLC0415
+
+            hub_cache = Path(str(hf_constants.HF_HUB_CACHE))
+        except Exception:  # noqa: BLE001
+            hub_cache = Path.home() / ".cache" / "huggingface" / "hub"
+
+    return hub_cache / f"models--{model_id.replace('/', '--')}"
+
+
+def remove_local_huggingface_cache(model_id: str) -> Path | None:
+    """Delete only the cache folder for one HuggingFace model id."""
+    cache_path = local_huggingface_cache_path(model_id)
+    if cache_path is None or not cache_path.exists():
+        return None
+    shutil.rmtree(cache_path)
+    return cache_path
 
 
 # ---------------------------------------------------------------------------

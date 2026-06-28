@@ -470,11 +470,12 @@ ADVANCED_CHUNK_DOCUMENTS = []
             lines.extend([
                 "",
                 "def _local_huggingface_embeddings(model_name: str):",
-                '    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")',
-                '    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")',
+                '    os.environ["HF_HUB_DISABLE_XET"] = "1"',
+                '    os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"',
+                '    os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)',
                 "    if HUGGINGFACEHUB_API_TOKEN:",
-                '        os.environ.setdefault("HF_TOKEN", HUGGINGFACEHUB_API_TOKEN)',
-                '        os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", HUGGINGFACEHUB_API_TOKEN)',
+                '        os.environ["HF_TOKEN"] = HUGGINGFACEHUB_API_TOKEN',
+                '        os.environ["HUGGING_FACE_HUB_TOKEN"] = HUGGINGFACEHUB_API_TOKEN',
                 "        return HuggingFaceEmbeddings(",
                 "            model_name=model_name,",
                 '            model_kwargs={"token": HUGGINGFACEHUB_API_TOKEN},',
@@ -570,8 +571,24 @@ def _invoke_loader(loader_class_name: str, source: str) -> list:
         from langchain_community.document_loaders import PDFPlumberLoader
         return PDFPlumberLoader(source).load()
     if loader_class_name == "CamelotLoader":
-        from langchain_community.document_loaders import CamelotPDFLoader
-        return CamelotPDFLoader(source).load()
+        try:
+            import camelot
+        except ImportError as exc:
+            raise ImportError("CamelotLoader requires camelot-py. Install it or choose PyPDFLoader/PDFPlumberLoader.") from exc
+        tables = camelot.read_pdf(source, pages="all")
+        docs = []
+        for index, table in enumerate(tables):
+            dataframe = getattr(table, "df", None)
+            if dataframe is None or dataframe.empty:
+                continue
+            docs.append(Document(
+                page_content=dataframe.to_csv(index=False),
+                metadata={{"source": source, "loader": "CamelotLoader", "table_index": index, "page": int(getattr(table, "page", 0) or 0)}},
+            ))
+        if docs:
+            return docs
+        from langchain_community.document_loaders import PyPDFLoader
+        return PyPDFLoader(source).load()
     if loader_class_name == "TabulaLoader":
         from langchain_community.document_loaders import UnstructuredPDFLoader
         return UnstructuredPDFLoader(source, mode="elements", strategy="fast").load()

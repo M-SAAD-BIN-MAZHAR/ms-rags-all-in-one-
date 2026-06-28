@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Callable
 import warnings
 
+from langchain_core.documents import Document
+
 try:
     from rich.console import Console
 except ImportError:
@@ -515,8 +517,11 @@ class IngestionOrchestrator:
         if loader_class_name in {"CamelotLoader", "TabulaLoader"}:
             try:
                 if loader_class_name == "CamelotLoader":
-                    from langchain_community.document_loaders import CamelotPDFLoader  # noqa: PLC0415
-                    return CamelotPDFLoader(source).load()
+                    camelot_docs = self._load_with_camelot(source)
+                    if camelot_docs:
+                        return camelot_docs
+                    from langchain_community.document_loaders import PyPDFLoader  # noqa: PLC0415
+                    return PyPDFLoader(source).load()
                 from langchain_community.document_loaders import UnstructuredPDFLoader  # noqa: PLC0415
                 return UnstructuredPDFLoader(source, mode="elements", strategy="fast").load()
             except Exception as exc:  # noqa: BLE001
@@ -697,6 +702,35 @@ class IngestionOrchestrator:
         # ── Fallback: plain text ──────────────────────────────────────
         from langchain_community.document_loaders import TextLoader  # noqa: PLC0415
         return TextLoader(source, encoding="utf-8").load()
+
+    def _load_with_camelot(self, source: str) -> list[Document]:
+        """Extract PDF tables directly with Camelot and return LangChain documents."""
+        try:
+            import camelot  # type: ignore[import-not-found]  # noqa: PLC0415
+        except ImportError as exc:
+            raise ImportError(
+                "CamelotLoader requires camelot-py. Install the production extra "
+                "or choose PyPDFLoader/PDFPlumberLoader for general PDF text."
+            ) from exc
+
+        tables = camelot.read_pdf(source, pages="all")
+        docs: list[Document] = []
+        for index, table in enumerate(tables):
+            dataframe = getattr(table, "df", None)
+            if dataframe is None or dataframe.empty:
+                continue
+            docs.append(
+                Document(
+                    page_content=dataframe.to_csv(index=False),
+                    metadata={
+                        "source": source,
+                        "loader": "CamelotLoader",
+                        "table_index": index,
+                        "page": int(getattr(table, "page", 0) or 0),
+                    },
+                )
+            )
+        return docs
 
     @staticmethod
     def _load_dataframe(source: str) -> list:

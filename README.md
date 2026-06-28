@@ -127,7 +127,7 @@ ms-rags
 That's it for the standard production feature set. The `[production]` extra includes:
 - All 12 LLM providers
 - ChromaDB, FAISS, Pinecone, Qdrant, Weaviate, Milvus, PGVector, Elasticsearch, OpenSearch, MongoDB Atlas, and AWS/Azure-compatible vector integrations
-- All 11 evaluation options are explicit about their runtime mode: package-backed scoring for RAGAS/DeepEval, modern TruLens package validation plus groundedness scores, LangSmith/Langfuse tracing, Phoenix OpenInference export, ARES-compatible scores, RAGBench dataset-compatible scoring, CI/CD gates, LangGraph trace export, and monitoring export.
+- All 11 evaluation options are explicit about their runtime mode: package-backed scoring when RAGAS/DeepEval are installed and compatible, visible lexical fallback metrics when optional evaluator packages are incompatible with the installed LangChain family, TruLens-prefixed groundedness scores, LangSmith/Langfuse tracing, Phoenix OpenInference export, ARES-compatible scores, RAGBench dataset-compatible scoring, CI/CD gates, LangGraph trace export, and monitoring export.
 - All rerankers (FlashRank, Cohere)
 - All document loaders (PDF, DOCX, CSV, Excel, PPTX, HTML, Markdown, JSON, XML, YouTube, images/OCR, ePub, RTF, code, SQL, MongoDB, etc.)
 - Production parser extras include Unstructured support for PPTX, Markdown, image OCR, ePub, and RTF, plus `jq`, `msoffcrypto-tool`, `python-pptx`, and `pypandoc-binary`.
@@ -679,8 +679,8 @@ When evaluation is enabled in Step 15, metrics are computed **live after each qu
 
 | Evaluator | Runtime behaviour |
 |-----------|-------------------|
-| RAGAS / DeepEval | Package-backed scoring when installed; lexical fallback with visible warning otherwise |
-| TruLens | Modern TruLens package validation plus TruLens-prefixed groundedness scores |
+| RAGAS / DeepEval | Package-backed scoring when installed and compatible; lexical fallback with visible warning if the optional package or one of its LangChain integration imports is unavailable |
+| TruLens | Modern TruLens package validation when compatible; TruLens-prefixed groundedness scores with visible fallback warning if its LangChain adapter is incompatible |
 | LangSmith / Langfuse | Logs trace/run when credentials are configured |
 | Arize Phoenix | OpenInference/Phoenix trace export when `PHOENIX_COLLECTOR_ENDPOINT` is configured; Phoenix-prefixed scores otherwise |
 | ARES | ARES-compatible retrieval/generation scores; install the external `ares-ai` package only in a separate ARES-focused environment if you need its package-backed path |
@@ -713,6 +713,10 @@ from langchain_classic.retrievers import EnsembleRetriever
 HuggingFace embeddings are intentionally split into two choices in the terminal:
 local models download/cache and run on the user's machine, while hosted HuggingFace
 endpoint embeddings use `HUGGINGFACEHUB_API_TOKEN` and do not download the model locally.
+For local HuggingFace downloads, MS-RAGS disables the `hf-xet` transfer path by
+default. If a download is interrupted and leaves a partial cache, the next
+ingestion failure will show the exact model cache folder and ask permission before
+cleaning only that model cache and retrying.
 
 ---
 

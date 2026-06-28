@@ -25,6 +25,8 @@ from ms_rag.ingestion.vectorization_module import (
     get_displayable_models,
     get_embedding_dimension,
     get_embedding_model_info,
+    local_huggingface_cache_path,
+    remove_local_huggingface_cache,
 )
 from ms_rag.models import CredentialStore, EmbeddingModelConfig
 
@@ -311,27 +313,46 @@ def test_local_huggingface_download_disables_xet_and_exports_token() -> None:
         {
             "HF_HUB_DISABLE_XET": "",
             "HF_HUB_DISABLE_SYMLINKS_WARNING": "",
-            "HF_TOKEN": "",
-            "HUGGING_FACE_HUB_TOKEN": "",
+            "HF_HUB_ENABLE_HF_TRANSFER": "1",
+            "HF_TOKEN": "old",
+            "HUGGING_FACE_HUB_TOKEN": "old",
         },
         clear=False,
     ):
         import os
 
-        for key in [
-            "HF_HUB_DISABLE_XET",
-            "HF_HUB_DISABLE_SYMLINKS_WARNING",
-            "HF_TOKEN",
-            "HUGGING_FACE_HUB_TOKEN",
-        ]:
-            os.environ.pop(key, None)
-
         _prepare_local_huggingface_download("hf_test")
 
         assert os.environ["HF_HUB_DISABLE_XET"] == "1"
         assert os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] == "1"
+        assert "HF_HUB_ENABLE_HF_TRANSFER" not in os.environ
         assert os.environ["HF_TOKEN"] == "hf_test"
         assert os.environ["HUGGING_FACE_HUB_TOKEN"] == "hf_test"
+
+
+def test_local_huggingface_cache_path_targets_one_model(tmp_path) -> None:
+    with patch.dict("os.environ", {"HF_HOME": str(tmp_path)}, clear=False):
+        cache_path = local_huggingface_cache_path("sentence-transformers/all-mpnet-base-v2")
+
+    assert cache_path == tmp_path / "hub" / "models--sentence-transformers--all-mpnet-base-v2"
+    assert local_huggingface_cache_path("hf-endpoint:sentence-transformers/all-mpnet-base-v2") is None
+
+
+def test_remove_local_huggingface_cache_deletes_only_target_model(tmp_path) -> None:
+    target = tmp_path / "hub" / "models--sentence-transformers--all-mpnet-base-v2"
+    other = tmp_path / "hub" / "models--sentence-transformers--all-MiniLM-L6-v2"
+    target.mkdir(parents=True)
+    other.mkdir(parents=True)
+    (target / "partial").write_text("broken", encoding="utf-8")
+    (other / "model").write_text("keep", encoding="utf-8")
+
+    with patch.dict("os.environ", {"HF_HOME": str(tmp_path)}, clear=False):
+        removed = remove_local_huggingface_cache("sentence-transformers/all-mpnet-base-v2")
+
+    assert removed == target
+    assert not target.exists()
+    assert other.exists()
+    assert (other / "model").read_text(encoding="utf-8") == "keep"
 
 
 # ---------------------------------------------------------------------------

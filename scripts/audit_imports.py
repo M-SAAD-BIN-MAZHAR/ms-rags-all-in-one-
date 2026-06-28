@@ -39,7 +39,7 @@ def collect_imports() -> set[tuple[str, str | None]]:
                 for alias in node.names:
                     if alias.name == "*":
                         continue
-                    symbol = alias.asname or alias.name
+                    symbol = alias.name
                     if symbol.isidentifier():
                         pairs.add((module, symbol))
 

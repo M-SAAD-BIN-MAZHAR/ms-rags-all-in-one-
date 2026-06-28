@@ -615,7 +615,7 @@ def _run_ingestion_with_recovery(
 ) -> tuple[object, object, object]:
     """Build embeddings/store and ingest, giving the user recovery choices."""
     import questionary  # noqa: PLC0415
-    from ms_rag.ui.prompts import print_error, print_hint, prompt_select  # noqa: PLC0415
+    from ms_rag.ui.prompts import print_error, print_hint, prompt_confirm, prompt_select  # noqa: PLC0415
 
     while True:
         try:
@@ -652,16 +652,63 @@ def _run_ingestion_with_recovery(
                 "Common causes: wrong embedding model for an existing index, missing DB credentials, "
                 "unreachable local service, or incompatible collection dimension.",
             )
+            hf_cache_path = None
+            if (
+                config.embedding_model
+                and config.embedding_model.provider in {"huggingface", "local"}
+                and "Can't load the model" in str(exc)
+            ):
+                from ms_rag.ingestion.vectorization_module import (  # noqa: PLC0415
+                    local_huggingface_cache_path,
+                    remove_local_huggingface_cache,
+                )
+
+                hf_cache_path = local_huggingface_cache_path(config.embedding_model.model_id)
+                print_hint(
+                    console,  # type: ignore[arg-type]
+                    "Local HuggingFace download failed before the weights were fully cached. "
+                    "MS-RAGS can clean only this model's local cache after your approval, "
+                    "or you can choose the Hosted HuggingFace Inference API option to avoid local downloads.",
+                )
+                if hf_cache_path and hf_cache_path.exists():
+                    print_hint(console, f"Detected partial/failed cache: {hf_cache_path}")  # type: ignore[arg-type]
+
+            recovery_choices = [
+                questionary.Choice("Retry with the same settings", value="retry"),
+                questionary.Choice("Change embedding model", value="embedding"),
+                questionary.Choice("Change vector database settings", value="vectordb"),
+                questionary.Choice("Abort setup", value="abort"),
+            ]
+            if hf_cache_path and hf_cache_path.exists():
+                recovery_choices.insert(
+                    0,
+                    questionary.Choice(
+                        "Clean this HuggingFace model cache and retry",
+                        value="clean_hf_cache",
+                    ),
+                )
             action = prompt_select(
                 "  What would you like to do?",
-                [
-                    questionary.Choice("Retry with the same settings", value="retry"),
-                    questionary.Choice("Change embedding model", value="embedding"),
-                    questionary.Choice("Change vector database settings", value="vectordb"),
-                    questionary.Choice("Abort setup", value="abort"),
-                ],
+                recovery_choices,
                 console=console,  # type: ignore[arg-type]
             )
+            if action == "clean_hf_cache":
+                if not hf_cache_path:
+                    print_error(console, "No HuggingFace cache folder was detected for this model.")  # type: ignore[arg-type]
+                    continue
+                if prompt_confirm(
+                    f"  Delete only this model cache and retry? {hf_cache_path}",
+                    default=False,
+                    console=console,  # type: ignore[arg-type]
+                ):
+                    deleted_path = remove_local_huggingface_cache(config.embedding_model.model_id)  # type: ignore[union-attr]
+                    if deleted_path:
+                        print_hint(console, f"Deleted HuggingFace cache: {deleted_path}")  # type: ignore[arg-type]
+                    else:
+                        print_hint(console, "Cache folder was already absent; retrying download.")  # type: ignore[arg-type]
+                    continue
+                print_hint(console, "Cache cleanup skipped; choose another recovery option.")  # type: ignore[arg-type]
+                continue
             if action == "retry":
                 continue
             if action == "embedding":

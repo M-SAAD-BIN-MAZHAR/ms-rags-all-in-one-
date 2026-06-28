@@ -447,7 +447,8 @@ def test_generated_local_huggingface_embedding_disables_xet_download_path() -> N
 
     ast.parse(code)
     assert "def _local_huggingface_embeddings(model_name: str):" in code
-    assert 'os.environ.setdefault("HF_HUB_DISABLE_XET", "1")' in code
+    assert 'os.environ["HF_HUB_DISABLE_XET"] = "1"' in code
+    assert 'os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)' in code
     assert 'HUGGINGFACEHUB_API_TOKEN = os.getenv("HUGGINGFACEHUB_API_TOKEN")' in code
     assert 'embeddings = _local_huggingface_embeddings("sentence-transformers/all-mpnet-base-v2")' in code
 
@@ -694,6 +695,19 @@ def test_generated_self_query_documents_dense_extension_point() -> None:
     ast.parse(code)
     assert "Self-Query needs a live LLM object" in code
     assert 'search_type="similarity"' in code
+
+
+def test_generated_camelot_loader_uses_direct_camelot_package() -> None:
+    config = _make_config()
+    config.loader_map = {"pdf": "CamelotLoader"}
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert "import camelot" in code
+    assert "camelot.read_pdf(source, pages=\"all\")" in code
+    assert "CamelotPDFLoader" not in code
 
 
 @pytest.mark.parametrize(
