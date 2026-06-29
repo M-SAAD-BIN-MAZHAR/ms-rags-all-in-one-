@@ -22,9 +22,12 @@ class RerankingRetriever(BaseRetriever):
         run_manager: CallbackManagerForRetrieverRun | None = None,
     ) -> list[Document]:
         docs = self.base_retriever.invoke(query)  # type: ignore[union-attr]
-        return self.reranking_module.rerank(  # type: ignore[union-attr]
+        self._ms_rag_pre_rerank_count = len(docs)
+        reranked = self.reranking_module.rerank(  # type: ignore[union-attr]
             query,
             docs,
             self.config,
             llm=self.llm,
         )
+        self._ms_rag_post_rerank_count = len(reranked)
+        return reranked

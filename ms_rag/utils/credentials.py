@@ -8,6 +8,8 @@ and can search across all configured providers when a field name is unique.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
@@ -78,6 +80,35 @@ def resolve_credential(
                 return val
     env_val = os.getenv(field)
     return env_val if env_val else None
+
+
+@contextmanager
+def temporary_env(values: dict[str, str | None]) -> Iterator[None]:
+    """Temporarily expose credential values for SDKs that only read os.environ."""
+    previous: dict[str, str | None] = {key: os.environ.get(key) for key in values}
+    try:
+        for key, value in values.items():
+            if value:
+                os.environ[key] = value
+        yield
+    finally:
+        for key, old_value in previous.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
+def env_from_store(
+    credential_store: object | None,
+    provider: str,
+    fields: list[str] | tuple[str, ...],
+) -> dict[str, str | None]:
+    """Build env-var mapping from the MS-RAGS credential store."""
+    return {
+        field: resolve_credential(field, credential_store, provider)
+        for field in fields
+    }
 
 
 def resolve_model_id(

@@ -28,6 +28,7 @@ except ImportError:
 
 from ms_rag.evaluation.evaluator_runners import (
     EVALUATOR_RUNNERS,
+    finite_scores,
     run_monitoring_export,
 )
 from ms_rag.models import EvaluationConfig
@@ -49,6 +50,7 @@ class EvaluatorInfo:
     requires_credentials: bool = False
     credential_fields: list[str] = None  # type: ignore[assignment]
     credential_provider: str = ""
+    requires_evaluator_llm: bool = False
 
     def __post_init__(self) -> None:
         if self.credential_fields is None:
@@ -60,11 +62,19 @@ EVALUATORS: list[EvaluatorInfo] = [
         evaluator_id="ragas",
         display_name="RAGAS",
         description="Reference-free RAG evaluation: faithfulness, answer relevancy, context precision",
+        requires_credentials=True,
+        credential_fields=["OPENAI_API_KEY", "OPENAI_ORG_ID"],
+        credential_provider="openai",
+        requires_evaluator_llm=True,
     ),
     EvaluatorInfo(
         evaluator_id="deepeval",
         display_name="DeepEval",
         description="LLM evaluation with G-Eval, RAG metrics, and custom test cases",
+        requires_credentials=True,
+        credential_fields=["OPENAI_API_KEY", "OPENAI_ORG_ID"],
+        credential_provider="openai",
+        requires_evaluator_llm=True,
     ),
     EvaluatorInfo(
         evaluator_id="trulens",
@@ -187,7 +197,8 @@ class EvaluationFramework:
         choices = [
             questionary.Choice(
                 title=f"{e.display_name}  —  {e.description}"
-                      + (" [API key required]" if e.requires_credentials else ""),
+                      + (" [evaluator LLM/API key required]" if e.requires_evaluator_llm else "")
+                      + (" [API key required]" if e.requires_credentials and not e.requires_evaluator_llm else ""),
                 value=e.evaluator_id,
             )
             for e in EVALUATORS
@@ -213,6 +224,11 @@ class EvaluationFramework:
             if info.requires_credentials:
                 self._prompt_evaluator_credentials(info, console)
 
+        evaluator_llm_provider: str | None = None
+        evaluator_llm_model: str | None = None
+        if any(EVALUATOR_MAP[eid].requires_evaluator_llm for eid in selected):
+            evaluator_llm_provider, evaluator_llm_model = self._prompt_evaluator_llm(console)
+
         # CI/CD gate thresholds (Req 16.5)
         cicd_thresholds: dict[str, float] | None = None
         if "cicd_gate" in selected:
@@ -221,6 +237,8 @@ class EvaluationFramework:
         config = EvaluationConfig(
             evaluators=selected,
             cicd_thresholds=cicd_thresholds,
+            evaluator_llm_provider=evaluator_llm_provider,
+            evaluator_llm_model=evaluator_llm_model,
         )
 
         console.print(
@@ -270,13 +288,11 @@ class EvaluationFramework:
                 continue
 
             try:
-                if evaluator_id in ("langsmith", "langfuse", "arize_phoenix", "ragas"):
-                    result = runner(
-                        query,
-                        context,
-                        answer,
-                        credential_store=self._credential_store,
-                    )
+                if evaluator_id in ("langsmith", "langfuse", "arize_phoenix", "ragas", "deepeval"):
+                    kwargs = {"credential_store": self._credential_store}
+                    if evaluator_id in ("ragas", "deepeval"):
+                        kwargs["evaluator_model"] = active.evaluator_llm_model
+                    result = runner(query, context, answer, **kwargs)
                 elif evaluator_id == "langgraph_trace":
                     result = runner(query, context, answer)
                 else:
@@ -288,9 +304,15 @@ class EvaluationFramework:
                 )
                 result = {}
 
-            for metric, value in result.items():
-                if isinstance(value, (int, float)):
-                    scores[metric] = float(value)
+            cleaned = finite_scores(result)
+            dropped = set(result) - set(cleaned)
+            if dropped:
+                warnings.warn(
+                    f"Evaluator {evaluator_id!r} returned non-finite/non-numeric metrics that were ignored: "
+                    f"{', '.join(sorted(dropped))}",
+                    stacklevel=2,
+                )
+            scores.update(cleaned)
 
         if deferred_export:
             export_scores = run_monitoring_export(
@@ -307,6 +329,9 @@ class EvaluationFramework:
             if ans_tokens:
                 overlap = len(gt_tokens & ans_tokens) / max(len(gt_tokens), 1)
                 scores["ground_truth_overlap"] = round(min(overlap, 1.0), 4)
+
+        if "cicd_gate" in active.evaluators and active.cicd_thresholds:
+            scores["cicd_gate_passed"] = 1.0 if self.check_cicd_thresholds(scores, active) else 0.0
 
         return scores
 
@@ -381,6 +406,22 @@ class EvaluationFramework:
                 self._credential_store.set(  # type: ignore[union-attr]
                     info.credential_provider, field, value.strip()
                 )
+
+    def _prompt_evaluator_llm(self, console: object) -> tuple[str, str]:
+        """Prompt for the evaluator LLM used by package-backed LLM judges."""
+        console.print(  # type: ignore[union-attr]
+            "\n  [bold white]Evaluator LLM[/bold white]\n"
+            "  RAGAS and DeepEval use an evaluator model to judge faithfulness/relevancy.\n"
+            "  This can be different from your answer-generation model."
+        )
+        provider = "openai"
+        model = questionary.text(
+            "    OpenAI evaluator model (default gpt-4o-mini):",
+            default="gpt-4o-mini",
+        ).ask()
+        model = (model or "gpt-4o-mini").strip() or "gpt-4o-mini"
+        console.print(f"  [green]✓ Evaluator LLM: {provider} / {model}[/green]")  # type: ignore[union-attr]
+        return provider, model
 
     def _prompt_cicd_thresholds(self, console: object) -> dict[str, float]:
         """Prompt for CI/CD metric thresholds. Req 16.5."""

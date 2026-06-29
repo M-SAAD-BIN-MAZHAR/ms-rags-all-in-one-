@@ -8,6 +8,7 @@ from ms_rag.utils.credentials import (
     resolve_credential,
     resolve_model_id,
     resolve_ollama_connection,
+    temporary_env,
 )
 
 
@@ -25,6 +26,21 @@ class TestResolveCredential:
     def test_returns_none_when_missing(self) -> None:
         store = CredentialStore()
         assert resolve_credential("MS_RAG_NONEXISTENT_FIELD_XYZ", store) is None
+
+    def test_temporary_env_overrides_and_restores_values(self, monkeypatch) -> None:
+        monkeypatch.setenv("MS_RAG_TEMP_EXISTING", "old-value")
+        monkeypatch.delenv("MS_RAG_TEMP_NEW", raising=False)
+
+        with temporary_env({"MS_RAG_TEMP_EXISTING": "typed-value", "MS_RAG_TEMP_NEW": "new-value"}):
+            import os
+
+            assert os.environ["MS_RAG_TEMP_EXISTING"] == "typed-value"
+            assert os.environ["MS_RAG_TEMP_NEW"] == "new-value"
+
+        import os
+
+        assert os.environ["MS_RAG_TEMP_EXISTING"] == "old-value"
+        assert "MS_RAG_TEMP_NEW" not in os.environ
 
 
 class TestResolveModelId:

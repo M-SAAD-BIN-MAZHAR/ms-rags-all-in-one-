@@ -9,10 +9,12 @@ Tests (Requirement 9.4, 9.5):
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ms_rag.models import CredentialStore
 from ms_rag.ingestion.vectordb_connector import (
     VECTOR_DBS,
     VECTOR_DB_IDS,
@@ -209,6 +211,24 @@ class TestGetVectorStoreDispatch:
         assert mock_chroma.call_args is not None
         assert mock_chroma.call_args.kwargs["persist_directory"] == "./legacy_chroma"
 
+    def test_chroma_defaults_to_collection_scoped_persistence_path_when_blank(self) -> None:
+        connector = VectorDBConnector()
+        config = VectorDBConfig(
+            db_type="chroma",
+            connection_params={},
+            collection_name="test_collection",
+        )
+
+        with patch("langchain_chroma.Chroma") as mock_chroma:
+            connector.get_vector_store(config, MagicMock())
+
+        assert mock_chroma.call_args is not None
+        assert mock_chroma.call_args.kwargs["persist_directory"].endswith(
+            "chroma_db\\test_collection"
+        ) or mock_chroma.call_args.kwargs["persist_directory"].endswith(
+            "chroma_db/test_collection"
+        )
+
     def test_faiss_gets_default_persistence_path(self) -> None:
         connector = VectorDBConnector()
         config = VectorDBConfig(
@@ -246,6 +266,31 @@ class TestGetVectorStoreDispatch:
         assert mock_client.call_args.kwargs["url"] == "https://qdrant.example"
         assert mock_client.call_args.kwargs["api_key"] == "qdrant-secret"
         assert mock_store.called
+
+    def test_pinecone_store_key_temporarily_overrides_stale_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        store = CredentialStore()
+        store.set("pinecone", "PINECONE_API_KEY", "typed-pinecone-key")
+        connector = VectorDBConnector(credential_store=store)
+        config = VectorDBConfig(
+            db_type="pinecone",
+            connection_params={"PINECONE_API_KEY": "PINECONE_API_KEY"},
+            collection_name="test_collection",
+        )
+        seen: dict[str, str | None] = {}
+        sentinel = object()
+
+        def fake_pinecone_store(**kwargs):
+            seen["during"] = os.environ.get("PINECONE_API_KEY")
+            seen["index_name"] = kwargs.get("index_name")
+            return sentinel
+
+        monkeypatch.setenv("PINECONE_API_KEY", "old-shell-key")
+        with patch("langchain_pinecone.PineconeVectorStore", side_effect=fake_pinecone_store):
+            result = connector.get_vector_store(config, MagicMock())
+
+        assert result is sentinel
+        assert seen["during"] == "typed-pinecone-key"
+        assert os.environ["PINECONE_API_KEY"] == "old-shell-key"
 
     def test_qdrant_missing_collection_is_created_with_dimension(self) -> None:
         connector = VectorDBConnector()

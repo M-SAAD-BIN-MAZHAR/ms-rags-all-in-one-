@@ -97,6 +97,19 @@ Inspired by OpenClaw's UX, MS-RAGS(ALL-IN-ONE) acts as a **live RAG workbench + 
 - **Git**
 - At least one LLM provider API key (e.g. OpenAI) **or** [Ollama](https://ollama.ai) running locally or via Ollama Cloud credentials for chat use
 
+### External Tools Some Loaders Need
+
+Python packages are installed with `pip install -e ".[production]"`, but a few document extractors also depend on system tools. MS-RAGS(ALL-IN-ONE) now checks the selected loaders and document sources before ingestion, shows an **External Tools Needed For Selected Loaders** table, and asks for permission before continuing when a required tool is missing.
+
+| Tool | Needed when | Install note |
+|------|-------------|--------------|
+| **Poppler** (`pdfinfo`) | You choose `UnstructuredPDFLoader` for PDFs, especially scanned/image PDFs. Without it, page counting can fail before OCR/extraction starts. | Install Poppler and add its `bin` folder to `PATH`. |
+| **Tesseract OCR** (`tesseract`) | You want local OCR for scanned PDFs or image files. | Install Tesseract and add it to `PATH`. This improves local OCR quality. |
+| **Java** (`java`) | You choose `TabulaLoader` for PDF table extraction. | Install a JRE/JDK and make sure `java` is available in the terminal. |
+| **Ghostscript** (`gs`/`gswin64c`) | You choose `CamelotLoader` for PDF table extraction, especially lattice/table-line mode. | Install Ghostscript and add it to `PATH`. |
+
+If you do not want local PDF/OCR dependencies, choose **LlamaParseLoader** for complex PDFs and provide `LLAMA_CLOUD_API_KEY`. LlamaParse is cloud-based, so use it only when sending documents to a managed parser is acceptable for your data policy.
+
 ---
 
 ## Installation
@@ -485,11 +498,14 @@ Once the runtime is built, you can type natural language questions. Available co
 | Command | Action |
 |---------|--------|
 | `/config` | Display full pipeline configuration summary |
+| `/settings` or `/edit` | Edit live query enhancement, reranking, or compression settings and rebuild runtime |
 | `/save` | Save session to JSON for later resumption |
 | `/help` | List available query-loop commands |
 | `/exit` or `/quit` | Exit with confirmation prompt |
 
 Empty Enter in the query loop re-prompts instead of exiting. Required workflow inputs (providers, document sources, vector DB connection, telemetry choice, etc.) loop until valid.
+
+When query enhancement is enabled, the live query loop prints a **Query Enhancement Trace** showing the original query, generated/re-written query variants, and the exact query sent to retrieval. This keeps HyDE, multi-query, rewrite, and fusion behavior visible instead of hidden.
 
 ---
 
@@ -679,7 +695,7 @@ When evaluation is enabled in Step 15, metrics are computed **live after each qu
 
 | Evaluator | Runtime behaviour |
 |-----------|-------------------|
-| RAGAS / DeepEval | Package-backed scoring when installed and compatible; lexical fallback with visible warning if the optional package or one of its LangChain integration imports is unavailable |
+| RAGAS / DeepEval | Package-backed LLM-judge scoring when installed and compatible. Step 15 asks for an OpenAI evaluator key and evaluator model such as `gpt-4o-mini`; lexical fallback is used with a visible warning if the evaluator API/package fails |
 | TruLens | Modern TruLens package validation when compatible; TruLens-prefixed groundedness scores with visible fallback warning if its LangChain adapter is incompatible |
 | LangSmith / Langfuse | Logs trace/run when credentials are configured |
 | Arize Phoenix | OpenInference/Phoenix trace export when `PHOENIX_COLLECTOR_ENDPOINT` is configured; Phoenix-prefixed scores otherwise |

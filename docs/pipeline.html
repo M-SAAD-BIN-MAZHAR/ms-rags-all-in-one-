@@ -50,6 +50,16 @@
               <div class="card"><span class="tag">5</span><h3>Retrieval</h3><p>Start dense. Add keyword, hybrid, MMR, parent-child, or self-query only when the retrieved chunks show the need.</p></div>
               <div class="card"><span class="tag">6</span><h3>Quality layers</h3><p>Add query enhancement, reranking, compression, evaluation, and traces after baseline retrieval works.</p></div>
             </div>
+            <div class="component-map" aria-label="Animated MS-RAGS component architecture">
+              <div class="component-track">
+                <span>Files</span><i></i><span>Extractor</span><i></i><span>Chunks</span><i></i><span>Embeddings</span><i></i><span>Vector DB</span>
+              </div>
+              <div class="component-branches">
+                <div><strong>Retrieval</strong><span>dense, hybrid, MMR, parent-child, multi-vector, graph traversal</span></div>
+                <div><strong>Quality</strong><span>query enhancement, reranking, compression, evaluation</span></div>
+                <div><strong>Output</strong><span>live answer, traces, pipeline.py, requirements.txt, .env</span></div>
+              </div>
+            </div>
           </section>
 
           <section id="supported-models">
@@ -200,10 +210,10 @@
                 <thead><tr><th>Extractor</th><th>What it does</th><th>When to use</th><th>Why choose it</th><th>Where to be careful</th></tr></thead>
                 <tbody>
                   <tr><td>PyPDFLoader</td><td>Reads PDF text quickly using a simple parser.</td><td>Clean digital PDFs with normal text flow.</td><td>Fast, free, good first PDF default.</td><td>Weak on scanned PDFs, complex tables, multi-column layouts.</td></tr>
-                  <tr><td>UnstructuredPDFLoader</td><td>Parses PDFs into text elements with layout awareness.</td><td>Mixed PDF layouts, scanned/OCR workflows, messy enterprise documents.</td><td>Better structure than simple extraction.</td><td>More dependencies and slower processing.</td></tr>
+                  <tr><td>UnstructuredPDFLoader</td><td>Parses PDFs into text elements with layout awareness.</td><td>Mixed PDF layouts, scanned/OCR workflows, messy enterprise documents.</td><td>Better structure than simple extraction. MS-RAGS checks for Poppler before ingestion when PDF sources are selected.</td><td>Needs Poppler for many PDFs and Tesseract for local OCR quality; choose LlamaParse if you prefer cloud parsing.</td></tr>
                   <tr><td>PDFPlumberLoader</td><td>Extracts PDF text with stronger layout/table inspection.</td><td>Reports, invoices, PDFs with columns or tables.</td><td>Good when table position and text layout matter.</td><td>Still needs manual sample review.</td></tr>
-                  <tr><td>CamelotLoader</td><td>Specialized PDF table extraction.</td><td>PDFs where the answer lives inside tables.</td><td>Better table recovery than plain text loaders.</td><td>Works best on digital PDFs with clear table lines/structure.</td></tr>
-                  <tr><td>TabulaLoader</td><td>Java-based PDF table extraction.</td><td>Table-heavy PDFs where Tabula performs better than Camelot.</td><td>Useful alternate table parser.</td><td>Java dependency and table quality variance.</td></tr>
+                  <tr><td>CamelotLoader</td><td>Specialized PDF table extraction.</td><td>PDFs where the answer lives inside tables.</td><td>Better table recovery than plain text loaders.</td><td>Works best on digital PDFs with clear table lines/structure; Ghostscript is recommended.</td></tr>
+                  <tr><td>TabulaLoader</td><td>Java-based PDF table extraction.</td><td>Table-heavy PDFs where Tabula performs better than Camelot.</td><td>Useful alternate table parser.</td><td>Requires Java and table quality varies by PDF structure.</td></tr>
                   <tr><td>LlamaParseLoader</td><td>Cloud parser for complex documents.</td><td>High-value PDFs, DOCX, PPTX, scanned or layout-heavy documents.</td><td>Best when extraction quality matters more than cost.</td><td>Requires credentials and sends documents to a cloud parser.</td></tr>
                   <tr><td>UnstructuredWordDocumentLoader</td><td>Parses Word documents with structure.</td><td>Policies, manuals, reports with headings.</td><td>Keeps document hierarchy more useful for chunking.</td><td>Inspect lists, tables, and images.</td></tr>
                   <tr><td>Docx2txtLoader</td><td>Simple DOCX-to-text extraction.</td><td>Clean Word docs where plain text is enough.</td><td>Lightweight and easy.</td><td>Less structure and metadata.</td></tr>
@@ -386,8 +396,8 @@
               <table>
                 <thead><tr><th>Tool or method</th><th>What it measures</th><th>When to use</th><th>Production reason</th></tr></thead>
                 <tbody>
-                  <tr><td><a href="https://docs.ragas.io/" rel="noopener">RAGAS</a></td><td>Faithfulness, context precision, context recall, answer relevancy when the optional package is installed and compatible; visible lexical fallback metrics otherwise.</td><td>You need automated RAG quality metrics.</td><td>Detects retrieval and hallucination regressions without hiding optional package incompatibilities.</td></tr>
-                  <tr><td><a href="https://www.deepeval.com/" rel="noopener">DeepEval</a></td><td>Test cases and LLM evaluation metrics.</td><td>You want CI-style evals around known questions.</td><td>Blocks low-quality generated pipelines before release.</td></tr>
+                  <tr><td><a href="https://docs.ragas.io/" rel="noopener">RAGAS</a></td><td>Faithfulness, answer relevancy, and no-reference context precision using an evaluator LLM. Step 15 asks for <code>OPENAI_API_KEY</code> and an evaluator model such as <code>gpt-4o-mini</code>; visible lexical fallback metrics are used if the evaluator API/package fails.</td><td>You need automated RAG quality metrics.</td><td>Detects retrieval and hallucination regressions without hiding evaluator credential or package problems.</td></tr>
+                  <tr><td><a href="https://www.deepeval.com/" rel="noopener">DeepEval</a></td><td>LLM evaluation metrics using the configured evaluator model and OpenAI key.</td><td>You want CI-style evals around known questions.</td><td>Blocks low-quality generated pipelines before release and reports clean fallback metrics if the evaluator cannot run.</td></tr>
                   <tr><td><a href="https://www.trulens.org/" rel="noopener">TruLens</a></td><td>Modern TruLens package validation when compatible, plus TruLens-prefixed groundedness scores with visible fallback warning when its LangChain adapter is incompatible.</td><td>You want TruLens-compatible local scoring and a path to deeper feedback workflows.</td><td>Helps inspect answer/context grounding without silently pretending an optional adapter loaded.</td></tr>
                   <tr><td><a href="https://www.langchain.com/langsmith" rel="noopener">LangSmith</a></td><td>Trace debugging, datasets, evaluation runs.</td><td>LangChain-heavy teams need trace-level debugging.</td><td>Makes complex chains and agents observable.</td></tr>
                   <tr><td><a href="https://langfuse.com/" rel="noopener">Langfuse</a></td><td>Open-source LLM observability and prompt traces.</td><td>You want self-hostable or vendor-flexible observability.</td><td>Tracks prompts, latency, tokens, and errors.</td></tr>
@@ -412,7 +422,7 @@
 
           <section>
             <h2>Evaluation</h2>
-            <p>Use <a href="https://docs.ragas.io/" rel="noopener">RAGAS</a> for faithfulness and context metrics when its optional package is compatible, <a href="https://www.deepeval.com/" rel="noopener">DeepEval</a> for package-backed answer checks, TruLens-compatible groundedness scores, <a href="https://www.langchain.com/langsmith" rel="noopener">LangSmith</a>, <a href="https://langfuse.com/" rel="noopener">Langfuse</a>, or <a href="https://phoenix.arize.com/" rel="noopener">Arize Phoenix</a> for tracing, ARES/RAGBench benchmark-compatible signals, CI/CD gates for release protection, and monitoring export for production dashboards. Optional evaluator import incompatibilities produce visible warnings and lexical fallback metrics.</p>
+            <p>Use <a href="https://docs.ragas.io/" rel="noopener">RAGAS</a> for faithfulness and context metrics with an explicit evaluator LLM, <a href="https://www.deepeval.com/" rel="noopener">DeepEval</a> for package-backed answer checks, TruLens-compatible groundedness scores, <a href="https://www.langchain.com/langsmith" rel="noopener">LangSmith</a>, <a href="https://langfuse.com/" rel="noopener">Langfuse</a>, or <a href="https://phoenix.arize.com/" rel="noopener">Arize Phoenix</a> for tracing, ARES/RAGBench benchmark-compatible signals, CI/CD gates for release protection, and monitoring export for production dashboards. Optional evaluator import incompatibilities or invalid evaluator credentials produce visible warnings and lexical fallback metrics.</p>
           </section>
           <div class="next-actions"><a class="button primary" href="databases.html">Next: Vector databases</a></div>
         </main>

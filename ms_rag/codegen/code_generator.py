@@ -106,10 +106,12 @@ class CodeGenerator:
         requirements = self._collect_requirements(config)
         python_code = self._render_python(config, requirements)
         requirements_txt = "\n".join(sorted(set(requirements)))
+        env_txt = self._render_env_file(config)
 
         return GeneratedCode(
             python_code=python_code,
             requirements_txt=requirements_txt,
+            env_txt=env_txt,
             rag_type=config.rag_type.rag_type if config.rag_type else "naive_rag",
         )
 
@@ -120,9 +122,11 @@ class CodeGenerator:
 
         pipeline_path = output_dir / "pipeline.py"
         requirements_path = output_dir / "requirements.txt"
+        env_path = output_dir / ".env"
 
         pipeline_path.write_text(code.python_code, encoding="utf-8")
         requirements_path.write_text(code.requirements_txt, encoding="utf-8")
+        env_path.write_text(code.env_txt, encoding="utf-8")
 
     def display_and_offer_save(
         self, code: GeneratedCode, console: object | None = None
@@ -163,7 +167,7 @@ class CodeGenerator:
 
         # Require explicit confirmation before writing (Req 17.7)
         confirmed: bool = questionary.confirm(
-            f"  Write pipeline.py and requirements.txt to {output_path.strip()}?",
+            f"  Write pipeline.py, requirements.txt, and .env to {output_path.strip()}?",
             default=True,
         ).ask()
 
@@ -176,7 +180,8 @@ class CodeGenerator:
             c.print(  # type: ignore[union-attr]
                 f"[green]  ✓ Files saved to {output_path.strip()}/[/green]\n"
                 f"  [dim]• pipeline.py[/dim]\n"
-                f"  [dim]• requirements.txt[/dim]"
+                f"  [dim]• requirements.txt[/dim]\n"
+                f"  [dim]• .env[/dim]"
             )
         except Exception as exc:  # noqa: BLE001
             c.print(f"[red]  ✗ Save failed: {exc}[/red]")  # type: ignore[union-attr]
@@ -243,6 +248,115 @@ class CodeGenerator:
 
         return sorted(reqs)
 
+    def _render_env_file(self, config: PipelineConfig) -> str:
+        """Render a deployable .env template from the exact selected config."""
+        from ms_rag.config.credential_manager import PROVIDER_FIELDS  # noqa: PLC0415
+        from ms_rag.ingestion.loader_selector import LOADER_MAP  # noqa: PLC0415
+
+        sections: list[tuple[str, list[str]]] = []
+
+        def unique(items: list[str]) -> list[str]:
+            return list(dict.fromkeys(item for item in items if item))
+
+        provider_ids = unique(
+            list(config.configured_providers or [])
+            + ([config.llm_model.provider] if config.llm_model else [])
+            + ([config.embedding_model.provider] if config.embedding_model else [])
+        )
+        provider_ids = ["huggingface" if item in {"huggingface_endpoint", "local"} else item for item in provider_ids]
+        provider_fields: list[str] = []
+        for provider_id in unique(provider_ids):
+            provider_fields.extend(PROVIDER_FIELDS.get(provider_id, []))
+        if provider_fields:
+            sections.append(("LLM and embedding providers", unique(provider_fields)))
+
+        loader_fields: list[str] = []
+        for loader_class in (config.loader_map or {}).values():
+            loader_info = LOADER_MAP.get(loader_class)
+            if loader_info:
+                loader_fields.extend(loader_info.credential_fields)
+        if loader_fields:
+            sections.append(("Document loaders", unique(loader_fields)))
+
+        if config.vector_db:
+            vector_fields = list((config.vector_db.connection_params or {}).keys())
+            if config.vector_db.db_type == "faiss":
+                vector_fields.append("FAISS_INDEX_PATH")
+            sections.append((f"Vector database: {config.vector_db.db_type}", unique(vector_fields)))
+
+        if config.keyword_store:
+            keyword_fields = list((config.keyword_store.connection_params or {}).keys())
+            sections.append((f"Keyword store: {config.keyword_store.store_type}", unique(keyword_fields)))
+
+        if config.graph_store:
+            graph_fields = list((config.graph_store.connection_params or {}).keys())
+            if config.graph_store.store_type == "local_json":
+                graph_fields.append("GRAPH_STORE_PATH")
+            elif config.graph_store.store_type == "kuzu":
+                graph_fields.append("KUZU_DATABASE_PATH")
+            elif config.graph_store.store_type == "neo4j":
+                graph_fields.extend(["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD", "NEO4J_DATABASE"])
+            sections.append((f"Graph store: {config.graph_store.store_type}", unique(graph_fields)))
+
+        if config.reranking_enabled and config.reranking and config.reranking.reranker == "cohere_reranker":
+            sections.append(("Reranking", ["COHERE_API_KEY"]))
+
+        evaluator_fields: list[str] = []
+        if config.evaluation_enabled and config.evaluation:
+            evaluator_ids = set(config.evaluation.evaluators or [])
+            if evaluator_ids.intersection({"ragas", "deepeval"}):
+                evaluator_fields.extend(["OPENAI_API_KEY", "OPENAI_ORG_ID"])
+            if "langsmith" in evaluator_ids:
+                evaluator_fields.extend(["LANGCHAIN_TRACING_V2", "LANGCHAIN_API_KEY", "LANGCHAIN_PROJECT"])
+            if "langfuse" in evaluator_ids:
+                evaluator_fields.extend(["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST"])
+            if "arize_phoenix" in evaluator_ids:
+                evaluator_fields.extend(["PHOENIX_API_KEY", "PHOENIX_COLLECTOR_ENDPOINT"])
+            if evaluator_fields:
+                sections.append(("Evaluation and monitoring", unique(evaluator_fields)))
+
+        tool_fields: list[str] = []
+        if config.agent_tools:
+            settings = config.agent_tools.tool_settings or {}
+            web_provider = str((settings.get("web_search") or {}).get("provider") or "")
+            if "web_search" in (config.agent_tools.enabled_tools or []):
+                if web_provider == "brave":
+                    tool_fields.append("BRAVE_SEARCH_API_KEY")
+                else:
+                    tool_fields.append("TAVILY_API_KEY")
+            api_auth = str((settings.get("api_request") or {}).get("auth_env_var") or "")
+            if api_auth:
+                tool_fields.append(api_auth)
+            if "memory" in (config.agent_tools.enabled_tools or []):
+                tool_fields.append("MS_RAG_AGENT_MEMORY_PATH")
+                memory_settings = settings.get("memory") or {}
+                connection_env = str(memory_settings.get("connection_env") or "")
+                if connection_env:
+                    tool_fields.append(connection_env)
+            if tool_fields:
+                sections.append(("Agentic tools", unique(tool_fields)))
+
+        lines = [
+            "# Generated by MS-RAGS(ALL-IN-ONE).",
+            "# Fill only the variables required by your selected pipeline.",
+            "# Secret values are intentionally not written by the generator.",
+            "",
+        ]
+        seen: set[str] = set()
+        for title, fields in sections:
+            fields = [field for field in fields if field and field not in seen]
+            if not fields:
+                continue
+            lines.append(f"# {title}")
+            for field in fields:
+                seen.add(field)
+                lines.append(f"{field}=")
+            lines.append("")
+        if not seen:
+            lines.append("# No external credentials are required for this selected pipeline.")
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
     # ------------------------------------------------------------------
     # Python code rendering
     # ------------------------------------------------------------------
@@ -303,8 +417,12 @@ import argparse
 import warnings
 import json
 import re
+import math
+import contextlib
+import io
 import requests
 from pathlib import Path
+from functools import lru_cache
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 
@@ -1023,8 +1141,17 @@ def init_vector_store(chunks: list = None):
     setattr(vector_store, "_ms_rag_embeddings", embeddings)
     return vector_store'''
 
+        chroma_default_path = (
+            params.get("CHROMA_PERSIST_DIRECTORY")
+            or params.get("CHROMA_PERSIST_DIR")
+            or "./chroma_db"
+        )
         store_init = {
-            "chroma": f'Chroma(collection_name="{collection}", embedding_function=embeddings, persist_directory="./chroma_db")',
+            "chroma": (
+                f'Chroma(collection_name="{collection}", embedding_function=embeddings, '
+                f'persist_directory=os.getenv("CHROMA_PERSIST_DIRECTORY") '
+                f'or os.getenv("CHROMA_PERSIST_DIR") or {chroma_default_path!r})'
+            ),
             "pinecone": f'PineconeVectorStore(index_name="{collection}", embedding=embeddings)',
             "pgvector": f'PGVector(embeddings=embeddings, collection_name="{collection}", connection=os.getenv("PGVECTOR_CONNECTION_STRING", ""))',
             "milvus": f'Milvus(embedding_function=embeddings, collection_name="{collection}", connection_args={{"uri": os.getenv("MILVUS_URI", "http://localhost:19530")}})',
@@ -1400,38 +1527,253 @@ def build_retriever(vector_store):
         reranker = config.reranking.reranker
         model_id = config.reranking.model_id
         top_k = config.reranking.top_k
+        needs_llm = reranker == "llm_reranker"
+        llm_init = self._render_llm_initializer(config) if needs_llm else "None"
         return f'''# ─── Reranking ────────────────────────────────────────────────
+class _RerankingRetriever:
+    """Retriever wrapper that applies the selected reranker before generation."""
+
+    def __init__(self, base_retriever, rerank_fn):
+        self.base_retriever = base_retriever
+        self.rerank_fn = rerank_fn
+
+    def invoke(self, query: str, *args, **kwargs):
+        docs = list(self.base_retriever.invoke(query, *args, **kwargs) or [])
+        return self.rerank_fn(query, docs)
+
+    def __or__(self, other):
+        from langchain_core.runnables import RunnableLambda
+
+        return RunnableLambda(lambda query: self.invoke(query)) | other
+
+
+def _build_rerank_llm():
+    return {llm_init}
+
+
 def rerank_documents(query: str, docs: list) -> list:
     """Rerank documents using {reranker} (top_k={top_k})."""
-    # Reranker: {reranker}, model: {model_id}
+    if not docs:
+        return []
+    reranker = {reranker!r}
+    model_id = {model_id!r}
     try:
-        from flashrank import Ranker, RerankRequest
-        ranker = Ranker()
-        passages = [{{"id": i, "text": d.page_content}} for i, d in enumerate(docs)]
-        results = ranker.rerank(RerankRequest(query=query, passages=passages))
-        top_ids = [r["id"] for r in results[:{top_k}]]
-        return [docs[i] for i in top_ids]
-    except ImportError:
-        return docs[:{top_k}]'''
+        if reranker in {{"cross_encoder", "bge_reranker", "colbert"}}:
+            model = _get_cross_encoder(model_id)
+            pairs = [(query, getattr(doc, "page_content", "")) for doc in docs]
+            scores = model.predict(pairs)
+            ranked = sorted(zip(scores, docs), key=lambda item: item[0], reverse=True)
+            return [doc for _, doc in ranked[:{top_k}]]
+
+        if reranker == "cohere_reranker":
+            import cohere
+
+            api_key = os.getenv("COHERE_API_KEY")
+            if not api_key:
+                raise RuntimeError("COHERE_API_KEY is required for Cohere reranking.")
+            client = cohere.Client(api_key)
+            response = client.rerank(
+                model=model_id,
+                query=query,
+                documents=[getattr(doc, "page_content", "") for doc in docs],
+                top_n={top_k},
+            )
+            return [docs[result.index] for result in response.results]
+
+        if reranker == "llm_reranker":
+            from langchain_core.output_parsers import StrOutputParser
+            from langchain_core.prompts import ChatPromptTemplate
+
+            llm = _build_rerank_llm()
+            if llm is None:
+                raise RuntimeError("LLM reranker requires a configured generation LLM.")
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", "Score relevance from 0 to 10. Reply with only the number."),
+                ("human", "Query: {{query}}\\n\\nDocument:\\n{{document}}"),
+            ])
+            chain = prompt | llm | StrOutputParser()
+            scored = []
+            for doc in docs:
+                raw = chain.invoke({{"query": query, "document": getattr(doc, "page_content", "")}})
+                try:
+                    score = float(str(raw).strip().split()[0])
+                except (ValueError, IndexError):
+                    score = 0.0
+                scored.append((score, doc))
+            scored.sort(key=lambda item: item[0], reverse=True)
+            return [doc for _, doc in scored[:{top_k}]]
+
+        if reranker == "flashrank":
+            from flashrank import Ranker, RerankRequest
+
+            ranker = Ranker()
+            passages = [{{"id": i, "text": getattr(doc, "page_content", "")}} for i, doc in enumerate(docs)]
+            results = ranker.rerank(RerankRequest(query=query, passages=passages))
+            top_ids = [result["id"] for result in results[:{top_k}]]
+            return [docs[i] for i in top_ids]
+
+        raise RuntimeError(f"Unsupported reranker: {{reranker}}")
+    except Exception as exc:
+        print(f"WARNING: Reranker {{reranker!r}} failed; using original top-k documents: {{exc}}")
+        return docs[:{top_k}]
+
+
+def apply_reranking(retriever):
+    return _RerankingRetriever(base_retriever=retriever, rerank_fn=rerank_documents)
+
+
+@lru_cache(maxsize=8)
+def _get_cross_encoder(model_id: str):
+    from sentence_transformers import CrossEncoder
+
+    return CrossEncoder(model_id)'''
 
     def _render_compressor_function(self, config: PipelineConfig) -> str:
         if not config.compression:
             return ""
-        techniques = ", ".join(config.compression.techniques)
+        techniques = list(config.compression.techniques or [])
+        techniques_label = ", ".join(techniques)
         threshold = config.compression.similarity_threshold
+        needs_llm = bool({"llm_chain_extraction", "summary_compression"} & set(techniques))
+        needs_llm = needs_llm or (
+            "contextual_compression" in techniques and not config.embedding_model
+        )
+        llm_init = self._render_llm_initializer(config) if needs_llm else "None"
         return f'''# ─── Context Compression ──────────────────────────────────────
-def compress_context(retriever, embeddings):
-    """Apply context compression: {techniques}."""
-    from langchain_classic.retrievers.document_compressors import EmbeddingsFilter
-    from langchain_classic.retrievers import ContextualCompressionRetriever
-    compressor = EmbeddingsFilter(
-        embeddings=embeddings,
-        similarity_threshold={threshold},
+class _SafeCompressionRetriever:
+    """Context compression wrapper that never hides an empty-compression failure."""
+
+    def __init__(self, base_retriever, base_compressor, min_retained_documents: int = 3):
+        self.base_retriever = base_retriever
+        self.base_compressor = base_compressor
+        self.min_retained_documents = max(int(min_retained_documents), 1)
+
+    def invoke(self, query: str, *args, **kwargs):
+        docs = list(self.base_retriever.invoke(query, *args, **kwargs) or [])
+        if not docs:
+            return []
+        compressed = list(_compress_or_transform_documents(self.base_compressor, docs, query) or [])
+        minimum = min(self.min_retained_documents, len(docs))
+        should_guard = not compressed or len(docs) >= self.min_retained_documents
+        if compressed and (not should_guard or len(compressed) >= minimum):
+            return compressed
+        print(
+            "WARNING: Context compression returned too little context "
+            f"({{len(compressed)}}/{{len(docs)}} documents); using the top {{minimum}} "
+            "uncompressed retrieved documents instead. Lower the threshold, increase top_k, "
+            "or disable compression."
+        )
+        return docs[:minimum]
+
+    def __or__(self, other):
+        from langchain_core.runnables import RunnableLambda
+
+        return RunnableLambda(lambda query: self.invoke(query)) | other
+
+
+def _compress_or_transform_documents(compressor, documents: list, query: str) -> list:
+    if hasattr(compressor, "compress_documents"):
+        return list(compressor.compress_documents(documents, query) or [])
+    if hasattr(compressor, "transform_documents"):
+        return list(compressor.transform_documents(documents) or [])
+    raise TypeError(
+        f"Compression component {{type(compressor).__name__}} does not implement "
+        "compress_documents() or transform_documents()."
     )
-    return ContextualCompressionRetriever(
-        base_compressor=compressor,
-        base_retriever=retriever,
-    )'''
+
+
+class _LLMSummaryCompressor:
+    """Summarize each retrieved document against the question."""
+
+    def __init__(self, llm):
+        self.llm = llm
+
+    def compress_documents(self, documents: list, query: str, callbacks=None) -> list:
+        from langchain_core.output_parsers import StrOutputParser
+        from langchain_core.prompts import ChatPromptTemplate
+
+        prompt = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                "Summarize the document for answering the question. Keep concrete facts, names, dates, numbers, and source-specific details. Return only the useful compressed context.",
+            ),
+            ("human", "Question:\\n{{query}}\\n\\nDocument:\\n{{document}}"),
+        ])
+        chain = prompt | self.llm | StrOutputParser()
+        summarized = []
+        for doc in documents:
+            text = str(getattr(doc, "page_content", "") or "")
+            if not text.strip():
+                continue
+            summary = str(chain.invoke({{"query": query, "document": text}})).strip()
+            if summary:
+                metadata = dict(getattr(doc, "metadata", {{}}) or {{}})
+                metadata["ms_rag_compression"] = "summary_compression"
+                summarized.append(Document(page_content=summary, metadata=metadata))
+        return summarized
+
+
+def _build_compression_llm():
+    return {llm_init}
+
+
+def compress_context(retriever, embeddings):
+    """Apply context compression: {techniques_label}."""
+    from langchain_classic.retrievers.document_compressors import (
+        DocumentCompressorPipeline,
+        EmbeddingsFilter,
+        LLMChainExtractor,
+    )
+    from langchain_community.document_transformers import EmbeddingsRedundantFilter
+
+    techniques = {techniques!r}
+    compressors = []
+    compression_llm = None
+
+    def require_llm():
+        nonlocal compression_llm
+        if compression_llm is None:
+            compression_llm = _build_compression_llm()
+        if compression_llm is None:
+            raise RuntimeError("Selected compression technique requires an LLM, but no LLM is configured.")
+        return compression_llm
+
+    for technique in techniques:
+        if technique == "llm_chain_extraction":
+            compressors.append(LLMChainExtractor.from_llm(require_llm()))
+        elif technique == "embeddings_filter":
+            if embeddings is None:
+                raise RuntimeError("Embeddings Filter compression requires the generated vector store embeddings.")
+            compressors.append(EmbeddingsFilter(embeddings=embeddings, similarity_threshold={threshold}))
+        elif technique == "redundancy_removal":
+            if embeddings is None:
+                raise RuntimeError("Redundancy Removal compression requires the generated vector store embeddings.")
+            compressors.append(EmbeddingsRedundantFilter(embeddings=embeddings))
+        elif technique == "contextual_compression":
+            if embeddings is not None:
+                compressors.append(EmbeddingsFilter(embeddings=embeddings, similarity_threshold={threshold}))
+            else:
+                compressors.append(LLMChainExtractor.from_llm(require_llm()))
+        elif technique == "document_compressor_pipeline":
+            if len(techniques) > 1:
+                continue
+            if embeddings is not None:
+                compressors.append(DocumentCompressorPipeline(transformers=[
+                    EmbeddingsRedundantFilter(embeddings=embeddings),
+                    EmbeddingsFilter(embeddings=embeddings, similarity_threshold={threshold}),
+                ]))
+            else:
+                compressors.append(LLMChainExtractor.from_llm(require_llm()))
+        elif technique == "summary_compression":
+            compressors.append(_LLMSummaryCompressor(require_llm()))
+        else:
+            raise RuntimeError(f"Unsupported compression technique: {{technique}}")
+
+    if not compressors:
+        raise RuntimeError("Compression was enabled, but no compressor could be built.")
+
+    compressor = compressors[0] if len(compressors) == 1 else DocumentCompressorPipeline(transformers=compressors)
+    return _SafeCompressionRetriever(base_compressor=compressor, base_retriever=retriever)'''
 
     def _render_llm_initializer(self, config: PipelineConfig) -> str:
         """Render the selected generation LLM constructor."""
@@ -1703,6 +2045,10 @@ def retrieve_graph_context(query: str, llm=None) -> str:
     def _render_lcel_chain(self, config: PipelineConfig) -> str:
         llm_init = self._render_llm_initializer(config)
         rag_type = config.rag_type.rag_type if config.rag_type else "naive_rag"
+        enhancements = list(config.query_enhancement or [])
+        enhancements_literal = repr(enhancements)
+        retrieval_strategy = config.retrieval.strategy if config.retrieval else "dense_vector"
+        keyword_strategy = retrieval_strategy in {"keyword_bm25", "tfidf", "hybrid", "ensemble"}
         special_chain = ""
         if rag_type == "speculative_rag":
             special_chain = '''
@@ -1756,20 +2102,134 @@ def build_rag_chain(retriever):
         )
 
     llm = {llm_init}
+    query_enhancements = {enhancements_literal}
+    keyword_sensitive_retrieval = {keyword_strategy!r}
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM_PROMPT),
         ("human", "Context passages:\\n\\n{{context}}\\n\\nQuestion: {{question}}"),
     ])
+
+    def _run_prompt(system_message: str, human_message: str, **values) -> str:
+        local_prompt = ChatPromptTemplate.from_messages([
+            ("system", system_message),
+            ("human", human_message),
+        ])
+        return str((local_prompt | llm | StrOutputParser()).invoke(values)).strip()
+
+    def _split_queries(text: str) -> list[str]:
+        queries = []
+        for line in str(text or "").splitlines():
+            cleaned = line.strip().lstrip("-*0123456789. )").strip()
+            if cleaned:
+                queries.append(cleaned)
+        return queries
+
+    def enhance_queries(question: str) -> list[str]:
+        queries = [question]
+        for technique in query_enhancements:
+            try:
+                if technique == "query_rewriting":
+                    rewritten = _run_prompt(
+                        "Rewrite the user question into a precise search query. Return only the rewritten query.",
+                        "{{question}}",
+                        question=queries[0],
+                    )
+                    if rewritten:
+                        queries = [rewritten]
+                elif technique == "query_expansion":
+                    expanded = _run_prompt(
+                        "Expand the query with synonyms and related domain terms. Return one concise expanded query.",
+                        "{{question}}",
+                        question=queries[0],
+                    )
+                    if expanded:
+                        queries = [expanded]
+                elif technique == "hyde":
+                    if keyword_sensitive_retrieval:
+                        continue
+                    hypothetical = _run_prompt(
+                        "Write a short hypothetical document that would answer the question. Return only the document.",
+                        "{{question}}",
+                        question=queries[0],
+                    )
+                    if hypothetical:
+                        queries = [hypothetical]
+                elif technique == "multi_query":
+                    generated = _run_prompt(
+                        "Generate 3 alternative retrieval queries for the question, one per line.",
+                        "{{question}}",
+                        question=question,
+                    )
+                    queries = [question] + _split_queries(generated)
+                elif technique == "step_back_prompting":
+                    step_back = _run_prompt(
+                        "Write one broader step-back question that helps answer the user question.",
+                        "{{question}}",
+                        question=question,
+                    )
+                    queries = [question] + ([step_back] if step_back else [])
+                elif technique == "sub_question_decomposition":
+                    generated = _run_prompt(
+                        "Break the question into 3 focused sub-questions for retrieval, one per line.",
+                        "{{question}}",
+                        question=question,
+                    )
+                    queries = [question] + _split_queries(generated)
+                elif technique == "rag_fusion":
+                    generated = _run_prompt(
+                        "Generate 4 diverse retrieval queries for reciprocal-rank fusion, one per line.",
+                        "{{question}}",
+                        question=question,
+                    )
+                    queries = [question] + _split_queries(generated)
+            except Exception as exc:
+                print(f"WARNING: Query enhancement {{technique!r}} failed; using current query set: {{exc}}")
+        deduped = []
+        seen = set()
+        for item in queries:
+            key = item.strip()
+            if key and key not in seen:
+                deduped.append(key)
+                seen.add(key)
+        if deduped != [question]:
+            print("\\nQuery enhancement trace:")
+            for idx, item in enumerate(deduped, start=1):
+                print(f"  {{idx}}. {{item[:240]}}")
+        return deduped or [question]
+
+    def retrieve_docs(question: str) -> list:
+        retrieval_queries = enhance_queries(question)
+        if len(retrieval_queries) == 1:
+            return retriever.invoke(retrieval_queries[0])
+
+        ranked = {{}}
+        docs_by_key = {{}}
+        use_rrf = "rag_fusion" in set(query_enhancements)
+        for query_variant in retrieval_queries:
+            docs = retriever.invoke(query_variant)
+            for rank, doc in enumerate(docs):
+                key = (
+                    getattr(doc, "metadata", {{}}).get("source"),
+                    getattr(doc, "metadata", {{}}).get("page"),
+                    getattr(doc, "page_content", "")[:120],
+                )
+                docs_by_key.setdefault(key, doc)
+                ranked[key] = ranked.get(key, 0.0) + (1.0 / (60 + rank) if use_rrf else 1.0 / (rank + 1))
+        return [docs_by_key[key] for key, _ in sorted(ranked.items(), key=lambda item: item[1], reverse=True)]
+
+    def prepare_inputs(question: str) -> dict:
+        return {{"context": format_docs(retrieve_docs(question)), "question": question}}
 {special_chain}
 
-    # LangChain LCEL chain: retrieve → format → prompt → LLM → parse
+    # LangChain LCEL chain: enhance → retrieve → format → prompt → LLM → parse
     rag_chain = (
-        {{"context": retriever | format_docs, "question": RunnablePassthrough()}}
+        RunnableLambda(prepare_inputs)
         | prompt
         | llm
         | StrOutputParser()
     )
+    setattr(rag_chain, "_ms_rag_retrieve_docs", retrieve_docs)
     return rag_chain'''
 
     def _render_agent_tool_helpers(self, config: PipelineConfig) -> str:
@@ -1920,14 +2380,35 @@ class GraphState(TypedDict):
     action: str
     route: str
     tool_results: list
+    trace: list[str]
 
 
 def build_rag_chain(retriever):
     """Build LangGraph agentic workflow for {rag_type}."""
     llm = {llm_init}
 
+    def append_trace(state: dict, message: str) -> list[str]:
+        return list(state.get("trace", []) or []) + [message]
+
+    def answer_is_unknown(answer: object) -> bool:
+        normalized = re.sub(r"[^a-z]+", " ", str(answer or "").lower()).strip()
+        return normalized in {{"i don t know", "i do not know"}}
+
+    def lexical_relevant_docs(question: str, docs: list, limit: int = 3) -> list:
+        stop_words = {{"about", "tell", "what", "which", "where", "when", "why", "how", "the", "and", "for", "with", "from", "this", "that"}}
+        terms = {{term for term in re.findall(r"[a-z0-9]+", question.lower()) if len(term) > 2 and term not in stop_words}}
+        scored = []
+        for doc in docs:
+            text = str(getattr(doc, "page_content", "") or "").lower()
+            score = sum(1 for term in terms if term in text)
+            if score:
+                scored.append((score, doc))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [doc for _, doc in scored[:limit]]
+
     def retrieve(state: GraphState) -> dict:
-        return {{"documents": retriever.invoke(state["question"])}}
+        docs = retriever.invoke(state["question"])
+        return {{"documents": docs, "trace": append_trace(state, f"retrieve: fetched {{len(docs)}} candidate document(s)")}}
 
     def direct_answer(state: GraphState) -> dict:
         prompt = ChatPromptTemplate.from_messages([
@@ -1935,10 +2416,15 @@ def build_rag_chain(retriever):
             ("human", "{{question}}"),
         ])
         chain = prompt | llm | StrOutputParser()
-        return {{"generation": chain.invoke({{"question": state["question"]}}), "documents": state.get("documents", [])}}
+        return {{
+            "generation": chain.invoke({{"question": state["question"]}}),
+            "documents": state.get("documents", []),
+            "trace": append_trace(state, "direct_answer: answered without retrieval context"),
+        }}
 
     def generate(state: GraphState) -> dict:
-        context = "\\n\\n".join(d.page_content for d in state.get("documents", []))
+        docs = list(state.get("documents", []) or [])
+        context = "\\n\\n".join(d.page_content for d in docs)
         tool_context = "\\n\\n".join(state.get("tool_results", []))
         if tool_context:
             context = (context + "\\n\\nTool results:\\n" + tool_context).strip()
@@ -1947,7 +2433,17 @@ def build_rag_chain(retriever):
             ("human", f"Context:\\n\\n{{context}}\\n\\nQuestion: {{{{question}}}}"),
         ])
         chain = prompt | llm | StrOutputParser()
-        return {{"generation": chain.invoke({{"question": state["question"]}})}}
+        answer = chain.invoke({{"question": state["question"]}})
+        trace = append_trace(state, f"generate: generated answer from {{len(docs)}} document(s)")
+        if docs and answer_is_unknown(answer):
+            retry_prompt = ChatPromptTemplate.from_messages([
+                ("system", SYSTEM_PROMPT + "\\n\\nSELF-RAG RETRY: Relevant context was retrieved. Before saying you do not know, extract the directly supported facts from the context. Do not use outside knowledge."),
+                ("human", f"Context:\\n\\n{{context}}\\n\\nQuestion: {{{{question}}}}"),
+            ])
+            retry_chain = retry_prompt | llm | StrOutputParser()
+            answer = retry_chain.invoke({{"question": state["question"]}})
+            trace = trace + ["generate: first answer was 'I don't know' despite retrieved evidence; ran one grounded retry"]
+        return {{"generation": answer, "trace": trace}}
 
     def rewrite_query(state: GraphState) -> dict:
         prompt = ChatPromptTemplate.from_messages([
@@ -1955,7 +2451,12 @@ def build_rag_chain(retriever):
             ("human", "{{question}}"),
         ])
         chain = prompt | llm | StrOutputParser()
-        return {{"question": chain.invoke({{"question": state["question"]}}), "rewrite_count": state.get("rewrite_count", 0) + 1}}
+        new_question = chain.invoke({{"question": state["question"]}}).strip()
+        return {{
+            "question": new_question,
+            "rewrite_count": state.get("rewrite_count", 0) + 1,
+            "trace": append_trace(state, f"rewrite_query: {{state['question']}} -> {{new_question}}"),
+        }}
 
     def llm_choice(messages: list[tuple[str, str]], values: dict, allowed: set[str], default: str) -> str:
         prompt = ChatPromptTemplate.from_messages(messages)
@@ -1972,12 +2473,21 @@ def build_rag_chain(retriever):
             ("human", "Question: {{question}}\\n\\nDocument: {{document}}"),
         ])
         chain = prompt | llm | StrOutputParser()
+        original_docs = list(state.get("documents", []))
         relevant = []
-        for doc in state.get("documents", []):
+        for doc in original_docs:
             grade = chain.invoke({{"question": state["question"], "document": doc.page_content}}).lower()
             if "yes" in grade:
                 relevant.append(doc)
-        return {{"documents": relevant}}
+        trace = append_trace(state, f"grade_documents: LLM relevance grader kept {{len(relevant)}}/{{len(original_docs)}} document(s)")
+        if not relevant and original_docs:
+            lexical = lexical_relevant_docs(state["question"], original_docs)
+            if lexical:
+                relevant = lexical
+                trace = trace + [f"grade_documents: safety kept {{len(lexical)}} document(s) with lexical query overlap after grader removed all evidence"]
+            else:
+                trace = trace + ["grade_documents: no relevant evidence found; graph may rewrite query"]
+        return {{"documents": relevant, "trace": trace}}
 
     def decide_to_generate(state: GraphState) -> str:
         if "{rag_type}" == "corrective_rag" and not state.get("documents"):
@@ -2001,7 +2511,7 @@ def build_rag_chain(retriever):
     def self_retrieval_need(state: GraphState) -> str:
         if "{rag_type}" != "self_rag":
             return "retrieve"
-        return llm_choice(
+        route = llm_choice(
             [
                 ("system", "Decide if this question needs the private document corpus. Answer exactly retrieve or direct."),
                 ("human", "{{question}}"),
@@ -2010,6 +2520,14 @@ def build_rag_chain(retriever):
             {{"retrieve", "direct"}},
             "retrieve",
         )
+        if route == "direct" and not is_obvious_direct_chat(state["question"]):
+            route = "retrieve"
+        return route
+
+    def record_retrieval_decision(state: GraphState) -> dict:
+        if "{rag_type}" == "self_rag":
+            return {{"trace": append_trace(state, "decide_retrieval_need: checking whether the private document corpus is needed")}}
+        return {{"trace": append_trace(state, "corrective_rag: retrieval is required before correction fallback")}}
 
     def corrective_fallback(state: GraphState) -> dict:
         if "{rag_type}" != "corrective_rag" or state.get("documents"):
@@ -2057,10 +2575,28 @@ def build_rag_chain(retriever):
             {{"retrieve", "rewrite", "answer"}},
             "retrieve",
         )
-        return {{"action": action}}
+        if action == "answer" and not is_obvious_direct_chat(state["question"]):
+            action = "retrieve"
+        return {{"action": action, "trace": append_trace(state, f"agentic_rag: planner selected action={{action}}")}}
+
+    def is_obvious_direct_chat(question: str) -> bool:
+        cleaned = " ".join(str(question or "").strip().lower().split())
+        return cleaned in {{
+            "hi",
+            "hello",
+            "hey",
+            "thanks",
+            "thank you",
+            "good morning",
+            "good afternoon",
+            "good evening",
+            "how are you",
+            "who are you",
+        }}
 
     def run_approved_tools_node(state: GraphState) -> dict:
-        return {{"tool_results": run_agent_tools(state["question"], state.get("documents", []), llm)}}
+        results = run_agent_tools(state["question"], state.get("documents", []), llm)
+        return {{"tool_results": results, "trace": append_trace(state, f"agentic_rag: approved tools returned {{len(results)}} result block(s)")}}
 
     def route_agent_action(state: GraphState) -> str:
         action = state.get("action", "retrieve")
@@ -2070,7 +2606,7 @@ def build_rag_chain(retriever):
 
     workflow = StateGraph(GraphState)
     if "{rag_type}" in ("self_rag", "corrective_rag"):
-        workflow.add_node("decide_retrieval_need", lambda state: {{}})
+        workflow.add_node("decide_retrieval_need", record_retrieval_decision)
         workflow.add_node("retrieve", retrieve)
         workflow.add_node("grade_documents", grade_documents)
         workflow.add_node("generate", generate)
@@ -2119,10 +2655,12 @@ def build_rag_chain(retriever):
         evaluators = config.evaluation.evaluators
         thresholds = config.evaluation.cicd_thresholds or {}
         evaluators_literal = repr(list(evaluators))
+        evaluator_model = config.evaluation.evaluator_llm_model or "gpt-4o-mini"
         lines = [
             "# ─── Evaluation Setup ─────────────────────────────────────────",
             f"# Enabled evaluators: {', '.join(evaluators)}",
             f"ENABLED_EVALUATORS = {evaluators_literal}",
+            f"EVALUATOR_LLM_MODEL = {evaluator_model!r}",
             "",
             "def _eval_context_texts(contexts: list) -> list[str]:",
             "    return [getattr(c, 'page_content', str(c)) for c in contexts if str(getattr(c, 'page_content', c)).strip()]",
@@ -2141,23 +2679,59 @@ def build_rag_chain(retriever):
             "    precision = len(ans_tokens & ctx_tokens) / len(ctx_tokens)",
             "    relevancy = len(ans_tokens & query_tokens) / len(ans_tokens) if query_tokens else 0.0",
             "    return {f'{key}context_recall': round(recall, 4), f'{key}context_precision': round(precision, 4), f'{key}answer_relevancy': round(relevancy, 4), f'{key}faithfulness': round(recall, 4)}",
+            "",
+            "def _finite_scores(scores: dict) -> dict:",
+            "    clean = {}",
+            "    for key, value in scores.items():",
+            "        if isinstance(value, (int, float)) and math.isfinite(float(value)):",
+            "            clean[str(key)] = float(value)",
+            "    return clean",
         ]
         if "ragas" in evaluators:
             lines += [
                 "",
+                "def _install_ragas_vertexai_compat_shim() -> None:",
+                "    import sys, types",
+                "    module_name = 'langchain_community.chat_models.vertexai'",
+                "    if module_name in sys.modules:",
+                "        return",
+                "    try:",
+                "        __import__(module_name)",
+                "        return",
+                "    except ModuleNotFoundError:",
+                "        pass",
+                "    try:",
+                "        from langchain_google_vertexai import ChatVertexAI",
+                "    except Exception:",
+                "        class ChatVertexAI:",
+                "            pass",
+                "    shim = types.ModuleType(module_name)",
+                "    shim.ChatVertexAI = ChatVertexAI",
+                "    sys.modules[module_name] = shim",
+                "",
                 "def evaluate_with_ragas(query: str, answer: str, contexts: list) -> dict:",
                 '    """Evaluate response using RAGAS metrics."""',
                 "    try:",
+                "        _install_ragas_vertexai_compat_shim()",
                 "        from ragas import evaluate",
-                "        from ragas.metrics import Faithfulness, AnswerRelevancy, ContextPrecision",
-                "        from datasets import Dataset",
-                "        dataset = Dataset.from_dict({",
-                '            "question": [query],',
-                '            "answer": [answer],',
-                '            "contexts": [[c.page_content for c in contexts]],',
-                "        })",
-                "        result = evaluate(dataset, metrics=[Faithfulness(), AnswerRelevancy(), ContextPrecision()])",
-                "        return result.to_pandas().to_dict('records')[0]",
+                "        from ragas import EvaluationDataset",
+                "        from ragas.metrics import Faithfulness, AnswerRelevancy, LLMContextPrecisionWithoutReference",
+                "        from langchain_openai import ChatOpenAI",
+                "        dataset = EvaluationDataset.from_list([{",
+                "            'user_input': query,",
+                "            'response': answer,",
+                "            'retrieved_contexts': _eval_context_texts(contexts) or [''],",
+                "        }])",
+                "        metrics = [Faithfulness(), AnswerRelevancy(), LLMContextPrecisionWithoutReference()]",
+                "        llm = ChatOpenAI(model=EVALUATOR_LLM_MODEL, temperature=0)",
+                "        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):",
+                "            result = evaluate(dataset, metrics=metrics, llm=llm, show_progress=False)",
+                "        records = result.to_pandas().to_dict('records') if hasattr(result, 'to_pandas') else []",
+                "        scores = _finite_scores(records[0] if records else {})",
+                "        if not scores:",
+                "            print('RAGAS returned no finite scores; using lexical fallback.')",
+                "            return _lexical_eval(query, answer, contexts, prefix='ragas')",
+                "        return scores",
                 "    except Exception as exc:",
                 "        print(f'RAGAS evaluation unavailable; using lexical fallback: {exc}')",
                 "        return _lexical_eval(query, answer, contexts, prefix='ragas')",
@@ -2172,19 +2746,25 @@ def build_rag_chain(retriever):
             "        try:",
             "            from deepeval.metrics import AnswerRelevancyMetric",
             "            from deepeval.test_case import LLMTestCase",
-            "            metric = AnswerRelevancyMetric(threshold=0.5)",
-            "            metric.measure(LLMTestCase(input=query, actual_output=answer, retrieval_context=_eval_context_texts(contexts) or ['']))",
-            "            scores['deepeval_answer_relevancy'] = float(metric.score or 0.0)",
+            "            metric = AnswerRelevancyMetric(threshold=0.5, async_mode=False, verbose_mode=False, model=EVALUATOR_LLM_MODEL)",
+            "            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):",
+            "                metric.measure(LLMTestCase(input=query, actual_output=answer, retrieval_context=_eval_context_texts(contexts) or ['']))",
+            "            deepeval_scores = _finite_scores({'answer_relevancy': float(metric.score), 'deepeval_answer_relevancy': float(metric.score)})",
+            "            if deepeval_scores:",
+            "                scores.update(deepeval_scores)",
+            "            else:",
+            "                print('DeepEval returned no finite scores; using lexical fallback.')",
+            "                scores.update(_lexical_eval(query, answer, contexts, prefix='deepeval'))",
             "        except Exception as exc:",
             "            print(f'DeepEval unavailable; using lexical fallback: {exc}')",
             "            scores.update(_lexical_eval(query, answer, contexts, prefix='deepeval'))",
             "    if 'trulens' in ENABLED_EVALUATORS:",
             "        try:",
-            "            from trulens.apps.langchain import TruChain",
-            "            _ = TruChain",
-            "            scores['trulens_package_available'] = 1.0",
+            "            from trulens.core import Feedback, Select",
+            "            _ = (Feedback, Select)",
+            "            scores['trulens_core_package_available'] = 1.0",
             "        except Exception as exc:",
-            "            print(f'TruLens package unavailable; using groundedness scores: {exc}')",
+            "            print(f'TruLens core package unavailable; using groundedness scores: {exc}')",
             "        scores.update(_lexical_eval(query, answer, contexts, prefix='trulens'))",
             "    if 'langsmith' in ENABLED_EVALUATORS:",
             "        if os.getenv('LANGCHAIN_API_KEY'):",
@@ -2253,14 +2833,37 @@ def build_rag_chain(retriever):
                 "            return False",
                 "    return True",
             ]
+        lines += [
+            "",
+            "def print_evaluation_results(scores: dict) -> None:",
+            '    """Print evaluation scores in a readable terminal format."""',
+            "    if not scores:",
+            "        print('Evaluation Results: no scores returned.')",
+            "        return",
+            "    print('\\nEvaluation Results')",
+            "    print('-' * 72)",
+            "    for metric, score in sorted(scores.items()):",
+            "        try:",
+            "            rendered = f'{float(score):.4f}'",
+            "        except (TypeError, ValueError):",
+            "            rendered = str(score)",
+            "        print(f'{metric:<48} {rendered:>12}')",
+            "    print('-' * 72)",
+        ]
         return "\n".join(lines)
 
     def _render_main(self, config: PipelineConfig) -> str:
         has_eval = config.evaluation_enabled and config.evaluation and bool(config.evaluation.evaluators if config.evaluation else [])
+        has_cicd_gate = bool(has_eval and config.evaluation and config.evaluation.cicd_thresholds)
         eval_call = """
         # Evaluate response
         scores = evaluate_response(query, answer, context_docs)
-        print(f"Evaluation scores: {scores}")""" if has_eval else ""
+        print_evaluation_results(scores)"""
+        if has_cicd_gate:
+            eval_call += """
+        check_cicd_gate(scores)"""
+        if not has_eval:
+            eval_call = ""
         is_graphrag = bool(config.rag_type and config.rag_type.rag_type == "graphrag")
         graph_ingest = ""
         if is_graphrag:
@@ -2271,6 +2874,17 @@ def build_rag_chain(retriever):
         graph = build_graph_index(chunks, llm=graph_llm)
         persist_graph_index(graph)
         print(f"GraphRAG graph complete: {{len(graph.get('nodes', []))}} entities, {{len(graph.get('edges', []))}} relationships, {{len(graph.get('communities', []))}} communities.")'''
+        compression_apply = ""
+        reranking_apply = ""
+        if config.reranking_enabled and config.reranking:
+            reranking_apply = '''
+    retriever = apply_reranking(retriever)'''
+        if config.compression_enabled and config.compression:
+            compression_apply = '''
+    retriever = compress_context(
+        retriever,
+        getattr(vector_store, "_ms_rag_embeddings", None),
+    )'''
 
         return f'''# ─── Main Entry Point ─────────────────────────────────────────
 def main():
@@ -2303,6 +2917,8 @@ def main():
 
     # Build retriever and RAG chain
     retriever = build_retriever(vector_store)
+{reranking_apply}
+{compression_apply}
     rag_chain = build_rag_chain(retriever)
 
     if args.query:
@@ -2310,7 +2926,7 @@ def main():
         print(f"\\nQuery: {{args.query}}")
         answer = rag_chain.invoke(args.query)
         print(f"\\nAnswer: {{answer}}")
-        context_docs = retriever.invoke(args.query){eval_call}
+        context_docs = getattr(rag_chain, "_ms_rag_retrieve_docs", retriever.invoke)(args.query){eval_call}
         return
 
     # Interactive query loop
@@ -2321,7 +2937,7 @@ def main():
             if not query:
                 continue
             answer = rag_chain.invoke(query)
-            context_docs = retriever.invoke(query)
+            context_docs = getattr(rag_chain, "_ms_rag_retrieve_docs", retriever.invoke)(query)
             print(f"\\nAnswer: {{answer}}\\n")
         except KeyboardInterrupt:
             print("\\nGoodbye.")

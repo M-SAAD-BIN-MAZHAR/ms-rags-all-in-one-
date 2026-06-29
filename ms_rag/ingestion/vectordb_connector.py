@@ -38,6 +38,12 @@ from ms_rag.utils.exceptions import ConnectionError as MSRAGConnectionError
 from ms_rag.utils.metadata import sanitize_documents
 
 
+def _safe_path_segment(value: str) -> str:
+    """Return a filesystem-safe directory segment for local DB paths."""
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in value.strip())
+    return cleaned or "ms_rag"
+
+
 # ---------------------------------------------------------------------------
 # Vector DB definitions
 # ---------------------------------------------------------------------------
@@ -246,6 +252,14 @@ class VectorDBConnector:
             console=console,
         )
 
+        if db_type == "chroma" and not (
+            connection_params.get("CHROMA_PERSIST_DIRECTORY")
+            or connection_params.get("CHROMA_PERSIST_DIR")
+        ):
+            connection_params["CHROMA_PERSIST_DIRECTORY"] = str(
+                Path("./chroma_db") / _safe_path_segment(collection_name)
+            )
+
         config = VectorDBConfig(
             db_type=db_type,
             connection_params=connection_params,
@@ -332,8 +346,9 @@ class VectorDBConnector:
             persist_dir = (
                 params.get("CHROMA_PERSIST_DIRECTORY")
                 or params.get("CHROMA_PERSIST_DIR")
-                or "./chroma_db"
+                or str(Path("./chroma_db") / _safe_path_segment(config.collection_name))
             )
+            config.connection_params["CHROMA_PERSIST_DIRECTORY"] = persist_dir
             return Chroma(
                 collection_name=config.collection_name,
                 embedding_function=embeddings,  # type: ignore[arg-type]
@@ -346,12 +361,13 @@ class VectorDBConnector:
 
         if db_type == "pinecone":
             from langchain_pinecone import PineconeVectorStore  # noqa: PLC0415
-            import os  # noqa: PLC0415
-            os.environ.setdefault("PINECONE_API_KEY", params.get("PINECONE_API_KEY", ""))
-            return PineconeVectorStore(
-                index_name=params.get("PINECONE_INDEX_NAME", config.collection_name),
-                embedding=embeddings,  # type: ignore[arg-type]
-            )
+            from ms_rag.utils.credentials import temporary_env  # noqa: PLC0415
+
+            with temporary_env({"PINECONE_API_KEY": params.get("PINECONE_API_KEY", "")}):
+                return PineconeVectorStore(
+                    index_name=params.get("PINECONE_INDEX_NAME", config.collection_name),
+                    embedding=embeddings,  # type: ignore[arg-type]
+                )
 
         if db_type == "qdrant":
             from langchain_qdrant import QdrantVectorStore  # noqa: PLC0415
@@ -687,13 +703,14 @@ class VectorDBConnector:
             # Real connection test happens in get_vector_store()
             pass
 
-    @staticmethod
-    def _resolved_connection_params(config: VectorDBConfig) -> dict[str, str]:
+    def _resolved_connection_params(self, config: VectorDBConfig) -> dict[str, str]:
         """Resolve sanitized env-var markers in connection_params to runtime values."""
+        from ms_rag.utils.credentials import resolve_credential  # noqa: PLC0415
+
         resolved: dict[str, str] = {}
         for key, value in config.connection_params.items():
             if value == key:
-                resolved[key] = os.getenv(key, "")
+                resolved[key] = resolve_credential(key, self._credential_store, config.db_type) or ""
             else:
                 resolved[key] = value
         return resolved

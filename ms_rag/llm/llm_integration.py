@@ -10,7 +10,7 @@ Requirement 17.3: generated code uses LangGraph for agentic RAG types
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, TypedDict
 import warnings
 
 from ms_rag.models import PipelineConfig, RetrievalConfig
@@ -22,6 +22,23 @@ from ms_rag.utils.credentials import (
 )
 from ms_rag.utils.telemetry import TelemetryReporter
 from ms_rag.workflow.rag_type_selector import LANGGRAPH_TYPES
+
+
+class GraphState(TypedDict, total=False):
+    """Shared LangGraph state for agentic RAG variants.
+
+    This is intentionally module-scoped because LangGraph inspects node
+    function annotations with global type-hint resolution while compiling.
+    """
+
+    question: str
+    generation: str
+    documents: list
+    rewrite_count: int
+    tool_results: list[str]
+    action: str
+    route: str
+    trace: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +467,7 @@ def build_session_runtime_from_vector_store(
             keyword_corpus = cached
         elif config.document_sources and config.loader_map and config.chunking is not None:
             try:
-                keyword_corpus = IngestionOrchestrator().build_keyword_corpus(
+                keyword_corpus = IngestionOrchestrator(credential_store=credential_store).build_keyword_corpus(
                     sources=config.document_sources,
                     loader_map=config.loader_map,
                     chunking_config=config.chunking,
@@ -474,7 +491,7 @@ def build_session_runtime_from_vector_store(
         has_chunk_state = bool(getattr(vector_store, "_ms_rag_chunk_documents", None))
         if not (has_parent_state and has_chunk_state) and config.document_sources and config.loader_map and config.chunking is not None:
             try:
-                state = IngestionOrchestrator().build_retrieval_state(
+                state = IngestionOrchestrator(credential_store=credential_store).build_retrieval_state(
                     sources=config.document_sources,
                     loader_map=config.loader_map,
                     chunking_config=config.chunking,
@@ -499,7 +516,7 @@ def build_session_runtime_from_vector_store(
             setattr(vector_store, "_ms_rag_graph_index", graph)
         except Exception as exc:  # noqa: BLE001
             if config.document_sources and config.loader_map and config.chunking is not None:
-                state = IngestionOrchestrator().build_retrieval_state(
+                state = IngestionOrchestrator(credential_store=credential_store).build_retrieval_state(
                     sources=config.document_sources,
                     loader_map=config.loader_map,
                     chunking_config=config.chunking,
@@ -534,6 +551,11 @@ def build_session_runtime_from_vector_store(
         llm=llm,
         embeddings=embeddings,
     )
+    compression_active = bool(
+        config.compression_enabled
+        and config.compression
+        and retriever is not base_retriever
+    )
 
     if config.rag_type and config.rag_type.requires_langgraph:
         rag_chain = build_langgraph_workflow(
@@ -559,6 +581,7 @@ def build_session_runtime_from_vector_store(
         "retriever": retriever,
         "llm": llm,
         "rag_chain": rag_chain,
+        "compression_active": compression_active,
     }
 
 
@@ -587,6 +610,63 @@ def _retrieval_uses_advanced_state(config: PipelineConfig | RetrievalConfig | No
         sub_ids = retrieval.ensemble_sub_retrievers or ["dense_vector", "keyword_bm25"]
         return any(sub_id in advanced for sub_id in sub_ids)
     return False
+
+
+def _select_primary_retrieval_query(
+    *,
+    original_query: str,
+    enhanced_queries: list[str],
+    retrieval: RetrievalConfig | None,
+) -> str:
+    """Choose the query string that should hit the configured retriever."""
+    if _retrieval_uses_keyword_corpus(retrieval):
+        return original_query
+    return enhanced_queries[0] if enhanced_queries else original_query
+
+
+def _append_trace(state: dict, message: str) -> list[str]:
+    """Append one visible workflow trace message to LangGraph state."""
+    return list(state.get("trace", []) or []) + [message]
+
+
+def _lexically_relevant_docs(question: str, docs: list, limit: int = 3) -> list:
+    """Keep obvious evidence when an LLM grader over-filters all documents."""
+    stop_words = {
+        "about",
+        "tell",
+        "what",
+        "which",
+        "where",
+        "when",
+        "why",
+        "how",
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "this",
+        "that",
+    }
+    query_terms = {
+        term
+        for term in re.findall(r"[a-z0-9]+", question.lower())
+        if len(term) > 2 and term not in stop_words
+    }
+    scored: list[tuple[int, object]] = []
+    for doc in docs:
+        text = str(getattr(doc, "page_content", "") or "").lower()
+        score = sum(1 for term in query_terms if term in text)
+        if score:
+            scored.append((score, doc))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [doc for _, doc in scored[:limit]]
+
+
+def _answer_is_unknown(answer: object) -> bool:
+    """Return True for the framework's exact grounded-no-answer response."""
+    normalized = re.sub(r"[^a-z]+", " ", str(answer or "").lower()).strip()
+    return normalized in {"i don t know", "i do not know"}
 
 
 def invoke_rag_chain(rag_chain: object, query: str, *, requires_langgraph: bool) -> str:
@@ -643,19 +723,9 @@ def build_langgraph_workflow(
         )
 
     from langgraph.graph import StateGraph, END  # noqa: PLC0415
-    from typing import TypedDict  # noqa: PLC0415
     from langchain_core.prompts import ChatPromptTemplate  # noqa: PLC0415
     from langchain_core.output_parsers import StrOutputParser  # noqa: PLC0415
     from ms_rag.agent.tools import AgentToolRuntime, ToolExecutionError  # noqa: PLC0415
-
-    class GraphState(TypedDict):
-        question: str
-        generation: str
-        documents: list
-        rewrite_count: int
-        tool_results: list[str]
-        action: str
-        route: str
 
     tool_runtime = AgentToolRuntime(agent_tools_config, credential_store, llm)
 
@@ -663,7 +733,10 @@ def build_langgraph_workflow(
 
     def retrieve(state: GraphState) -> dict:
         docs = retriever.invoke(state["question"])  # type: ignore[union-attr]
-        return {"documents": docs}
+        return {
+            "documents": docs,
+            "trace": _append_trace(state, f"retrieve: fetched {len(docs)} candidate document(s)"),
+        }
 
     def direct_answer(state: GraphState) -> dict:
         prompt = ChatPromptTemplate.from_messages([
@@ -672,12 +745,15 @@ def build_langgraph_workflow(
         ])
         chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
         answer = chain.invoke({"question": state["question"]})
-        return {"generation": answer, "documents": list(state.get("documents", []))}
+        return {
+            "generation": answer,
+            "documents": list(state.get("documents", [])),
+            "trace": _append_trace(state, "direct_answer: answered without retrieval context"),
+        }
 
     def generate(state: GraphState) -> dict:
-        context = "\n\n".join(
-            d.page_content for d in state.get("documents", [])
-        )
+        docs = list(state.get("documents", []) or [])
+        context = "\n\n".join(d.page_content for d in docs)
         tool_context = "\n\n".join(state.get("tool_results", []))
         if tool_context:
             context = f"{context}\n\nTool results:\n{tool_context}".strip()
@@ -687,7 +763,32 @@ def build_langgraph_workflow(
         ])
         chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
         answer = chain.invoke({"question": state["question"]})
-        return {"generation": answer}
+        trace = _append_trace(
+            state,
+            f"generate: generated answer from {len(docs)} document(s)"
+            + (f" and {len(state.get('tool_results', []))} tool result(s)" if state.get("tool_results") else ""),
+        )
+        if docs and _answer_is_unknown(answer):
+            retry_prompt = ChatPromptTemplate.from_messages([
+                (
+                    "system",
+                    system_prompt
+                    + "\n\nSELF-RAG RETRY: Relevant context was retrieved. "
+                    "Before saying you do not know, extract the directly supported facts from the context. "
+                    "Do not use outside knowledge.",
+                ),
+                ("human", f"Context:\n\n{context}\n\nQuestion: {{question}}"),
+            ])
+            retry_chain = retry_prompt | llm | StrOutputParser()  # type: ignore[operator]
+            retry_answer = retry_chain.invoke({"question": state["question"]})
+            trace = trace + [
+                "generate: first answer was 'I don't know' despite retrieved evidence; ran one grounded retry"
+            ]
+            answer = retry_answer
+        return {
+            "generation": answer,
+            "trace": trace,
+        }
 
     def rewrite_query(state: GraphState) -> dict:
         rewrite_prompt = ChatPromptTemplate.from_messages([
@@ -699,6 +800,7 @@ def build_langgraph_workflow(
         return {
             "question": new_q.strip(),
             "rewrite_count": state.get("rewrite_count", 0) + 1,
+            "trace": _append_trace(state, f"rewrite_query: {state['question']} -> {new_q.strip()}"),
         }
 
     def _contains_any(text: str, words: set[str]) -> bool:
@@ -724,6 +826,7 @@ def build_langgraph_workflow(
             ("human", "Question: {question}\n\nDocument: {document}"),
         ])
         chain = grade_prompt | llm | StrOutputParser()  # type: ignore[operator]
+        original_docs = list(state.get("documents", []))
         relevant = []
         for doc in state["documents"]:
             grade = chain.invoke({
@@ -732,7 +835,20 @@ def build_langgraph_workflow(
             }).lower()
             if "yes" in grade:
                 relevant.append(doc)
-        return {"documents": relevant}
+        trace = _append_trace(
+            state,
+            f"grade_documents: LLM relevance grader kept {len(relevant)}/{len(original_docs)} document(s)",
+        )
+        if not relevant and original_docs:
+            lexical = _lexically_relevant_docs(state["question"], original_docs)
+            if lexical:
+                trace = trace + [
+                    f"grade_documents: safety kept {len(lexical)} document(s) with lexical query overlap after grader removed all evidence"
+                ]
+                relevant = lexical
+            else:
+                trace = trace + ["grade_documents: no relevant evidence found; graph may rewrite query"]
+        return {"documents": relevant, "trace": trace}
 
     # ── Routing functions ──────────────────────────────────────────────
 
@@ -772,6 +888,21 @@ def build_langgraph_workflow(
 
     if rag_type in ("self_rag", "corrective_rag"):
         # Self-RAG / CRAG: retrieve → grade → generate → check hallucination
+        def record_retrieval_decision(state: GraphState) -> dict:
+            if rag_type == "self_rag":
+                return {
+                    "trace": _append_trace(
+                        state,
+                        "decide_retrieval_need: checking whether the private document corpus is needed",
+                    )
+                }
+            return {
+                "trace": _append_trace(
+                    state,
+                    "corrective_rag: retrieval is required before correction fallback",
+                )
+            }
+
         def decide_retrieval_need(state: GraphState) -> str:
             if rag_type != "self_rag":
                 return "retrieve"
@@ -789,6 +920,8 @@ def build_langgraph_workflow(
                 {"retrieve", "direct"},
                 "retrieve",
             )
+            if route == "direct" and not _is_obvious_direct_chat(question):
+                route = "retrieve"
             return route
 
         def corrective_web_fallback(state: GraphState) -> dict:
@@ -820,7 +953,7 @@ def build_langgraph_workflow(
         workflow.add_node("generate", generate)
         workflow.add_node("rewrite_query", rewrite_query)
 
-        workflow.add_node("decide_retrieval_need", lambda state: {})
+        workflow.add_node("decide_retrieval_need", record_retrieval_decision)
         workflow.set_entry_point("decide_retrieval_need")
         workflow.add_conditional_edges(
             "decide_retrieval_need",
@@ -879,7 +1012,13 @@ def build_langgraph_workflow(
             )
             if planner_action == "tools" and not trigger_notes:
                 planner_action = "retrieve"
-            return {"tool_results": [], "action": planner_action}
+            if planner_action == "answer" and not _is_obvious_direct_chat(question):
+                planner_action = "retrieve"
+            return {
+                "tool_results": [],
+                "action": planner_action,
+                "trace": _append_trace(state, f"agentic_rag: planner selected action={planner_action}"),
+            }
 
         def route_agent_action(state: GraphState) -> str:
             action = str(state.get("action") or "retrieve")
@@ -930,7 +1069,10 @@ def build_langgraph_workflow(
                     results.append(f"Web search results:\n{web_results}")
                 except ToolExecutionError as exc:
                     raise RuntimeError(f"Configured Web Search Tool failed: {exc}") from exc
-            return {"tool_results": results}
+            return {
+                "tool_results": results,
+                "trace": _append_trace(state, f"agentic_rag: approved tools returned {len(results)} result block(s)"),
+            }
 
         workflow.add_node("query_analysis", query_analysis)
         workflow.add_node("retrieve", retrieve)
@@ -983,6 +1125,14 @@ def build_langgraph_workflow(
                 return "deep"
             return route
 
+        def record_adaptive_route(state: GraphState) -> dict:
+            return {
+                "trace": _append_trace(
+                    state,
+                    "adaptive_rag: routing query as direct, standard retrieval, or deep retrieval",
+                )
+            }
+
         def deep_retrieve(state: GraphState) -> dict:
             original_question = state["question"]
             rewritten = rewrite_query(state)
@@ -1004,13 +1154,17 @@ def build_langgraph_workflow(
                 "documents": merged,
                 "question": rewritten_question,
                 "rewrite_count": state.get("rewrite_count", 0) + 1,
+                "trace": _append_trace(
+                    state,
+                    f"adaptive_rag: deep retrieval merged {len(merged)} document(s) from original and rewritten queries",
+                ),
             }
 
         workflow.add_node("retrieve", retrieve)
         workflow.add_node("deep_retrieve", deep_retrieve)
         workflow.add_node("generate", generate)
         workflow.add_node("direct_answer", direct_answer)
-        workflow.add_node("route_question", lambda state: {})
+        workflow.add_node("route_question", record_adaptive_route)
 
         workflow.set_entry_point("route_question")
         workflow.add_conditional_edges(
@@ -1085,8 +1239,16 @@ def process_query(
                 )
                 enhanced_queries = [query]
 
-        # Use the first enhanced query for retrieval
-        primary_query = enhanced_queries[0] if enhanced_queries else query
+        # HyDE is useful for dense embedding retrieval, but keyword-only
+        # retrievers need the user's exact terms. Do not replace BM25/TF-IDF
+        # queries with a hypothetical document.
+        primary_query = _select_primary_retrieval_query(
+            original_query=query,
+            enhanced_queries=enhanced_queries,
+            retrieval=cfg.retrieval,
+        )
+        ss.last_enhanced_queries = list(enhanced_queries)
+        ss.last_primary_retrieval_query = primary_query
 
         # Step 2: invoke the RAG chain
         if ss.rag_chain is None:
@@ -1097,48 +1259,140 @@ def process_query(
                 cfg.rag_type and cfg.rag_type.requires_langgraph
             )
             if (
-                len(enhanced_queries) > 1
+                (len(enhanced_queries) > 1 or primary_query != query)
                 and not requires_langgraph
                 and ss.retriever is not None
                 and ss.llm is not None
             ):
                 use_reciprocal_rank_fusion = "rag_fusion" in set(cfg.query_enhancement or [])
+                ss.last_rag_trace = [
+                    "standard_rag: generated multiple retrieval queries",
+                    (
+                        "standard_rag: merged retrieved evidence with reciprocal-rank fusion"
+                        if use_reciprocal_rank_fusion
+                        else "standard_rag: merged retrieved evidence from enhanced queries"
+                    ),
+                    "standard_rag: generated the answer from merged context",
+                ]
                 answer = _answer_from_merged_queries(
                     original_query=query,
-                    retrieval_queries=enhanced_queries,
+                    retrieval_queries=(
+                        enhanced_queries if len(enhanced_queries) > 1 else [primary_query]
+                    ),
                     retriever=ss.retriever,
                     llm=ss.llm,
                     system_prompt=cfg.system_prompt,
                     use_reciprocal_rank_fusion=use_reciprocal_rank_fusion,
                 )
             else:
-                answer = invoke_rag_chain(
-                    ss.rag_chain,
-                    primary_query,
-                    requires_langgraph=requires_langgraph,
-                )
+                if requires_langgraph:
+                    result = ss.rag_chain.invoke({"question": primary_query, "trace": []})  # type: ignore[union-attr]
+                    if isinstance(result, dict):
+                        ss.last_rag_trace = list(result.get("trace", []) or [])
+                        answer = str(result.get("generation", result))
+                    else:
+                        ss.last_rag_trace = []
+                        answer = str(result)
+                else:
+                    ss.last_rag_trace = [
+                        "standard_rag: retrieved context using the selected retriever",
+                        "standard_rag: generated the answer with the selected LLM",
+                    ]
+                    answer = invoke_rag_chain(
+                        ss.rag_chain,
+                        primary_query,
+                        requires_langgraph=requires_langgraph,
+                    )
         except Exception as exc:  # noqa: BLE001
             raise exc  # re-raise so QueryLoop can handle it
 
         # Step 3: Evaluation (if enabled)
+        context_docs = []
+        if ss.retriever:
+            try:
+                context_docs = ss.retriever.invoke(primary_query)
+                ss.last_retrieved_context_count = len(context_docs)
+                ss.last_retrieved_context_preview = [
+                    str(getattr(doc, "page_content", "") or "")[:240]
+                    for doc in context_docs[:3]
+                ]
+                trace = _collect_retriever_trace(ss.retriever)
+                ss.last_rerank_trace = trace.get("rerank", {})
+                ss.last_compression_trace = trace.get("compression", {})
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"Could not collect retrieval trace for this query: {exc}",
+                    stacklevel=2,
+                )
+                ss.last_retrieved_context_count = 0
+                ss.last_retrieved_context_preview = []
+                ss.last_rerank_trace = {}
+                ss.last_compression_trace = {}
+
         if evaluation_framework and cfg.evaluation_enabled and cfg.evaluation:
             try:
-                context_docs = []
-                if ss.retriever:
-                    context_docs = ss.retriever.invoke(primary_query)
-                evaluation_framework.evaluate(  # type: ignore[union-attr]
+                scores = evaluation_framework.evaluate(  # type: ignore[union-attr]
                     query=query,
                     context=context_docs,
                     answer=answer,
                     config=cfg.evaluation,
                 )
+                ss.last_evaluation_scores = dict(scores or {})
+                ss.last_evaluation_warning = "" if scores else "Evaluation ran but returned no scores."
             except Exception as exc:  # noqa: BLE001
+                ss.last_evaluation_scores = {}
+                ss.last_evaluation_warning = f"Evaluation failed for this query: {exc}"
                 warnings.warn(
                     f"Evaluation failed for this query; answer returned without scores: {exc}",
                     stacklevel=2,
                 )
+        else:
+            ss.last_evaluation_scores = {}
+            ss.last_evaluation_warning = ""
 
     return answer
+
+
+def _collect_retriever_trace(retriever: object) -> dict[str, dict[str, object]]:
+    """Collect trace counters from nested retriever wrappers."""
+    trace: dict[str, dict[str, object]] = {}
+    current = retriever
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if hasattr(current, "_ms_rag_pre_rerank_count") or hasattr(current, "_ms_rag_post_rerank_count"):
+            trace["rerank"] = {
+                "before": getattr(current, "_ms_rag_pre_rerank_count", None),
+                "after": getattr(current, "_ms_rag_post_rerank_count", None),
+            }
+        if hasattr(current, "_ms_rag_pre_compression_count") or hasattr(current, "_ms_rag_post_compression_count"):
+            trace["compression"] = {
+                "before": getattr(current, "_ms_rag_pre_compression_count", None),
+                "after": getattr(current, "_ms_rag_post_compression_count", None),
+                "fallback": bool(getattr(current, "_ms_rag_compression_fallback", False)),
+            }
+        current = getattr(current, "base_retriever", None)
+    return trace
+
+
+def _is_obvious_direct_chat(question: str) -> bool:
+    """Return True only for safe context-free conversational turns."""
+    cleaned = " ".join(str(question or "").strip().lower().split())
+    if not cleaned:
+        return True
+    direct_phrases = {
+        "hi",
+        "hello",
+        "hey",
+        "thanks",
+        "thank you",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "how are you",
+        "who are you",
+    }
+    return cleaned in direct_phrases
 
 
 def _answer_from_merged_queries(

@@ -56,6 +56,28 @@ ms-rags --load session.json</code></pre>
           </section>
 
           <section>
+            <h2>External Tools You May Need</h2>
+            <p>
+              The Python production install gives you the package integrations, but some
+              document extractors also need command-line tools installed on the machine.
+              MS-RAGS(ALL-IN-ONE) checks your selected loaders and document sources before
+              ingestion, shows what is missing, and asks before continuing.
+            </p>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Tool</th><th>Needed when</th><th>What to do</th></tr></thead>
+                <tbody>
+                  <tr><td>Poppler <code>pdfinfo</code></td><td>You choose UnstructuredPDFLoader for PDFs, especially scanned/image PDFs.</td><td>Install Poppler and add its <code>bin</code> folder to <code>PATH</code>.</td></tr>
+                  <tr><td>Tesseract OCR</td><td>You want local OCR for scanned PDFs or image files.</td><td>Install Tesseract and add it to <code>PATH</code>.</td></tr>
+                  <tr><td>Java</td><td>You choose TabulaLoader for PDF table extraction.</td><td>Install a JRE/JDK so <code>java</code> works in the terminal.</td></tr>
+                  <tr><td>Ghostscript</td><td>You choose CamelotLoader for table extraction from PDFs.</td><td>Install Ghostscript so <code>gs</code> or <code>gswin64c</code> is available.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>If you do not want local OCR/PDF tools, choose LlamaParseLoader for complex PDFs and provide <code>LLAMA_CLOUD_API_KEY</code>. Use cloud parsing only when your data policy allows documents to leave the local machine.</p>
+          </section>
+
+          <section>
             <h2>Run With Docker</h2>
             <p>Use Docker when you want a repeatable container environment instead of installing Python packages directly on the host machine.</p>
             <div class="table-wrap">
@@ -103,12 +125,14 @@ ms-rags --load session.json</code></pre>
                 <thead><tr><th>Command</th><th>Behavior</th></tr></thead>
                 <tbody>
                   <tr><td><code>/config</code></td><td>Show the full pipeline configuration summary.</td></tr>
+                  <tr><td><code>/settings</code> or <code>/edit</code></td><td>Edit live query enhancement, reranking, or compression settings and rebuild the runtime.</td></tr>
                   <tr><td><code>/save</code></td><td>Save the session config JSON for later resumption.</td></tr>
                   <tr><td><code>/help</code></td><td>Show available query-loop commands.</td></tr>
                   <tr><td><code>/exit</code> or <code>/quit</code></td><td>Ask for confirmation before ending the query loop.</td></tr>
                 </tbody>
               </table>
             </div>
+            <p>When query enhancement is enabled, the terminal prints a Query Enhancement Trace with the original query, generated variants, and the exact retrieval query.</p>
           </section>
 
           <section>

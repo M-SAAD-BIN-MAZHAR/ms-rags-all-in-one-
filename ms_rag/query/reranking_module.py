@@ -15,6 +15,7 @@ Requirement 13:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import warnings
 
 try:
@@ -287,8 +288,7 @@ class RerankingModule:
     # ------------------------------------------------------------------
 
     def _rerank_cross_encoder(self, query: str, docs: list, config: RerankingConfig) -> list:
-        from sentence_transformers import CrossEncoder  # noqa: PLC0415
-        model = CrossEncoder(config.model_id)
+        model = _get_cross_encoder(config.model_id)
         pairs = [(query, doc.page_content) for doc in docs]
         scores = model.predict(pairs)
         ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
@@ -310,8 +310,7 @@ class RerankingModule:
         return [docs[result.index] for result in response.results]
 
     def _rerank_bge(self, query: str, docs: list, config: RerankingConfig) -> list:
-        from sentence_transformers import CrossEncoder  # noqa: PLC0415
-        model = CrossEncoder(config.model_id)
+        model = _get_cross_encoder(config.model_id)
         pairs = [(query, doc.page_content) for doc in docs]
         scores = model.predict(pairs)
         ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
@@ -414,3 +413,11 @@ class RerankingModule:
                 console.print("[red]  ✗ Please enter a valid integer.[/red]")  # type: ignore[union-attr]
             except ValidationError as exc:
                 console.print(f"[red]  ✗ {exc}[/red]")  # type: ignore[union-attr]
+
+
+@lru_cache(maxsize=8)
+def _get_cross_encoder(model_id: str) -> object:
+    """Load and cache local CrossEncoder rerankers for the process lifetime."""
+    from sentence_transformers import CrossEncoder  # noqa: PLC0415
+
+    return CrossEncoder(model_id)

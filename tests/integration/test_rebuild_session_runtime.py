@@ -80,11 +80,18 @@ class TestRebuildSessionRuntime:
 
         runtime = rebuild_session_runtime(config, store)
 
-        assert set(runtime.keys()) == {"vector_store", "retriever", "llm", "rag_chain"}
+        assert set(runtime.keys()) == {
+            "vector_store",
+            "retriever",
+            "llm",
+            "rag_chain",
+            "compression_active",
+        }
         assert runtime["vector_store"] is mock_store
         assert runtime["retriever"] is mock_retriever
         assert runtime["llm"] is mock_llm
         assert runtime["rag_chain"] is mock_chain
+        assert runtime["compression_active"] is False
         mock_build_chain.assert_called_once()
 
     @patch("ms_rag.llm.llm_integration.build_langgraph_workflow")

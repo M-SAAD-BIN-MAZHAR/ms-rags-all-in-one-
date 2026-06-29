@@ -129,13 +129,56 @@ class AgentToolConfigurator:
             min_selections=1,
             console=con,
         )
-        path = prompt_text(
-            "  Memory store path for local/container deploys:",
-            default="./agent_memory/memory.json",
-            required=True,
+        backend = prompt_select(
+            "  Memory backend:",
+            choices=[
+                {"name": "Local JSON file - simplest local/container memory", "value": "json"},
+                {"name": "Local SQLite - durable local memory database", "value": "sqlite"},
+                {"name": "Postgres / cloud Postgres - production shared memory", "value": "postgres"},
+                {"name": "MongoDB Atlas - managed cloud document memory", "value": "mongodb_atlas"},
+            ],
             console=con,
         )
-        return {"memory_types": memory_types, "path": str(path), "backend": "json", "max_records": 1000}
+        settings: dict[str, Any] = {"memory_types": memory_types, "backend": backend, "max_records": 1000}
+        if backend == "json":
+            path = prompt_text(
+                "  Memory JSON path for local/container deploys:",
+                default="./agent_memory/memory.json",
+                required=True,
+                console=con,
+            )
+            settings["path"] = str(path)
+        elif backend == "sqlite":
+            path = prompt_text(
+                "  Memory SQLite path for local/container deploys:",
+                default="./agent_memory/memory.sqlite3",
+                required=True,
+                console=con,
+            )
+            settings["path"] = str(path)
+        elif backend == "postgres":
+            conn = prompt_text(
+                "  MEMORY_POSTGRES_CONNECTION_STRING:",
+                required=True,
+                secret=True,
+                console=con,
+            )
+            self.credential_store.set("memory", "MEMORY_POSTGRES_CONNECTION_STRING", str(conn))
+            settings["connection_env"] = "MEMORY_POSTGRES_CONNECTION_STRING"
+            settings["table"] = str(prompt_text("  Memory table name:", default="ms_rag_agent_memory", required=True, console=con))
+        elif backend == "mongodb_atlas":
+            conn = prompt_text(
+                "  MEMORY_MONGODB_CONNECTION_STRING:",
+                required=True,
+                secret=True,
+                console=con,
+            )
+            self.credential_store.set("memory", "MEMORY_MONGODB_CONNECTION_STRING", str(conn))
+            settings["connection_env"] = "MEMORY_MONGODB_CONNECTION_STRING"
+            settings["database"] = str(prompt_text("  Memory database name:", default="ms_rag_memory", required=True, console=con))
+            settings["collection"] = str(prompt_text("  Memory collection name:", default="agent_memory", required=True, console=con))
+        print_success(con, f"Memory backend configured: {backend}")
+        return settings
 
     def _configure_url_fetch(self) -> dict[str, Any]:
         con = get_console()

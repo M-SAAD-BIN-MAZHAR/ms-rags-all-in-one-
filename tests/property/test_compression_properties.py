@@ -59,8 +59,12 @@ def test_context_compressor_multi_select_round_trip(
         mock_q.checkbox.return_value = mock_checkbox
         mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
 
-        # If embeddings_filter selected, mock threshold prompt
-        if "embeddings_filter" in techniques:
+        # Any embedding-based compression choice asks for the threshold.
+        if set(techniques) & {
+            "embeddings_filter",
+            "contextual_compression",
+            "document_compressor_pipeline",
+        }:
             mock_text = MagicMock()
             mock_text.ask.return_value = "0.75"
             mock_q.text.return_value = mock_text
@@ -165,6 +169,183 @@ def test_non_llm_techniques_not_in_llm_required() -> None:
                "document_compressor_pipeline"}
     for t in non_llm:
         assert t not in LLM_REQUIRED_TECHNIQUES
+
+
+def test_contextual_compression_builds_real_wrapper_with_embeddings() -> None:
+    compressor = ContextCompressor()
+    config = CompressionConfig(
+        techniques=["contextual_compression"],
+        similarity_threshold=0.5,
+    )
+    embeddings = MagicMock()
+    base_retriever = MagicMock()
+
+    with patch("langchain_classic.retrievers.document_compressors.EmbeddingsFilter") as filter_cls:
+        filter_cls.return_value = MagicMock(name="filter")
+        result = compressor.get_compressor(
+            config,
+            llm=None,
+            embeddings=embeddings,
+            base_retriever=base_retriever,
+        )
+
+    assert result.base_compressor is filter_cls.return_value
+    assert result.base_retriever is base_retriever
+    filter_cls.assert_called_once()
+
+
+def test_document_compressor_pipeline_builds_real_wrapper_with_embeddings() -> None:
+    compressor = ContextCompressor()
+    config = CompressionConfig(
+        techniques=["document_compressor_pipeline"],
+        similarity_threshold=0.5,
+    )
+    embeddings = MagicMock()
+    base_retriever = MagicMock()
+
+    with patch("langchain_classic.retrievers.document_compressors.EmbeddingsFilter") as filter_cls, \
+         patch("langchain_community.document_transformers.EmbeddingsRedundantFilter") as redundant_cls, \
+         patch("langchain_classic.retrievers.document_compressors.DocumentCompressorPipeline") as pipeline_cls:
+        filter_cls.return_value = MagicMock(name="filter")
+        redundant_cls.return_value = MagicMock(name="redundant")
+        pipeline_cls.return_value = MagicMock(name="pipeline")
+        result = compressor.get_compressor(
+            config,
+            llm=None,
+            embeddings=embeddings,
+            base_retriever=base_retriever,
+        )
+
+    assert result.base_compressor is pipeline_cls.return_value
+    assert result.base_retriever is base_retriever
+    pipeline_cls.assert_called_once()
+
+
+def test_document_compressor_pipeline_is_meta_when_combined() -> None:
+    compressor = ContextCompressor()
+    config = CompressionConfig(
+        techniques=["document_compressor_pipeline", "embeddings_filter"],
+        similarity_threshold=0.5,
+    )
+    embeddings = MagicMock()
+    base_retriever = MagicMock()
+
+    with patch("langchain_classic.retrievers.document_compressors.EmbeddingsFilter") as filter_cls, \
+         patch("langchain_classic.retrievers.document_compressors.DocumentCompressorPipeline") as pipeline_cls:
+        filter_cls.return_value = MagicMock(name="filter")
+        pipeline_cls.return_value = MagicMock(name="pipeline")
+        result = compressor.get_compressor(
+            config,
+            llm=None,
+            embeddings=embeddings,
+            base_retriever=base_retriever,
+        )
+
+    assert result.base_compressor is filter_cls.return_value
+    assert result.base_retriever is base_retriever
+    filter_cls.assert_called_once()
+    pipeline_cls.assert_not_called()
+
+
+def test_summary_compression_builds_summary_compressor() -> None:
+    from ms_rag.query.compression_retriever import LLMSummaryCompressor
+
+    compressor = ContextCompressor()
+    config = CompressionConfig(techniques=["summary_compression"])
+    llm = MagicMock()
+
+    result = compressor.get_compressor(
+        config,
+        llm=llm,
+        embeddings=None,
+        base_retriever=None,
+    )
+
+    assert isinstance(result, LLMSummaryCompressor)
+    assert result.llm is llm
+
+
+def test_safe_compression_falls_back_when_compressor_removes_all_docs() -> None:
+    from langchain_core.documents import Document
+    from ms_rag.query.compression_retriever import SafeCompressionRetriever
+
+    docs = [Document(page_content="Elephants are large mammals.")]
+    base_retriever = MagicMock()
+    base_retriever.invoke.return_value = docs
+    compressor = MagicMock()
+    compressor.compress_documents.return_value = []
+
+    retriever = SafeCompressionRetriever(
+        base_retriever=base_retriever,
+        base_compressor=compressor,
+    )
+
+    with pytest.warns(UserWarning, match="too little context"):
+        result = retriever.invoke("tell me about elephants")
+
+    assert result == docs
+
+
+def test_safe_compression_accepts_transformer_only_components() -> None:
+    from langchain_core.documents import Document
+    from ms_rag.query.compression_retriever import SafeCompressionRetriever
+
+    docs = [
+        Document(page_content="Elephants are large mammals."),
+        Document(page_content="Elephants are large mammals."),
+    ]
+    transformed = [docs[0]]
+    base_retriever = MagicMock()
+    base_retriever.invoke.return_value = docs
+    class TransformerOnly:
+        def __init__(self) -> None:
+            self.seen_documents: list[Document] | None = None
+
+        def transform_documents(self, documents: list[Document]) -> list[Document]:
+            self.seen_documents = documents
+            return transformed
+
+    transformer = TransformerOnly()
+
+    retriever = SafeCompressionRetriever(
+        base_retriever=base_retriever,
+        base_compressor=transformer,
+    )
+
+    result = retriever.invoke("tell me about elephants")
+
+    assert result == transformed
+    assert transformer.seen_documents == docs
+
+
+def test_safe_compression_keeps_minimum_context_when_too_aggressive() -> None:
+    from langchain_core.documents import Document
+    from ms_rag.query.compression_retriever import SafeCompressionRetriever
+
+    docs = [
+        Document(page_content="Elephant overview."),
+        Document(page_content="Elephant habitat."),
+        Document(page_content="Elephant behavior."),
+        Document(page_content="Elephant conservation."),
+    ]
+    base_retriever = MagicMock()
+    base_retriever.invoke.return_value = docs
+    compressor = MagicMock()
+    compressor.compress_documents.return_value = [docs[0]]
+
+    retriever = SafeCompressionRetriever(
+        base_retriever=base_retriever,
+        base_compressor=compressor,
+        min_retained_documents=3,
+    )
+
+    with pytest.warns(UserWarning, match="too little context"):
+        result = retriever.invoke("tell me about elephants")
+
+    assert result == docs[:3]
+    assert retriever._ms_rag_pre_compression_count == 4
+    assert retriever._ms_rag_post_compression_count == 3
+    assert retriever._ms_rag_compression_fallback is True
 
 
 # ---------------------------------------------------------------------------

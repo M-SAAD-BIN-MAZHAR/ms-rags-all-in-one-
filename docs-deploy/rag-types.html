@@ -108,6 +108,122 @@
           </section>
 
           <section>
+            <h2>Technical Architecture Diagrams</h2>
+            <p class="lead">
+              Each picture shows the actual shape of the runtime path. Use these
+              diagrams when deciding which extra steps are worth the latency,
+              credentials, and operational complexity for your users.
+            </p>
+            <div class="architecture-grid">
+              <article class="architecture-card">
+                <h3>Naive RAG</h3>
+                <div class="flow-diagram" aria-label="Naive RAG architecture">
+                  <span>Query</span><i></i><span>Embed</span><i></i><span>Vector DB</span><i></i><span>Top-k Context</span><i></i><span>LLM Answer</span>
+                </div>
+                <p>Single retrieval path. Best for a first baseline and easy debugging.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>Advanced RAG</h3>
+                <div class="flow-diagram" aria-label="Advanced RAG architecture">
+                  <span>Query</span><i></i><span>Rewrite / HyDE</span><i></i><span>Hybrid Retrieve</span><i></i><span>Rerank</span><i></i><span>Compress</span><i></i><span>Answer</span>
+                </div>
+                <p>Adds quality controls around the baseline path for production Q&A.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>Modular RAG</h3>
+                <div class="flow-diagram branch" aria-label="Modular RAG architecture">
+                  <span>Query</span><i></i><span>Router</span><i></i><span>Retriever Module</span><span>Prompt Module</span><span>Evaluator Module</span><i></i><span>Answer</span>
+                </div>
+                <p>Stages are replaceable, so teams can swap modules per domain or file type.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>Agentic RAG</h3>
+                <div class="flow-diagram branch" aria-label="Agentic RAG architecture">
+                  <span>Query</span><i></i><span>LangGraph Planner</span><i></i><span>Retrieve</span><span>Approved Tools</span><span>Memory</span><i></i><span>Trace + Answer</span>
+                </div>
+                <p>Uses permission-gated tools, memory, and routing for multi-step tasks.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>Self-RAG</h3>
+                <div class="flow-diagram" aria-label="Self-RAG architecture">
+                  <span>Query</span><i></i><span>Need Retrieval?</span><i></i><span>Retrieve</span><i></i><span>Grade Evidence</span><i></i><span>Generate</span><i></i><span>Support Check</span>
+                </div>
+                <p>Reflects on retrieval and verifies whether the answer is grounded.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>Corrective RAG</h3>
+                <div class="flow-diagram branch" aria-label="Corrective RAG architecture">
+                  <span>Query</span><i></i><span>Retrieve</span><i></i><span>Grade Chunks</span><span>Rewrite Retry</span><span>Approved Web Search</span><i></i><span>Corrected Answer</span>
+                </div>
+                <p>Repairs weak retrieval with explicit checks and approved fallback paths.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>Speculative RAG</h3>
+                <div class="flow-diagram" aria-label="Speculative RAG architecture">
+                  <span>Query</span><i></i><span>Draft Hypothesis</span><i></i><span>Evidence Search</span><i></i><span>Verify</span><i></i><span>Final Answer</span>
+                </div>
+                <p>Uses an initial draft to guide retrieval, then verifies against evidence.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>GraphRAG</h3>
+                <div class="flow-diagram branch" aria-label="GraphRAG architecture">
+                  <span>Documents</span><i></i><span>Entities + Relations</span><i></i><span>Graph Store</span><span>Communities</span><span>Vector Evidence</span><i></i><span>Local / Global Answer</span>
+                </div>
+                <p>Builds persistent graph context for cross-document relationship questions.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>HyDE RAG</h3>
+                <div class="flow-diagram" aria-label="HyDE RAG architecture">
+                  <span>Query</span><i></i><span>Hypothetical Doc</span><i></i><span>Embed Hypothesis</span><i></i><span>Retrieve Real Chunks</span><i></i><span>Answer</span>
+                </div>
+                <p>Useful when user wording is abstract but documents use different terms.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>Multi-Query RAG</h3>
+                <div class="flow-diagram branch" aria-label="Multi-Query RAG architecture">
+                  <span>Query</span><i></i><span>Query Variants</span><i></i><span>Retrieve A</span><span>Retrieve B</span><span>Retrieve C</span><i></i><span>Merge Context</span><i></i><span>Answer</span>
+                </div>
+                <p>Improves recall by searching multiple phrasings of the same question.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>RAG-Fusion</h3>
+                <div class="flow-diagram branch" aria-label="RAG-Fusion architecture">
+                  <span>Query</span><i></i><span>Generated Queries</span><i></i><span>Parallel Retrieval</span><i></i><span>Reciprocal Rank Fusion</span><i></i><span>Answer</span>
+                </div>
+                <p>Merges result rankings from multiple retrieval paths for stronger recall.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>Step-Back RAG</h3>
+                <div class="flow-diagram branch" aria-label="Step-Back RAG architecture">
+                  <span>Query</span><i></i><span>Broader Question</span><span>Original Question</span><i></i><span>Background Context</span><span>Specific Evidence</span><i></i><span>Synthesis</span>
+                </div>
+                <p>Combines general principles with source-specific facts.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>Parent-Child RAG</h3>
+                <div class="flow-diagram" aria-label="Parent-Child RAG architecture">
+                  <span>Documents</span><i></i><span>Parent Chunks</span><i></i><span>Child Index</span><i></i><span>Retrieve Child</span><i></i><span>Return Parent Context</span><i></i><span>Answer</span>
+                </div>
+                <p>Small chunks find the location; larger parent context gives the answer.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>Adaptive RAG</h3>
+                <div class="flow-diagram branch" aria-label="Adaptive RAG architecture">
+                  <span>Query</span><i></i><span>Complexity Router</span><i></i><span>Direct Answer</span><span>Naive RAG</span><span>Rewrite + Retrieve</span><i></i><span>Answer</span>
+                </div>
+                <p>Routes simple, normal, and complex questions to different paths.</p>
+              </article>
+              <article class="architecture-card">
+                <h3>Contextual Compression RAG</h3>
+                <div class="flow-diagram" aria-label="Contextual Compression RAG architecture">
+                  <span>Query</span><i></i><span>Retrieve Chunks</span><i></i><span>Filter / Extract</span><i></i><span>Compressed Context</span><i></i><span>Answer</span>
+                </div>
+                <p>Removes irrelevant text before generation to reduce noise and prompt size.</p>
+              </article>
+            </div>
+          </section>
+
+          <section>
             <h2>Supported RAG Architectures</h2>
             <div class="grid two">
               <div class="card"><span class="tag">Default baseline</span><h3>Naive RAG</h3><p><strong>How it works:</strong> query embedding, top-k vector retrieval, context inserted into prompt, answer generated.</p><p><strong>Use when:</strong> documents are clean and the user needs straightforward Q&A.</p><p><strong>Tradeoff:</strong> weak on ambiguous, multi-hop, or noisy queries.</p></div>

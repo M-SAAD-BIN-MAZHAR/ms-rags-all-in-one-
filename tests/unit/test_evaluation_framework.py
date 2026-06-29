@@ -8,6 +8,7 @@ Tests (Requirement 16.4, 16.5):
 
 from __future__ import annotations
 
+import math
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -57,13 +58,14 @@ class TestEvaluatorListCompleteness:
             assert len(e.display_name.strip()) > 0
 
     def test_credential_required_evaluators_set(self) -> None:
+        assert "ragas" in CREDENTIAL_REQUIRED_EVALUATORS
+        assert "deepeval" in CREDENTIAL_REQUIRED_EVALUATORS
         assert "langsmith" in CREDENTIAL_REQUIRED_EVALUATORS
         assert "langfuse" in CREDENTIAL_REQUIRED_EVALUATORS
         assert "arize_phoenix" in CREDENTIAL_REQUIRED_EVALUATORS
 
     def test_non_credential_evaluators_not_in_set(self) -> None:
-        for eid in ["ragas", "deepeval", "trulens", "ares", "ragbench",
-                    "cicd_gate", "langgraph_trace", "monitoring_export"]:
+        for eid in ["trulens", "ares", "ragbench", "cicd_gate", "langgraph_trace", "monitoring_export"]:
             assert eid not in CREDENTIAL_REQUIRED_EVALUATORS
 
 
@@ -251,14 +253,93 @@ class TestEvaluateRuntime:
 
     def test_evaluate_merges_runner_scores(self) -> None:
         mock_deepeval = MagicMock(return_value={"answer_relevancy": 0.91})
-        framework = EvaluationFramework()
-        framework._config = EvaluationConfig(evaluators=["deepeval"])
+        store = CredentialStore()
+        framework = EvaluationFramework(credential_store=store)
+        framework._config = EvaluationConfig(
+            evaluators=["deepeval"],
+            evaluator_llm_provider="openai",
+            evaluator_llm_model="gpt-4o-mini",
+        )
 
         with patch.dict(EVALUATOR_RUNNERS, {"deepeval": mock_deepeval}):
             scores = framework.evaluate("q", [], "a")
 
         assert scores["answer_relevancy"] == 0.91
         mock_deepeval.assert_called_once()
+        assert mock_deepeval.call_args.kwargs["credential_store"] is store
+        assert mock_deepeval.call_args.kwargs["evaluator_model"] == "gpt-4o-mini"
+
+    def test_deepeval_uses_store_openai_key_temporarily(self) -> None:
+        store = CredentialStore()
+        store.set("openai", "OPENAI_API_KEY", "sk-from-store")
+        seen: dict[str, str | None] = {}
+
+        fake_metric = MagicMock()
+        fake_metric.score = 0.77
+
+        def measure(_case: object) -> None:
+            import os
+
+            seen["during"] = os.environ.get("OPENAI_API_KEY")
+
+        fake_metric.measure.side_effect = measure
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-old-env"}), \
+             patch("deepeval.metrics.AnswerRelevancyMetric", return_value=fake_metric), \
+             patch("deepeval.test_case.LLMTestCase", return_value=object()):
+            scores = evaluator_runners.run_deepeval(
+                "q",
+                [],
+                "a",
+                credential_store=store,
+            )
+            import os
+
+            after = os.environ.get("OPENAI_API_KEY")
+
+        assert seen["during"] == "sk-from-store"
+        assert after == "sk-old-env"
+        assert scores["deepeval_answer_relevancy"] == 0.77
+
+    def test_deepeval_uses_non_async_quiet_metric_when_supported(self) -> None:
+        fake_metric = MagicMock()
+        fake_metric.score = 0.66
+
+        with patch("deepeval.metrics.AnswerRelevancyMetric", return_value=fake_metric) as metric_cls, \
+             patch("deepeval.test_case.LLMTestCase", return_value=object()):
+            scores = evaluator_runners.run_deepeval("q", [], "a")
+
+        assert metric_cls.call_args.kwargs["async_mode"] is False
+        assert metric_cls.call_args.kwargs["verbose_mode"] is False
+        assert metric_cls.call_args.kwargs["model"] == "gpt-4o-mini"
+        assert scores["deepeval_answer_relevancy"] == 0.66
+
+    def test_deepeval_nan_score_falls_back_to_lexical_metrics(self) -> None:
+        fake_metric = MagicMock()
+        fake_metric.score = math.nan
+
+        with patch("deepeval.metrics.AnswerRelevancyMetric", return_value=fake_metric), \
+             patch("deepeval.test_case.LLMTestCase", return_value=object()), \
+             pytest.warns(UserWarning, match="DeepEval returned no finite scores"):
+            scores = evaluator_runners.run_deepeval(
+                "tell me about elephants",
+                ["Elephants are large mammals."],
+                "Elephants are large mammals.",
+            )
+
+        assert "deepeval_faithfulness" in scores
+        assert all(math.isfinite(value) for value in scores.values())
+
+    def test_framework_ignores_non_finite_runner_scores(self) -> None:
+        mock_runner = MagicMock(return_value={"ok": 0.9, "bad": math.nan, "text": "nope"})
+        framework = EvaluationFramework()
+        framework._config = EvaluationConfig(evaluators=["deepeval"])
+
+        with patch.dict(EVALUATOR_RUNNERS, {"deepeval": mock_runner}), \
+             pytest.warns(UserWarning, match="non-finite/non-numeric"):
+            scores = framework.evaluate("q", [], "a")
+
+        assert scores == {"ok": 0.9}
 
     def test_monitoring_export_runs_last(self) -> None:
         mock_ares = MagicMock(return_value={"ares_faithfulness": 0.8})
@@ -322,11 +403,19 @@ class TestConfigureFlow:
             mock_checkbox.ask.side_effect = [[], ["ragas"]]
             mock_q.checkbox.return_value = mock_checkbox
             mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
+            mock_text = MagicMock()
+            mock_text.ask.return_value = "gpt-4o-mini"
+            mock_q.text.return_value = mock_text
+            mock_password = MagicMock()
+            mock_password.ask.return_value = ""
+            mock_q.password.return_value = mock_password
 
             result = framework.configure()
 
         assert result is not None
         assert result.evaluators == ["ragas"]
+        assert result.evaluator_llm_provider == "openai"
+        assert result.evaluator_llm_model == "gpt-4o-mini"
 
     def test_selected_evaluators_stored_in_config(self) -> None:
         framework = EvaluationFramework()
@@ -342,8 +431,16 @@ class TestConfigureFlow:
             mock_checkbox.ask.return_value = selected
             mock_q.checkbox.return_value = mock_checkbox
             mock_q.Choice = MagicMock(side_effect=lambda title, value: value)
+            text_prompt = MagicMock()
+            text_prompt.ask.side_effect = ["", "", "gpt-4o-mini"]
+            mock_q.text.return_value = text_prompt
+            password_prompt = MagicMock()
+            password_prompt.ask.return_value = ""
+            mock_q.password.return_value = password_prompt
 
             result = framework.configure()
 
         assert result is not None
         assert set(result.evaluators) == set(selected)
+        assert result.evaluator_llm_provider == "openai"
+        assert result.evaluator_llm_model == "gpt-4o-mini"

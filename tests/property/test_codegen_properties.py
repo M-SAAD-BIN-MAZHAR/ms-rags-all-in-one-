@@ -21,11 +21,13 @@ from hypothesis import strategies as st
 from ms_rag.codegen.code_generator import CodeGenerator
 from ms_rag.models import (
     ChunkingConfig,
+    CompressionConfig,
     EmbeddingModelConfig,
     GraphStoreConfig,
     LLMModelConfig,
     PipelineConfig,
     RAGTypeConfig,
+    RerankingConfig,
     RetrievalConfig,
     VectorDBConfig,
     AgentToolConfig,
@@ -262,12 +264,18 @@ def test_generated_evaluation_supports_all_selected_evaluators() -> None:
             "monitoring_export",
         ],
         cicd_thresholds={"faithfulness": 0.8},
+        evaluator_llm_provider="openai",
+        evaluator_llm_model="gpt-4o-mini",
     )
 
     code = CodeGenerator().generate(config).python_code
     ast.parse(code)
     assert "def evaluate_response" in code
     assert "ENABLED_EVALUATORS" in code
+    assert "EVALUATOR_LLM_MODEL = 'gpt-4o-mini'" in code
+    assert "EvaluationDataset.from_list" in code
+    assert "LLMContextPrecisionWithoutReference" in code
+    assert "_finite_scores" in code
     assert "deepeval_answer_relevancy" in code
     assert "trulens_package_available" in code
     assert "phoenix_endpoint_configured" in code
@@ -331,6 +339,7 @@ def test_save_creates_directory_and_files() -> None:
         assert output_dir.exists()
         assert (output_dir / "pipeline.py").exists()
         assert (output_dir / "requirements.txt").exists()
+        assert (output_dir / ".env").exists()
 
 
 def test_saved_pipeline_py_contains_main() -> None:
@@ -356,6 +365,64 @@ def test_saved_requirements_txt_non_empty() -> None:
         content = (output_dir / "requirements.txt").read_text(encoding="utf-8")
         assert len(content.strip()) > 0
         assert "langchain" in content
+
+
+def test_saved_env_file_contains_selected_runtime_variables_only() -> None:
+    config = _make_config(rag_type_id="agentic_rag", providers=["groq"])
+    config.embedding_model = EmbeddingModelConfig(
+        provider="huggingface_endpoint",
+        model_id="sentence-transformers/all-mpnet-base-v2",
+    )
+    config.loader_map = {"pdf": "LlamaParseLoader"}
+    config.vector_db = VectorDBConfig(
+        db_type="pinecone",
+        connection_params={"PINECONE_API_KEY": "PINECONE_API_KEY", "PINECONE_INDEX_NAME": "saadi"},
+        collection_name="saadi",
+    )
+    config.evaluation_enabled = True
+    config.evaluation = EvaluationConfig(evaluators=["langsmith"])
+    config.agent_tools = AgentToolConfig(
+        enabled_tools=["web_search", "memory"],
+        tool_settings={"web_search": {"provider": "brave"}, "memory": {"path": "./agent_memory/memory.json"}},
+    )
+
+    result = CodeGenerator().generate(config)
+
+    assert "GROQ_API_KEY=" in result.env_txt
+    assert "HUGGINGFACEHUB_API_TOKEN=" in result.env_txt
+    assert "LLAMA_CLOUD_API_KEY=" in result.env_txt
+    assert "PINECONE_API_KEY=" in result.env_txt
+    assert "PINECONE_INDEX_NAME=" in result.env_txt
+    assert "LANGCHAIN_API_KEY=" in result.env_txt
+    assert "BRAVE_SEARCH_API_KEY=" in result.env_txt
+    assert "MS_RAG_AGENT_MEMORY_PATH=" in result.env_txt
+    assert "OPENAI_API_KEY=" not in result.env_txt
+    assert "sk-" not in result.env_txt
+
+
+def test_generated_code_and_env_preserve_selected_provider_and_database() -> None:
+    config = _make_config(providers=["huggingface"])
+    config.llm_model = LLMModelConfig(provider="huggingface", model_id="meta-llama/Meta-Llama-3-8B-Instruct")
+    config.embedding_model = EmbeddingModelConfig(
+        provider="huggingface_endpoint",
+        model_id="sentence-transformers/all-mpnet-base-v2",
+    )
+    config.vector_db = VectorDBConfig(
+        db_type="qdrant",
+        connection_params={"QDRANT_URL": "QDRANT_URL", "QDRANT_API_KEY": "QDRANT_API_KEY"},
+        collection_name="docs_qdrant",
+        dimension=768,
+    )
+
+    result = CodeGenerator().generate(config)
+
+    assert "HuggingFaceEndpoint" in result.python_code
+    assert "HuggingFaceEndpointEmbeddings" in result.python_code
+    assert "QdrantVectorStore" in result.python_code
+    assert "docs_qdrant" in result.python_code
+    assert "HUGGINGFACEHUB_API_TOKEN=" in result.env_txt
+    assert "QDRANT_URL=" in result.env_txt
+    assert "QDRANT_API_KEY=" in result.env_txt
 
 
 def test_generated_code_rag_type_field() -> None:
@@ -743,3 +810,109 @@ def test_generated_vector_db_pipelines_import_and_ingest_supported_backends(
     ast.parse(code)
     for snippet in expected_snippets:
         assert snippet in code
+
+
+def test_generated_chroma_pipeline_uses_configured_persist_directory() -> None:
+    config = _make_config()
+    config.vector_db = VectorDBConfig(
+        db_type="chroma",
+        connection_params={"CHROMA_PERSIST_DIRECTORY": "./custom_chroma/saadi"},
+        collection_name="saadi",
+    )
+
+    result = CodeGenerator().generate(config)
+    code = result.python_code
+
+    ast.parse(code)
+    assert 'os.getenv("CHROMA_PERSIST_DIRECTORY")' in code
+    assert 'os.getenv("CHROMA_PERSIST_DIR")' in code
+    assert "'./custom_chroma/saadi'" in code
+
+
+def test_generated_code_uses_updated_live_settings_config() -> None:
+    config = _make_config()
+    config.query_enhancement = ["hyde"]
+    config.reranking_enabled = False
+    config.reranking = None
+    config.compression_enabled = True
+    config.compression = CompressionConfig(techniques=["embeddings_filter"], similarity_threshold=0.65)
+
+    result = CodeGenerator().generate(config)
+
+    assert "rerank_documents" not in result.python_code
+    assert "compress_context" in result.python_code
+    assert "similarity_threshold=0.65" in result.python_code
+    assert "retriever = compress_context(" in result.python_code
+
+
+def test_generated_code_applies_selected_reranking() -> None:
+    config = _make_config()
+    config.reranking_enabled = True
+    config.reranking = RerankingConfig(
+        reranker="cohere_reranker",
+        model_id="rerank-english-v3.0",
+        top_k=3,
+    )
+
+    result = CodeGenerator().generate(config)
+
+    ast.parse(result.python_code)
+    assert "def rerank_documents" in result.python_code
+    assert "reranker = 'cohere_reranker'" in result.python_code
+    assert "retriever = apply_reranking(retriever)" in result.python_code
+    assert "COHERE_API_KEY" in result.python_code
+
+
+@pytest.mark.parametrize(
+    "technique",
+    [
+        "query_rewriting",
+        "query_expansion",
+        "hyde",
+        "multi_query",
+        "step_back_prompting",
+        "sub_question_decomposition",
+        "rag_fusion",
+    ],
+)
+def test_generated_code_applies_each_query_enhancement(technique: str) -> None:
+    config = _make_config()
+    config.query_enhancement = [technique]
+
+    result = CodeGenerator().generate(config)
+
+    ast.parse(result.python_code)
+    assert "def enhance_queries" in result.python_code
+    assert "Query enhancement trace" in result.python_code
+    assert repr([technique]) in result.python_code
+    assert "RunnableLambda(prepare_inputs)" in result.python_code
+    assert 'setattr(rag_chain, "_ms_rag_retrieve_docs", retrieve_docs)' in result.python_code
+    assert 'getattr(rag_chain, "_ms_rag_retrieve_docs", retriever.invoke)' in result.python_code
+
+
+@pytest.mark.parametrize(
+    ("technique", "expected_snippet"),
+    [
+        ("llm_chain_extraction", "LLMChainExtractor.from_llm"),
+        ("embeddings_filter", "EmbeddingsFilter(embeddings=embeddings"),
+        ("document_compressor_pipeline", "DocumentCompressorPipeline(transformers=["),
+        ("redundancy_removal", "EmbeddingsRedundantFilter(embeddings=embeddings)"),
+        ("contextual_compression", "technique == \"contextual_compression\""),
+        ("summary_compression", "_LLMSummaryCompressor"),
+    ],
+)
+def test_generated_code_supports_each_compression_technique(
+    technique: str,
+    expected_snippet: str,
+) -> None:
+    config = _make_config()
+    config.compression_enabled = True
+    config.compression = CompressionConfig(techniques=[technique], similarity_threshold=0.65)
+
+    result = CodeGenerator().generate(config)
+
+    ast.parse(result.python_code)
+    assert "compress_context" in result.python_code
+    assert "retriever = compress_context(" in result.python_code
+    assert "_SafeCompressionRetriever" in result.python_code
+    assert expected_snippet in result.python_code

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import os
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -30,6 +31,7 @@ from ms_rag.ingestion.ingestion_orchestrator import (
 )
 from ms_rag.models import (
     ChunkingConfig,
+    CredentialStore,
     IngestionResult,
     VectorDBConfig,
     EmbeddingModelConfig,
@@ -352,6 +354,46 @@ def test_unstructured_pdf_loader_warns_before_falling_back_to_pypdf() -> None:
     mock_pypdf.assert_called_once_with("Resume\\resume.pdf")
 
 
+def test_unstructured_pdf_loader_poppler_failure_is_actionable() -> None:
+    from ms_rag.utils.exceptions import IngestionError
+
+    orchestrator = IngestionOrchestrator()
+
+    with patch(
+        "langchain_unstructured.UnstructuredLoader",
+        side_effect=RuntimeError("Unable to get page count. Is poppler installed and in PATH?"),
+    ), patch("langchain_community.document_loaders.PyPDFLoader") as mock_pypdf:
+        with pytest.raises(IngestionError, match="needs Poppler"):
+            orchestrator._invoke_loader("UnstructuredPDFLoader", "SmokeDocs\\elephants_scanned_ocr.pdf")
+
+    mock_pypdf.assert_not_called()
+
+
+def test_ingest_skips_empty_extracted_chunks_with_actionable_message() -> None:
+    orchestrator = IngestionOrchestrator()
+    mock_store = MagicMock()
+    mock_splitter = MagicMock()
+    mock_splitter.split_documents.return_value = [MagicMock(page_content="   ")]
+
+    with patch.object(orchestrator, "discover_documents", return_value=[Path("scan.pdf")]), \
+         patch.object(orchestrator, "_load_source", return_value=[MagicMock(page_content="")]), \
+         patch("ms_rag.ingestion.ingestion_orchestrator.ChunkingEngine") as mock_chunking:
+        mock_chunking.return_value.get_splitter.return_value = mock_splitter
+        result = orchestrator.ingest(
+            sources=["scan.pdf"],
+            loader_map={"pdf": "UnstructuredPDFLoader"},
+            chunking_config=ChunkingConfig(strategy="recursive_character", chunk_size=100, chunk_overlap=0),
+            embedding_model=EmbeddingModelConfig(provider="cohere", model_id="embed-multilingual-v3.0"),
+            vector_db=VectorDBConfig(db_type="chroma", connection_params={}, collection_name="test"),
+            vector_store=mock_store,
+        )
+
+    assert result.chunk_count == 0
+    assert result.failed_documents
+    assert "No extractable text chunks" in result.failed_documents[0][1]
+    mock_store.add_documents.assert_not_called()
+
+
 def test_unstructured_docx_loader_warns_before_falling_back_to_docx2txt() -> None:
     orchestrator = IngestionOrchestrator()
     fallback_docs = [MagicMock(page_content="resume text")]
@@ -421,6 +463,106 @@ def test_ingest_attaches_advanced_retrieval_state_to_vector_store() -> None:
     assert chunk.metadata["ms_rag_child_id"]
     assert chunk.metadata["ms_rag_multi_vector_source_id"]
     assert chunk.metadata["ms_rag_ingested_at"]
+
+
+def test_llamaparse_loader_uses_store_key_temporarily(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = CredentialStore()
+    store.set("llamaparse", "LLAMA_CLOUD_API_KEY", "typed-llama-key")
+    orchestrator = IngestionOrchestrator(credential_store=store)
+    seen: dict[str, str | None] = {}
+
+    class FakeLlamaParse:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        def load_data(self, source: str) -> list:
+            seen["during"] = os.environ.get("LLAMA_CLOUD_API_KEY")
+            seen["source"] = source
+            return [MagicMock(page_content="parsed")]
+
+    monkeypatch.setenv("LLAMA_CLOUD_API_KEY", "old-llama-key")
+    with patch.dict(sys.modules, {"llama_parse": SimpleNamespace(LlamaParse=FakeLlamaParse)}):
+        docs = orchestrator._invoke_loader("LlamaParseLoader", "doc.pdf")
+
+    assert docs
+    assert seen["during"] == "typed-llama-key"
+    assert os.environ["LLAMA_CLOUD_API_KEY"] == "old-llama-key"
+
+
+def test_llamaparse_loader_normalizes_llamaindex_documents(monkeypatch: pytest.MonkeyPatch) -> None:
+    orchestrator = IngestionOrchestrator()
+
+    class LlamaIndexDocument:
+        metadata = {"page_label": "1"}
+
+        def get_content(self, **_kwargs) -> str:
+            return "Elephants are large mammals with trunks."
+
+    class FakeLlamaParse:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        def load_data(self, source: str) -> list:
+            return [LlamaIndexDocument()]
+
+    monkeypatch.delenv("LLAMA_CLOUD_API_KEY", raising=False)
+    with patch.dict(sys.modules, {"llama_parse": SimpleNamespace(LlamaParse=FakeLlamaParse)}):
+        docs = orchestrator._invoke_loader("LlamaParseLoader", "SmokeDocs\\elephants_small.pdf")
+
+    assert docs[0].page_content == "Elephants are large mammals with trunks."
+    assert docs[0].metadata["source"] == "SmokeDocs\\elephants_small.pdf"
+    assert docs[0].metadata["loader"] == "LlamaParseLoader"
+    assert docs[0].metadata["page_label"] == "1"
+
+
+def test_firecrawl_loader_uses_store_key_temporarily(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = CredentialStore()
+    store.set("firecrawl", "FIRECRAWL_API_KEY", "typed-firecrawl-key")
+    orchestrator = IngestionOrchestrator(credential_store=store)
+    seen: dict[str, str | None] = {}
+
+    class FakeFireCrawlLoader:
+        def __init__(self, **kwargs) -> None:
+            seen["during_init"] = os.environ.get("FIRECRAWL_API_KEY")
+            self.kwargs = kwargs
+
+        def load(self) -> list:
+            seen["during_load"] = os.environ.get("FIRECRAWL_API_KEY")
+            return [MagicMock(page_content="scraped")]
+
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "old-firecrawl-key")
+    with patch("langchain_community.document_loaders.FireCrawlLoader", FakeFireCrawlLoader):
+        docs = orchestrator._invoke_loader("FireCrawlLoader", "https://example.com")
+
+    assert docs
+    assert seen["during_init"] == "typed-firecrawl-key"
+    assert seen["during_load"] == "typed-firecrawl-key"
+    assert os.environ["FIRECRAWL_API_KEY"] == "old-firecrawl-key"
+
+
+def test_apify_loader_uses_store_key_temporarily(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = CredentialStore()
+    store.set("apify", "APIFY_API_TOKEN", "typed-apify-token")
+    orchestrator = IngestionOrchestrator(credential_store=store)
+    seen: dict[str, str | None] = {}
+
+    class FakeApifyDatasetLoader:
+        def __init__(self, **kwargs) -> None:
+            seen["during_init"] = os.environ.get("APIFY_API_TOKEN")
+            self.mapping = kwargs["dataset_mapping_function"]
+
+        def load(self) -> list:
+            seen["during_load"] = os.environ.get("APIFY_API_TOKEN")
+            return [self.mapping({"text": "dataset row"})]
+
+    monkeypatch.setenv("APIFY_API_TOKEN", "old-apify-token")
+    with patch("langchain_community.document_loaders.ApifyDatasetLoader", FakeApifyDatasetLoader):
+        docs = orchestrator._invoke_loader("ApifyWebScraper", "dataset-id")
+
+    assert docs[0].page_content == "dataset row"
+    assert seen["during_init"] == "typed-apify-token"
+    assert seen["during_load"] == "typed-apify-token"
+    assert os.environ["APIFY_API_TOKEN"] == "old-apify-token"
 
 
 # ---------------------------------------------------------------------------

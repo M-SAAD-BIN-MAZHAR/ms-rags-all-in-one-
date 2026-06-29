@@ -54,6 +54,7 @@ RAG_TYPE_PRESETS: dict[str, RAGTypePreset] = {
         query_enhancement=["query_rewriting"],
         retrieval=RetrievalConfig(strategy="dense_vector", top_k=5),
         allow_reranking_prompt=True,
+        allow_compression_prompt=True,
     ),
     "self_rag": RAGTypePreset(
         rag_type="self_rag",
@@ -61,6 +62,7 @@ RAG_TYPE_PRESETS: dict[str, RAGTypePreset] = {
         query_enhancement=["query_rewriting"],
         retrieval=RetrievalConfig(strategy="dense_vector", top_k=5),
         allow_reranking_prompt=True,
+        allow_compression_prompt=True,
     ),
     "corrective_rag": RAGTypePreset(
         rag_type="corrective_rag",
@@ -68,6 +70,7 @@ RAG_TYPE_PRESETS: dict[str, RAGTypePreset] = {
         query_enhancement=["query_rewriting"],
         retrieval=RetrievalConfig(strategy="dense_vector", top_k=5),
         allow_reranking_prompt=True,
+        allow_compression_prompt=True,
         notes=[
             "For full CRAG behavior, enable the Web Search tool in Step 3b so missing or irrelevant corpus context can fall back to approved web search."
         ],

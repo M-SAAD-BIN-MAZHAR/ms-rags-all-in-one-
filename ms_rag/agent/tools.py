@@ -56,14 +56,20 @@ class MemoryRecord:
 
 
 class AgentMemoryStore:
-    """Small JSON-backed memory store that works locally and in containers."""
+    """Permission-gated memory store with local and cloud backends."""
 
     VALID_TYPES = {"short_term", "long_term", "semantic", "episodic", "user_profile"}
 
-    def __init__(self, settings: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        settings: dict[str, Any] | None = None,
+        credential_store: CredentialStore | None = None,
+    ) -> None:
         self.settings = settings or {}
+        self.credential_store = credential_store
         self.enabled_types = set(self.settings.get("memory_types") or [])
         self.short_term: list[MemoryRecord] = []
+        self.backend = str(self.settings.get("backend") or "json")
         default_path = Path(os.getenv("MS_RAG_AGENT_MEMORY_PATH", "./agent_memory/memory.json"))
         self.path = Path(str(self.settings.get("path") or default_path)).expanduser()
         self.max_records = int(self.settings.get("max_records", 1000))
@@ -107,6 +113,12 @@ class AgentMemoryStore:
         ]
 
     def _load(self) -> list[MemoryRecord]:
+        if self.backend == "sqlite":
+            return self._load_sqlite()
+        if self.backend == "postgres":
+            return self._load_postgres()
+        if self.backend == "mongodb_atlas":
+            return self._load_mongodb()
         if not self.path.exists():
             return []
         try:
@@ -125,6 +137,15 @@ class AgentMemoryStore:
         ]
 
     def _save(self, records: list[MemoryRecord]) -> None:
+        if self.backend == "sqlite":
+            self._save_sqlite(records)
+            return
+        if self.backend == "postgres":
+            self._save_postgres(records)
+            return
+        if self.backend == "mongodb_atlas":
+            self._save_mongodb(records)
+            return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             payload = [
@@ -140,6 +161,132 @@ class AgentMemoryStore:
         except OSError as exc:
             raise ToolExecutionError(f"Could not write agent memory store: {exc}") from exc
 
+    def _record_from_row(self, memory_type: str, text: str, metadata: Any, created_at: Any) -> MemoryRecord:
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                metadata = {}
+        return MemoryRecord(str(memory_type), str(text), dict(metadata or {}), float(created_at or 0))
+
+    def _load_sqlite(self) -> list[MemoryRecord]:
+        import sqlite3  # noqa: PLC0415
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.path) as conn:
+            self._ensure_sqlite(conn)
+            rows = conn.execute(
+                "SELECT memory_type, text, metadata, created_at FROM memory ORDER BY created_at DESC LIMIT ?",
+                (self.max_records,),
+            ).fetchall()
+        return [self._record_from_row(*row) for row in rows]
+
+    def _save_sqlite(self, records: list[MemoryRecord]) -> None:
+        import sqlite3  # noqa: PLC0415
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.path) as conn:
+            self._ensure_sqlite(conn)
+            conn.execute("DELETE FROM memory")
+            conn.executemany(
+                "INSERT INTO memory(memory_type, text, metadata, created_at) VALUES (?, ?, ?, ?)",
+                [(r.memory_type, r.text, json.dumps(r.metadata), r.created_at) for r in records],
+            )
+
+    def _ensure_sqlite(self, conn: Any) -> None:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS memory ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, memory_type TEXT, text TEXT, metadata TEXT, created_at REAL)"
+        )
+
+    def _postgres_conn_string(self) -> str:
+        env_name = str(self.settings.get("connection_env") or "MEMORY_POSTGRES_CONNECTION_STRING")
+        value = (
+            self.credential_store.get("memory", env_name)
+            if self.credential_store is not None
+            else None
+        ) or os.getenv(env_name)
+        if not value:
+            raise ToolExecutionError(f"Missing memory Postgres connection string: {env_name}")
+        return value
+
+    def _load_postgres(self) -> list[MemoryRecord]:
+        try:
+            import psycopg  # type: ignore[import-not-found]  # noqa: PLC0415
+        except ImportError as exc:
+            raise ToolExecutionError("Postgres memory requires psycopg. Install psycopg[binary].") from exc
+        table = str(self.settings.get("table") or "ms_rag_agent_memory")
+        with psycopg.connect(self._postgres_conn_string()) as conn:
+            self._ensure_postgres(conn, table)
+            rows = conn.execute(
+                f"SELECT memory_type, text, metadata, created_at FROM {table} ORDER BY created_at DESC LIMIT %s",
+                (self.max_records,),
+            ).fetchall()
+        return [self._record_from_row(*row) for row in rows]
+
+    def _save_postgres(self, records: list[MemoryRecord]) -> None:
+        try:
+            import psycopg  # type: ignore[import-not-found]  # noqa: PLC0415
+        except ImportError as exc:
+            raise ToolExecutionError("Postgres memory requires psycopg. Install psycopg[binary].") from exc
+        table = str(self.settings.get("table") or "ms_rag_agent_memory")
+        with psycopg.connect(self._postgres_conn_string()) as conn:
+            self._ensure_postgres(conn, table)
+            conn.execute(f"DELETE FROM {table}")
+            conn.executemany(
+                f"INSERT INTO {table}(memory_type, text, metadata, created_at) VALUES (%s, %s, %s, %s)",
+                [(r.memory_type, r.text, json.dumps(r.metadata), r.created_at) for r in records],
+            )
+
+    def _ensure_postgres(self, conn: Any, table: str) -> None:
+        if not table.replace("_", "").isalnum():
+            raise ToolExecutionError(f"Unsafe memory table name: {table}")
+        conn.execute(
+            f"CREATE TABLE IF NOT EXISTS {table} ("
+            "id SERIAL PRIMARY KEY, memory_type TEXT, text TEXT, metadata JSONB, created_at DOUBLE PRECISION)"
+        )
+
+    def _mongodb_collection(self) -> Any:
+        try:
+            from pymongo import MongoClient  # noqa: PLC0415
+        except ImportError as exc:
+            raise ToolExecutionError("MongoDB memory requires pymongo.") from exc
+        env_name = str(self.settings.get("connection_env") or "MEMORY_MONGODB_CONNECTION_STRING")
+        uri = (
+            self.credential_store.get("memory", env_name)
+            if self.credential_store is not None
+            else None
+        ) or os.getenv(env_name)
+        if not uri:
+            raise ToolExecutionError(f"Missing MongoDB memory connection string: {env_name}")
+        client = MongoClient(uri)
+        db = client[str(self.settings.get("database") or "ms_rag_memory")]
+        return db[str(self.settings.get("collection") or "agent_memory")]
+
+    def _load_mongodb(self) -> list[MemoryRecord]:
+        coll = self._mongodb_collection()
+        rows = coll.find({}, {"_id": 0}).sort("created_at", -1).limit(self.max_records)
+        return [
+            self._record_from_row(row.get("memory_type"), row.get("text"), row.get("metadata"), row.get("created_at"))
+            for row in rows
+        ]
+
+    def _save_mongodb(self, records: list[MemoryRecord]) -> None:
+        coll = self._mongodb_collection()
+        coll.delete_many({})
+        if records:
+            coll.insert_many(
+                [
+                    {
+                        "memory_type": r.memory_type,
+                        "text": r.text,
+                        "metadata": r.metadata,
+                        "created_at": r.created_at,
+                    }
+                    for r in records
+                ]
+            )
+
 
 class AgentToolRuntime:
     """Runtime facade for configured Agentic RAG tools."""
@@ -153,7 +300,10 @@ class AgentToolRuntime:
         self.config = config or AgentToolConfig()
         self.credential_store = credential_store or CredentialStore()
         self.llm = llm
-        self.memory = AgentMemoryStore(self.settings("memory"))
+        self.memory = AgentMemoryStore(
+            self.settings("memory"),
+            credential_store=self.credential_store,
+        )
 
     def enabled(self, tool_name: str) -> bool:
         return tool_name in set(self.config.enabled_tools)

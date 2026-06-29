@@ -152,6 +152,7 @@ def run(load_path: str | None = None) -> None:
                 credentials=credential_store,
                 **runtime,
             )
+            _display_selected_architecture(config, console)
             eval_framework = None
             if config.evaluation_enabled:
                 from ms_rag.evaluation.evaluation_framework import EvaluationFramework  # noqa: PLC0415
@@ -324,6 +325,7 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
     with telemetry.span("setup.sources"):
         config.document_sources = prompt_document_sources(console=con)
 
+    _display_runtime_dependency_report(config, con)
     _display_ingestion_review(config, con)
     prompt_required_confirm("Start ingestion with the settings above?", console=con)
     telemetry.record_event("ingestion.confirmed", "User approved ingestion start")
@@ -334,7 +336,7 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
             credential_store,
             vectorization,
             db_connector,
-            IngestionOrchestrator(),
+            IngestionOrchestrator(credential_store=credential_store),
             con,
         )
     config.ingestion_result = ingestion_result
@@ -384,13 +386,15 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
             config.query_enhancement = query_enhancer.configure(config.configured_providers)
             config.hyde_llm_provider = query_enhancer.hyde_llm_provider
         else:
-            config.query_enhancement = list(rag_preset.query_enhancement or [])
-            if "hyde" in config.query_enhancement and config.llm_model:
+            config.query_enhancement = _confirm_query_enhancement_preset(
+                rag_preset,
+                query_enhancer,
+                config.configured_providers,
+                con,
+            )
+            config.hyde_llm_provider = query_enhancer.hyde_llm_provider
+            if "hyde" in config.query_enhancement and not config.hyde_llm_provider and config.llm_model:
                 config.hyde_llm_provider = config.llm_model.provider
-            if config.query_enhancement:
-                print_success(con, f"Query enhancement preset: {', '.join(config.query_enhancement)}")
-            else:
-                con.print("  [dim]Query enhancement skipped by selected RAG preset.[/dim]")
 
     # Step 11: Retrieval Strategy
     with telemetry.span("setup.retrieval"):
@@ -434,11 +438,12 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
         if rag_preset.allow_compression_prompt:
             compression_config = compressor.configure(config.configured_providers)
         else:
-            compression_config = rag_preset.compression
-            if compression_config:
-                print_success(con, f"Compression preset: {', '.join(compression_config.techniques)}")
-            else:
-                con.print("  [dim]Context compression skipped by selected RAG preset.[/dim]")
+            compression_config = _confirm_compression_preset(
+                rag_preset,
+                compressor,
+                config.configured_providers,
+                con,
+            )
         if compression_config:
             config.compression = compression_config
             config.compression_enabled = True
@@ -581,6 +586,88 @@ def _prompt_llm_model_selection(
         return selected
 
 
+def _confirm_query_enhancement_preset(
+    rag_preset: object,
+    query_enhancer: object,
+    configured_providers: list[str],
+    console: object,
+) -> list[str]:
+    """Ask permission before applying a RAG-type query enhancement preset."""
+    import questionary  # noqa: PLC0415
+    from ms_rag.ui.prompts import prompt_select  # noqa: PLC0415
+
+    preset = list(getattr(rag_preset, "query_enhancement", []) or [])
+    if not preset:
+        console.print("  [dim]Query enhancement skipped by selected RAG preset.[/dim]")  # type: ignore[union-attr]
+        return []
+
+    console.print("\n[bold cyan]Step 10 — Query Enhancement[/bold cyan]\n")  # type: ignore[union-attr]
+    console.print(  # type: ignore[union-attr]
+        "[yellow]  The selected RAG type recommends a query enhancement preset.[/yellow]\n"
+        f"  Preset: [bold]{', '.join(preset)}[/bold]\n"
+        "  You can keep it, edit it, or disable query enhancement for this session."
+    )
+    action = prompt_select(
+        "  What do you want to do with this preset?",
+        [
+            questionary.Choice("Keep recommended preset", "keep"),
+            questionary.Choice("Edit query enhancement choices", "edit"),
+            questionary.Choice("Disable query enhancement", "disable"),
+        ],
+        console=console,  # type: ignore[arg-type]
+    )
+    if action == "edit":
+        selected = query_enhancer.configure(configured_providers)  # type: ignore[union-attr]
+        return list(selected or [])
+    if action == "disable":
+        console.print("  [dim]Query enhancement disabled by user.[/dim]")  # type: ignore[union-attr]
+        return []
+
+    print_success(console, f"Query enhancement preset kept: {', '.join(preset)}")  # type: ignore[arg-type]
+    return preset
+
+
+def _confirm_compression_preset(
+    rag_preset: object,
+    compressor: object,
+    configured_providers: list[str],
+    console: object,
+) -> object | None:
+    """Ask permission before applying a RAG-type compression preset."""
+    import questionary  # noqa: PLC0415
+    from ms_rag.ui.prompts import prompt_select  # noqa: PLC0415
+
+    preset = getattr(rag_preset, "compression", None)
+    if preset is None:
+        console.print("  [dim]Context compression skipped by selected RAG preset.[/dim]")  # type: ignore[union-attr]
+        return None
+
+    techniques = list(getattr(preset, "techniques", []) or [])
+    console.print("\n[bold cyan]Step 13 — Context Compression[/bold cyan]\n")  # type: ignore[union-attr]
+    console.print(  # type: ignore[union-attr]
+        "[yellow]  The selected RAG type recommends a compression preset.[/yellow]\n"
+        f"  Preset: [bold]{', '.join(techniques)}[/bold]\n"
+        "  You can keep it, edit it, or disable compression for this session."
+    )
+    action = prompt_select(
+        "  What do you want to do with this preset?",
+        [
+            questionary.Choice("Keep recommended preset", "keep"),
+            questionary.Choice("Edit compression choices", "edit"),
+            questionary.Choice("Disable compression", "disable"),
+        ],
+        console=console,  # type: ignore[arg-type]
+    )
+    if action == "edit":
+        return compressor.configure(configured_providers)  # type: ignore[union-attr]
+    if action == "disable":
+        console.print("  [dim]Context compression disabled by user.[/dim]")  # type: ignore[union-attr]
+        return None
+
+    print_success(console, f"Compression preset kept: {', '.join(techniques)}")  # type: ignore[arg-type]
+    return preset
+
+
 def _display_ingestion_review(config: PipelineConfig, console: object) -> None:
     """Show a final human-readable review before writing vectors."""
     from rich.table import Table  # noqa: PLC0415
@@ -603,6 +690,46 @@ def _display_ingestion_review(config: PipelineConfig, console: object) -> None:
         "Existing indexes must use the same embedding dimension. Use a new collection when changing models.",
     )
     console.print(table)  # type: ignore[union-attr]
+
+
+def _display_runtime_dependency_report(config: PipelineConfig, console: object) -> None:
+    """Tell users which non-Python runtime tools their selected loaders may need."""
+    from rich.table import Table  # noqa: PLC0415
+    from ms_rag.ingestion.dependency_preflight import (  # noqa: PLC0415
+        build_dependency_checks,
+        missing_required_dependencies,
+    )
+    from ms_rag.ui.prompts import print_warning, prompt_confirm  # noqa: PLC0415
+
+    checks = build_dependency_checks(config.loader_map, config.document_sources)
+    if not checks:
+        return
+
+    table = Table(title="External Tools Needed For Selected Loaders", border_style="yellow")
+    table.add_column("Tool", style="bold white")
+    table.add_column("Status", style="cyan")
+    table.add_column("Needed For", style="white")
+    table.add_column("Install Hint", style="green")
+    for check in checks:
+        status = "installed" if check.installed else ("missing required" if check.required else "missing optional")
+        table.add_row(check.tool, status, check.needed_for, check.install_hint)
+    console.print(table)  # type: ignore[union-attr]
+
+    missing = missing_required_dependencies(checks)
+    if missing:
+        names = ", ".join(check.tool for check in missing)
+        print_warning(
+            console,  # type: ignore[arg-type]
+            f"Missing required external tool(s): {names}. Scanned/image PDFs may fail or be skipped.",
+        )
+        if not prompt_confirm(
+            "Continue ingestion anyway? Choose No to install the missing tool(s) first.",
+            default=False,
+            console=console,  # type: ignore[arg-type]
+        ):
+            raise click.ClickException(
+                f"Ingestion stopped because required external tool(s) are missing: {names}."
+            )
 
 
 def _run_ingestion_with_recovery(
@@ -757,6 +884,7 @@ def _build_runtime_with_recovery(
         )
         console.print("[green]  ✓ Runtime pipeline ready.[/green]")  # type: ignore[union-attr]
         _display_runtime_readiness(config, runtime, console)
+        _display_selected_architecture(config, console)
         return runtime
     except Exception as exc:  # noqa: BLE001
         from ms_rag.ui.prompts import print_error  # noqa: PLC0415
@@ -797,6 +925,31 @@ def _display_runtime_readiness(
         "ready" if runtime.get("retriever") is not None else "missing",
         retrieval.strategy if retrieval else "No retrieval strategy selected",
     )
+    if config.compression_enabled and config.compression:
+        table.add_row(
+            "Compression",
+            "ready" if runtime.get("compression_active") else "not applied",
+            ", ".join(config.compression.techniques),
+        )
+    else:
+        table.add_row("Compression", "disabled", "No compression configured")
+
+    if config.agent_tools and config.agent_tools.enabled_tools:
+        table.add_row("Agent tools", "ready", ", ".join(config.agent_tools.enabled_tools))
+        if "memory" in config.agent_tools.enabled_tools:
+            memory_settings = dict((config.agent_tools.tool_settings or {}).get("memory") or {})
+            backend = str(memory_settings.get("backend") or "json")
+            detail = backend
+            if backend in {"json", "sqlite"}:
+                detail += f" / {memory_settings.get('path', 'default path')}"
+            elif backend == "postgres":
+                detail += f" / table={memory_settings.get('table', 'ms_rag_agent_memory')}"
+            elif backend == "mongodb_atlas":
+                detail += (
+                    f" / db={memory_settings.get('database', 'ms_rag_memory')}"
+                    f" / collection={memory_settings.get('collection', 'agent_memory')}"
+                )
+            table.add_row("Memory store", "ready", detail)
 
     selected = {retrieval.strategy} if retrieval else set()
     if retrieval and retrieval.strategy == "ensemble":
@@ -811,6 +964,13 @@ def _display_runtime_readiness(
             f"parents={parent_count}, chunks={chunk_count}, representation_embeddings={'yes' if has_embeddings else 'no'}",
         )
     console.print(table)  # type: ignore[union-attr]
+
+
+def _display_selected_architecture(config: PipelineConfig, console: object) -> None:
+    """Show the final selected architecture and all selected components."""
+    from ms_rag.ui.architecture import display_architecture_report  # noqa: PLC0415
+
+    display_architecture_report(config, console)
 
 
 def _ensure_vector_db_connection(
@@ -853,6 +1013,7 @@ def _ensure_vector_db_connection(
 def _run_query_loop(session: SessionState, eval_framework: object | None = None) -> None:
     """Run the interactive query loop."""
     from ms_rag.cli.query_loop import QueryLoop  # noqa: PLC0415
+    from ms_rag.llm.llm_integration import build_session_runtime_from_vector_store  # noqa: PLC0415
     from ms_rag.llm.llm_integration import process_query  # noqa: PLC0415
     from ms_rag.query.query_enhancer import QueryEnhancer  # noqa: PLC0415
     from ms_rag.session.session_manager import SessionManager  # noqa: PLC0415
@@ -867,11 +1028,85 @@ def _run_query_loop(session: SessionState, eval_framework: object | None = None)
             evaluation_framework=eval_framework,
         )
 
+    def edit_settings(sess: SessionState, console: object) -> bool:
+        changed = _edit_live_query_settings(sess, console)
+        if not changed:
+            return False
+        runtime = build_session_runtime_from_vector_store(
+            sess.config,
+            sess.credentials,
+            vector_store=sess.vector_store,
+            embeddings=getattr(sess.vector_store, "_ms_rag_embeddings", None),
+        )
+        sess.vector_store = runtime["vector_store"]
+        sess.retriever = runtime["retriever"]
+        sess.llm = runtime["llm"]
+        sess.rag_chain = runtime["rag_chain"]
+        _display_runtime_readiness(sess.config, runtime, console)
+        return True
+
     loop = QueryLoop(
         query_pipeline=pipeline,
         session_manager=SessionManager(),
+        settings_editor=edit_settings,
     )
     loop.run(session)
+
+
+def _edit_live_query_settings(session: SessionState, console: object) -> bool:
+    """Edit query-time settings that can be safely rebuilt without re-ingestion."""
+    from ms_rag.query.query_enhancer import QueryEnhancer  # noqa: PLC0415
+    from ms_rag.query.reranking_module import RerankingModule  # noqa: PLC0415
+    from ms_rag.query.context_compressor import ContextCompressor  # noqa: PLC0415
+    from ms_rag.ui.prompts import prompt_select, print_hint, print_success  # noqa: PLC0415
+    import questionary  # noqa: PLC0415
+
+    cfg = session.config
+    action = prompt_select(
+        "  What do you want to edit?",
+        choices=[
+            questionary.Choice("Query enhancement", "query_enhancement"),
+            questionary.Choice("Reranking", "reranking"),
+            questionary.Choice("Context compression", "compression"),
+            questionary.Choice("Retrieval/vector DB path (requires re-ingestion)", "requires_reingest"),
+            questionary.Choice("Cancel", "cancel"),
+        ],
+        console=console,  # type: ignore[arg-type]
+    )
+
+    if action == "cancel":
+        return False
+    if action == "requires_reingest":
+        print_hint(
+            console,  # type: ignore[arg-type]
+            "Retrieval strategy, vector DB, embedding model, loader, chunking, and source path changes require a fresh ingestion run so indexes stay consistent.",
+        )
+        return False
+
+    if action == "query_enhancement":
+        enhancer = QueryEnhancer()
+        cfg.query_enhancement = enhancer.configure(cfg.configured_providers)
+        cfg.hyde_llm_provider = enhancer.hyde_llm_provider
+        print_success(console, "Query enhancement updated.")  # type: ignore[arg-type]
+        return True
+
+    if action == "reranking":
+        reranker = RerankingModule(credential_store=session.credentials)
+        reranking_config = reranker.configure(cfg.retrieval.top_k if cfg.retrieval else 5)
+        cfg.reranking = reranking_config
+        cfg.reranking_enabled = reranking_config is not None
+        print_success(console, "Reranking settings updated.")  # type: ignore[arg-type]
+        return True
+
+    if action == "compression":
+        compressor = ContextCompressor()
+        compression_config = compressor.configure(cfg.configured_providers)
+        cfg.compression = compression_config
+        cfg.compression_enabled = compression_config is not None
+        print_success(console, "Compression settings updated.")  # type: ignore[arg-type]
+        return True
+
+    return False
 
 
 def _generate_and_offer_save(config: PipelineConfig, console: object) -> None:

@@ -190,7 +190,7 @@ class QueryEnhancer:
                     llm=llm,
                     num_queries=num_queries,
                 )
-                if strict and result_queries == before:
+                if strict and result_queries == before and technique != "query_rewriting":
                     raise RuntimeError(
                         f"Technique {technique!r} did not produce an enhanced query."
                     )
@@ -263,6 +263,12 @@ class QueryEnhancer:
         """Rewrite query to be clearer and more retrieval-friendly."""
         if llm is None:
             return query
+        if _is_simple_lookup_query(query):
+            warnings.warn(
+                "Improving a simple query may lead to wrong retrieval results; "
+                "MS-RAGS(ALL-IN-ONE) will still run query rewriting because you selected it.",
+                stacklevel=2,
+            )
         try:
             from langchain_core.prompts import ChatPromptTemplate  # noqa: PLC0415
             from langchain_core.output_parsers import StrOutputParser  # noqa: PLC0415
@@ -428,3 +434,26 @@ class QueryEnhancer:
         )
 
         return selected
+
+
+def _is_simple_lookup_query(query: str) -> bool:
+    """Return True when rewriting is more likely to weaken a direct lookup."""
+    cleaned = " ".join(query.strip().split())
+    if not cleaned:
+        return True
+    words = cleaned.split()
+    if len(words) > 8:
+        return False
+    lowered = cleaned.lower()
+    simple_prefixes = (
+        "tell me about ",
+        "what is ",
+        "what are ",
+        "who is ",
+        "who are ",
+        "define ",
+        "describe ",
+        "explain ",
+        "list ",
+    )
+    return lowered.startswith(simple_prefixes)

@@ -16,6 +16,8 @@ import pytest
 
 from ms_rag.llm.llm_integration import (
     _answer_from_merged_queries,
+    _collect_retriever_trace,
+    _select_primary_retrieval_query,
     build_langgraph_workflow,
     build_rag_chain,
     get_llm,
@@ -26,6 +28,7 @@ from ms_rag.models import (
     CredentialStore,
     PipelineConfig,
     RAGTypeConfig,
+    RetrievalConfig,
     SessionState,
 )
 from ms_rag.query.query_enhancer import QueryEnhancer
@@ -229,6 +232,28 @@ class TestBuildLangGraphWorkflow:
         assert '"direct": "direct_answer"' in source
         assert '"deep": "deep_retrieve"' in source
 
+    def test_agentic_rag_workflow_compiles_without_graphstate_name_error(self) -> None:
+        """Agentic graph compilation must resolve GraphState annotations."""
+        try:
+            from langchain_core.runnables import RunnableLambda  # noqa: PLC0415
+        except ImportError:
+            pytest.skip("langchain-core not installed")
+
+        retriever = MagicMock()
+        llm = RunnableLambda(lambda value: "retrieve")
+
+        try:
+            graph = build_langgraph_workflow(
+                "agentic_rag",
+                retriever=retriever,
+                llm=llm,
+                system_prompt="Use context only.",
+            )
+        except ImportError:
+            pytest.skip("langgraph not installed")
+
+        assert graph is not None
+
 
 # ---------------------------------------------------------------------------
 # process_query
@@ -311,6 +336,126 @@ def test_required_hyde_rag_enhancement_fails_instead_of_silent_fallback() -> Non
         process_query("What is RAG?", session, query_enhancer=QueryEnhancer())
 
 
+def test_process_query_records_enhanced_query_trace() -> None:
+    from langchain_core.documents import Document
+
+    config = PipelineConfig()
+    config.query_enhancement = ["query_rewriting"]
+    config.retrieval = RetrievalConfig(strategy="dense_vector", top_k=5)
+    mock_chain = MagicMock()
+    mock_chain.invoke.return_value = "answer"
+    session = SessionState(
+        config=config,
+        credentials=CredentialStore(),
+        rag_chain=mock_chain,
+        llm=MagicMock(),
+    )
+    session.retriever = MagicMock()
+    session.retriever.invoke.return_value = [Document(page_content="Elephants are large mammals.")]
+    enhancer = MagicMock()
+    enhancer.enhance.return_value = ["rewritten elephant query"]
+
+    with patch("ms_rag.llm.llm_integration._answer_from_merged_queries") as answer_helper:
+        answer_helper.return_value = "answer"
+        answer = process_query("tell me about elephants", session, query_enhancer=enhancer)
+
+    assert answer == "answer"
+    answer_helper.assert_called_once()
+    assert answer_helper.call_args.kwargs["original_query"] == "tell me about elephants"
+    assert answer_helper.call_args.kwargs["retrieval_queries"] == ["rewritten elephant query"]
+    assert session.last_enhanced_queries == ["rewritten elephant query"]
+    assert session.last_primary_retrieval_query == "rewritten elephant query"
+    assert session.last_retrieved_context_count == 1
+    assert "Elephants are large mammals" in session.last_retrieved_context_preview[0]
+
+
+def test_hyde_retrieves_with_hypothetical_but_answers_original_question() -> None:
+    config = PipelineConfig()
+    config.query_enhancement = ["hyde"]
+    config.retrieval = RetrievalConfig(strategy="multi_vector", top_k=5)
+    session = SessionState(
+        config=config,
+        credentials=CredentialStore(),
+        rag_chain=MagicMock(),
+        retriever=MagicMock(),
+        llm=MagicMock(),
+    )
+    enhancer = MagicMock()
+    enhancer.enhance.return_value = ["Hypothetical elephant document."]
+
+    with patch("ms_rag.llm.llm_integration._answer_from_merged_queries") as answer_helper:
+        answer_helper.return_value = "Elephants are large land mammals."
+        answer = process_query("tell me about elephants", session, query_enhancer=enhancer)
+
+    assert answer == "Elephants are large land mammals."
+    answer_helper.assert_called_once()
+    assert answer_helper.call_args.kwargs["original_query"] == "tell me about elephants"
+    assert answer_helper.call_args.kwargs["retrieval_queries"] == ["Hypothetical elephant document."]
+    session.rag_chain.invoke.assert_not_called()
+
+
+def test_keyword_retrieval_keeps_original_query_when_hyde_is_enabled() -> None:
+    selected = _select_primary_retrieval_query(
+        original_query="tell me about elephant",
+        enhanced_queries=["A hypothetical document about elephants and habitats."],
+        retrieval=RetrievalConfig(strategy="keyword_bm25", top_k=5),
+    )
+
+    assert selected == "tell me about elephant"
+
+
+def test_hybrid_retrieval_keeps_original_query_when_hyde_is_enabled() -> None:
+    selected = _select_primary_retrieval_query(
+        original_query="tell me about elephant",
+        enhanced_queries=["A hypothetical document about elephants and habitats."],
+        retrieval=RetrievalConfig(strategy="hybrid", top_k=5, alpha=0.5),
+    )
+
+    assert selected == "tell me about elephant"
+
+
+def test_keyword_ensemble_keeps_original_query_when_hyde_is_enabled() -> None:
+    selected = _select_primary_retrieval_query(
+        original_query="tell me about elephant",
+        enhanced_queries=["A hypothetical document about elephants and habitats."],
+        retrieval=RetrievalConfig(
+            strategy="ensemble",
+            top_k=5,
+            ensemble_sub_retrievers=["dense_vector", "keyword_bm25"],
+        ),
+    )
+
+    assert selected == "tell me about elephant"
+
+
+def test_dense_retrieval_uses_hyde_enhanced_query() -> None:
+    selected = _select_primary_retrieval_query(
+        original_query="tell me about elephant",
+        enhanced_queries=["A hypothetical document about elephants and habitats."],
+        retrieval=RetrievalConfig(strategy="dense_vector", top_k=5),
+    )
+
+    assert selected == "A hypothetical document about elephants and habitats."
+
+
+def test_collect_retriever_trace_reads_nested_rerank_and_compression_counts() -> None:
+    base = MagicMock()
+    reranker = MagicMock()
+    reranker.base_retriever = base
+    reranker._ms_rag_pre_rerank_count = 5
+    reranker._ms_rag_post_rerank_count = 3
+    compressor = MagicMock()
+    compressor.base_retriever = reranker
+    compressor._ms_rag_pre_compression_count = 3
+    compressor._ms_rag_post_compression_count = 3
+    compressor._ms_rag_compression_fallback = True
+
+    trace = _collect_retriever_trace(compressor)
+
+    assert trace["rerank"] == {"before": 5, "after": 3}
+    assert trace["compression"] == {"before": 3, "after": 3, "fallback": True}
+
+
 def test_rag_fusion_uses_reciprocal_rank_fusion_ordering() -> None:
     from langchain_core.documents import Document
     from langchain_core.runnables import RunnableLambda
@@ -343,3 +488,16 @@ def test_rag_fusion_uses_reciprocal_rank_fusion_ordering() -> None:
     assert answer == "answer"
     rendered = captured["prompt"]
     assert rendered.find("B") < rendered.find("A")
+
+
+def test_query_rewriting_keeps_simple_lookup_query_unchanged() -> None:
+    enhancer = QueryEnhancer()
+    llm = MagicMock()
+
+    result = enhancer.enhance(
+        "tell me about elephants",
+        techniques=["query_rewriting"],
+        llm=llm,
+    )
+
+    assert result == ["tell me about elephants"]

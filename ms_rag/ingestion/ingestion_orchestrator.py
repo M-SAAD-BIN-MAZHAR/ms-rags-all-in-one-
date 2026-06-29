@@ -100,6 +100,55 @@ def _copy_document(doc: object) -> object:
         return doc
 
 
+def _document_text(doc: object) -> str:
+    """Read text from LangChain, LlamaIndex, or simple document-like objects."""
+    page_content = getattr(doc, "page_content", None)
+    if page_content is not None:
+        return str(page_content)
+
+    get_content = getattr(doc, "get_content", None)
+    if callable(get_content):
+        try:
+            return str(get_content() or "")
+        except TypeError:
+            return str(get_content(metadata_mode="none") or "")
+
+    text = getattr(doc, "text", None)
+    if text is not None:
+        return str(text)
+
+    return str(doc or "")
+
+
+def _normalize_documents(docs: list, source: str, loader: str) -> list[Document]:
+    """Convert loader output into LangChain Documents.
+
+    Some parser SDKs, especially LlamaParse/LlamaIndex, return their own
+    Document shape with `.text` or `.get_content()` instead of `.page_content`.
+    Normalize at the ingestion boundary so chunkers, retrievers, and vector DBs
+    receive one predictable document contract.
+    """
+    normalized: list[Document] = []
+    for doc in docs:
+        if hasattr(doc, "page_content"):
+            metadata = dict(getattr(doc, "metadata", {}) or {})
+            metadata.setdefault("source", source)
+            metadata.setdefault("loader", loader)
+            normalized.append(
+                Document(
+                    page_content=str(getattr(doc, "page_content") or ""),
+                    metadata=metadata,
+                )
+            )
+            continue
+
+        metadata = dict(getattr(doc, "metadata", {}) or {})
+        metadata.setdefault("source", source)
+        metadata.setdefault("loader", loader)
+        normalized.append(Document(page_content=_document_text(doc), metadata=metadata))
+    return normalized
+
+
 def _prepare_parent_documents(docs: list, source: str) -> dict[str, object]:
     """Attach stable parent IDs and timestamps to loaded documents."""
     parent_documents: dict[str, object] = {}
@@ -173,6 +222,9 @@ class IngestionOrchestrator:
             vector_store=store,
         )
     """
+
+    def __init__(self, credential_store: object | None = None) -> None:
+        self._credential_store = credential_store
 
     def discover_documents(
         self,
@@ -330,6 +382,17 @@ class IngestionOrchestrator:
                         chunks = splitter.split_documents(prepared_docs["documents"])
                         _prepare_child_documents(chunks)
                         sanitize_documents(chunks)
+                        chunks = [
+                            chunk
+                            for chunk in chunks
+                            if getattr(chunk, "page_content", "").strip()
+                        ]
+                        if not chunks:
+                            raise IngestionError(
+                                "No extractable text chunks were produced. "
+                                "For scanned/image PDFs, install Poppler/Tesseract or use LlamaParse.",
+                                document_path=source_str,
+                            )
                         retrieval_state["chunk_documents"].extend(chunks)
                         keyword_corpus.extend(
                             chunk.page_content
@@ -475,7 +538,8 @@ class IngestionOrchestrator:
                 document_path=source_str,
             )
 
-        return self._invoke_loader(loader_class_name, source_str, youtube_language)
+        docs = self._invoke_loader(loader_class_name, source_str, youtube_language)
+        return _normalize_documents(docs, source_str, loader_class_name)
 
     def _invoke_loader(
         self,
@@ -503,6 +567,12 @@ class IngestionOrchestrator:
                 from langchain_unstructured import UnstructuredLoader  # noqa: PLC0415
                 return UnstructuredLoader(source).load()
             except Exception as exc:  # noqa: BLE001
+                if "poppler" in str(exc).lower() or "page count" in str(exc).lower():
+                    raise IngestionError(
+                        "UnstructuredPDFLoader needs Poppler for this PDF. "
+                        "Install Poppler and add it to PATH, or choose LlamaParse for cloud parsing.",
+                        document_path=source,
+                    ) from exc
                 warnings.warn(
                     f"UnstructuredPDFLoader could not parse {source}; falling back to PyPDFLoader: {exc}",
                     stacklevel=2,
@@ -602,7 +672,10 @@ class IngestionOrchestrator:
 
         if loader_class_name == "FireCrawlLoader":
             from langchain_community.document_loaders import FireCrawlLoader  # noqa: PLC0415
-            return FireCrawlLoader(url=source, mode="scrape").load()
+            from ms_rag.utils.credentials import env_from_store, temporary_env  # noqa: PLC0415
+
+            with temporary_env(env_from_store(self._credential_store, "firecrawl", ("FIRECRAWL_API_KEY",))):
+                return FireCrawlLoader(url=source, mode="scrape").load()
 
         if loader_class_name == "ApifyWebScraper":
             if str(source).startswith(("http://", "https://")):
@@ -613,13 +686,16 @@ class IngestionOrchestrator:
                 )
             from langchain_community.document_loaders import ApifyDatasetLoader  # noqa: PLC0415
             from langchain_core.documents import Document  # noqa: PLC0415
-            return ApifyDatasetLoader(
-                dataset_id=source,
-                dataset_mapping_function=lambda item: Document(
-                    page_content=str(item.get("text") or item.get("content") or item),
-                    metadata={"source": source, "loader": "ApifyWebScraper"},
-                ),
-            ).load()
+            from ms_rag.utils.credentials import env_from_store, temporary_env  # noqa: PLC0415
+
+            with temporary_env(env_from_store(self._credential_store, "apify", ("APIFY_API_TOKEN",))):
+                return ApifyDatasetLoader(
+                    dataset_id=source,
+                    dataset_mapping_function=lambda item: Document(
+                        page_content=str(item.get("text") or item.get("content") or item),
+                        metadata={"source": source, "loader": "ApifyWebScraper"},
+                    ),
+                ).load()
 
         if loader_class_name == "LlamaParseLoader":
             try:
@@ -629,8 +705,15 @@ class IngestionOrchestrator:
                     "LlamaParseLoader requires the llama-parse package. "
                     "Install it with `pip install llama-parse` and set LLAMA_CLOUD_API_KEY."
                 ) from exc
-            parser = LlamaParse(result_type="markdown")
-            return parser.load_data(source)
+            from ms_rag.utils.credentials import env_from_store, temporary_env  # noqa: PLC0415
+
+            with temporary_env(env_from_store(self._credential_store, "llamaparse", ("LLAMA_CLOUD_API_KEY",))):
+                parser = LlamaParse(result_type="markdown")
+                return _normalize_documents(
+                    parser.load_data(source),
+                    source,
+                    loader_class_name,
+                )
 
         # ── YouTube ───────────────────────────────────────────────────
         if loader_class_name == "YoutubeLoader":

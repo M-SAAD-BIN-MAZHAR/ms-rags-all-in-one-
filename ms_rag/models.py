@@ -189,6 +189,8 @@ class EvaluationConfig:
     evaluators: list[str]  # e.g. ["ragas", "deepeval", "langsmith"]
     # Metric thresholds for CI/CD gate evaluation (metric_name -> min_score)
     cicd_thresholds: dict[str, float] | None = None
+    evaluator_llm_provider: str | None = None
+    evaluator_llm_model: str | None = None
 
 
 @dataclass
@@ -216,6 +218,7 @@ class GeneratedCode:
     python_code: str      # complete pipeline.py content
     requirements_txt: str # requirements.txt content (also embedded as comment at top of python_code)
     rag_type: str         # e.g. "naive_rag" — used for display and file naming
+    env_txt: str = ""     # .env content with selected runtime variables, values intentionally blank
 
 
 # ---------------------------------------------------------------------------
@@ -542,3 +545,10 @@ class SessionState:
     current_step: int = 1
     query_history: list[tuple[str, str]] = field(default_factory=list)
     # Each entry: (query_text, answer_text)
+    last_enhanced_queries: list[str] = field(default_factory=list)
+    last_primary_retrieval_query: str = ""
+    last_retrieved_context_count: int = 0
+    last_retrieved_context_preview: list[str] = field(default_factory=list)
+    last_evaluation_scores: dict[str, float] = field(default_factory=dict)
+    last_evaluation_warning: str = ""
+    last_rag_trace: list[str] = field(default_factory=list)

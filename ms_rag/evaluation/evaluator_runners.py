@@ -9,12 +9,24 @@ from __future__ import annotations
 import json
 import os
 import re
+import contextlib
+import io
+import math
+import sys
+import types
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ms_rag.utils.credentials import resolve_credential
+from ms_rag.utils.credentials import env_from_store, resolve_credential, temporary_env
+
+
+def _openai_env_from_store(credential_store: object | None) -> dict[str, str | None]:
+    """Return OpenAI env values from the MS-RAGS credential store."""
+    values = env_from_store(credential_store, "openai", ("OPENAI_API_KEY", "OPENAI_ORG_ID"))
+    values["OPENAI_ORGANIZATION"] = values.get("OPENAI_ORG_ID")
+    return values
 
 
 def context_texts(context: list) -> list[str]:
@@ -74,29 +86,87 @@ def _prefixed(scores: dict[str, float], prefix: str) -> dict[str, float]:
     return {key if key.startswith(f"{prefix}_") else f"{prefix}_{key}": value for key, value in scores.items()}
 
 
+def finite_scores(scores: dict[str, Any]) -> dict[str, float]:
+    """Return only numeric finite evaluator scores."""
+    clean: dict[str, float] = {}
+    for key, value in scores.items():
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            clean[str(key)] = float(value)
+    return clean
+
+
+def _install_ragas_vertexai_compat_shim() -> None:
+    """Provide the legacy VertexAI import path expected by some RAGAS builds.
+
+    RAGAS 0.4.x imports ``langchain_community.chat_models.vertexai`` at module
+    import time even when the user evaluates with OpenAI. Newer
+    langchain-community releases removed that chat-model module in favour of
+    ``langchain-google-vertexai``. A tiny class shim is enough for RAGAS to
+    finish importing; actual VertexAI use still requires the real integration.
+    """
+    module_name = "langchain_community.chat_models.vertexai"
+    if module_name in sys.modules:
+        return
+
+    try:
+        __import__(module_name)
+        return
+    except ModuleNotFoundError:
+        pass
+
+    try:
+        from langchain_google_vertexai import ChatVertexAI  # type: ignore  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        class ChatVertexAI:  # type: ignore[no-redef]
+            """Compatibility placeholder for RAGAS import-time type checks."""
+
+            pass
+
+    shim = types.ModuleType(module_name)
+    shim.ChatVertexAI = ChatVertexAI
+    sys.modules[module_name] = shim
+
+
 def run_ragas(
     query: str,
     context: list,
     answer: str,
     *,
     credential_store: object | None = None,
+    evaluator_model: str | None = None,
 ) -> dict[str, float]:
     """Run RAGAS metrics when ragas and its dependencies are available."""
     try:
-        from ragas import evaluate as ragas_evaluate  # noqa: PLC0415
-        from ragas.metrics import (  # noqa: PLC0415
-            AnswerRelevancy,
-            ContextPrecision,
-            Faithfulness,
-        )
+        with temporary_env(_openai_env_from_store(credential_store)):
+            _install_ragas_vertexai_compat_shim()
+            from ragas import evaluate as ragas_evaluate  # noqa: PLC0415
+            from ragas import EvaluationDataset  # noqa: PLC0415
+            from ragas.metrics import (  # noqa: PLC0415
+                AnswerRelevancy,
+                Faithfulness,
+                LLMContextPrecisionWithoutReference,
+            )
+            from langchain_openai import ChatOpenAI  # noqa: PLC0415
 
-        sample = {
-            "user_input": query,
-            "response": answer,
-            "retrieved_contexts": context_texts(context) or [""],
-        }
-        metrics = [Faithfulness(), AnswerRelevancy(), ContextPrecision()]
-        result = ragas_evaluate([sample], metrics=metrics)
+            sample = {
+                "user_input": query,
+                "response": answer,
+                "retrieved_contexts": context_texts(context) or [""],
+            }
+            metrics = [
+                Faithfulness(),
+                AnswerRelevancy(),
+                LLMContextPrecisionWithoutReference(),
+            ]
+            dataset = EvaluationDataset.from_list([sample])
+            ragas_llm = ChatOpenAI(model=evaluator_model or "gpt-4o-mini", temperature=0)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                result = ragas_evaluate(
+                    dataset,
+                    metrics=metrics,
+                    llm=ragas_llm,
+                    show_progress=False,
+                )
 
         scores: dict[str, float] = {}
         if hasattr(result, "to_pandas"):
@@ -105,8 +175,15 @@ def run_ragas(
                 row = df.iloc[0]
                 for col in df.columns:
                     value = row[col]
-                    if isinstance(value, (int, float)):
+                    if isinstance(value, (int, float)) and math.isfinite(float(value)):
                         scores[str(col).lower()] = float(value)
+        if not scores:
+            warnings.warn(
+                "RAGAS returned no finite scores; using lexical fallback metrics. "
+                "This usually means the evaluator LLM/API key failed or the selected RAGAS metric could not complete.",
+                stacklevel=2,
+            )
+            return lexical_grounding_scores(query, answer, context, prefix="ragas")
         return scores
     except Exception as exc:
         warnings.warn(
@@ -120,21 +197,42 @@ def run_deepeval(
     query: str,
     context: list,
     answer: str,
+    *,
+    credential_store: object | None = None,
+    evaluator_model: str | None = None,
 ) -> dict[str, float]:
     """Run DeepEval answer relevancy when deepeval is installed."""
     try:
-        from deepeval.metrics import AnswerRelevancyMetric  # noqa: PLC0415
-        from deepeval.test_case import LLMTestCase  # noqa: PLC0415
+        with temporary_env(_openai_env_from_store(credential_store)):
+            from deepeval.metrics import AnswerRelevancyMetric  # noqa: PLC0415
+            from deepeval.test_case import LLMTestCase  # noqa: PLC0415
 
-        metric = AnswerRelevancyMetric(threshold=0.5)
-        test_case = LLMTestCase(
-            input=query,
-            actual_output=answer,
-            retrieval_context=context_texts(context) or [""],
-        )
-        metric.measure(test_case)
-        score = float(metric.score or 0.0)
-        return {"answer_relevancy": score, "deepeval_answer_relevancy": score}
+            try:
+                metric = AnswerRelevancyMetric(
+                    threshold=0.5,
+                    async_mode=False,
+                    verbose_mode=False,
+                    model=evaluator_model or "gpt-4o-mini",
+                )
+            except TypeError:
+                metric = AnswerRelevancyMetric(threshold=0.5, model=evaluator_model or "gpt-4o-mini")
+            test_case = LLMTestCase(
+                input=query,
+                actual_output=answer,
+                retrieval_context=context_texts(context) or [""],
+            )
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                metric.measure(test_case)
+        score = float(metric.score)
+        scores = finite_scores({"answer_relevancy": score, "deepeval_answer_relevancy": score})
+        if not scores:
+            warnings.warn(
+                "DeepEval returned no finite scores; using lexical fallback metrics. "
+                "This usually means the evaluator LLM/API key failed or the selected metric could not complete.",
+                stacklevel=2,
+            )
+            return lexical_grounding_scores(query, answer, context, prefix="deepeval")
+        return scores
     except Exception as exc:
         warnings.warn(
             f"DeepEval evaluation failed; using lexical fallback metrics: {exc}",
@@ -148,19 +246,24 @@ def run_trulens(
     context: list,
     answer: str,
 ) -> dict[str, float]:
-    """Run TruLens package-backed local feedback compatibility checks."""
+    """Run TruLens core package validation plus local groundedness scores.
+
+    The optional ``trulens.apps.langchain`` adapter can lag behind modern
+    LangChain releases. Live single-query evaluation does not need that adapter,
+    so this runner validates the stable TruLens core package instead of importing
+    TruChain and breaking on adapter compatibility.
+    """
     try:
         from trulens.core import Feedback  # noqa: PLC0415
         from trulens.core import Select  # noqa: PLC0415
-        from trulens.apps.langchain import TruChain  # noqa: PLC0415
 
-        _ = (Feedback, Select, TruChain)  # validate supported modern packages
+        _ = (Feedback, Select)  # validate supported modern core package
         scores = lexical_grounding_scores(query, answer, context)
-        scores["package_available"] = 1.0
+        scores["core_package_available"] = 1.0
         return _prefixed(scores, "trulens")
     except Exception as exc:
         warnings.warn(
-            f"TruLens import/check failed; using lexical fallback metrics: {exc}",
+            f"TruLens core import/check failed; using lexical fallback metrics: {exc}",
             stacklevel=2,
         )
         return lexical_grounding_scores(query, answer, context, prefix="trulens")

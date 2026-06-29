@@ -162,9 +162,9 @@ class ContextCompressor:
             selected = valid
             break
 
-        # Embeddings filter threshold (Req 14.4)
+        # Embedding-based compressors use a similarity threshold.
         similarity_threshold = 0.75
-        if "embeddings_filter" in selected:
+        if set(selected) & {"embeddings_filter", "contextual_compression", "document_compressor_pipeline"}:
             similarity_threshold = self._prompt_threshold(console)
 
         config = CompressionConfig(
@@ -225,8 +225,9 @@ class ContextCompressor:
 
         # Wrap with ContextualCompressionRetriever if base_retriever provided
         if base_retriever is not None:
-            from langchain_classic.retrievers import ContextualCompressionRetriever  # noqa: PLC0415
-            return ContextualCompressionRetriever(
+            from ms_rag.query.compression_retriever import SafeCompressionRetriever  # noqa: PLC0415
+
+            return SafeCompressionRetriever(
                 base_compressor=single,
                 base_retriever=base_retriever,
             )
@@ -286,11 +287,71 @@ class ContextCompressor:
             return EmbeddingsRedundantFilter(embeddings=embeddings)  # type: ignore[arg-type]
 
         if technique == "contextual_compression":
-            # This is handled at the get_compressor level with base_retriever
+            # ContextualCompressionRetriever is the wrapper, but it still needs
+            # an actual document compressor. Use the selected embeddings as a
+            # reliable local default, then fall back to an LLM extractor.
+            if embeddings is not None:
+                from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
+                    EmbeddingsFilter,
+                )
+                return EmbeddingsFilter(
+                    embeddings=embeddings,  # type: ignore[arg-type]
+                    similarity_threshold=config.similarity_threshold,
+                )
+            if llm is not None:
+                from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
+                    LLMChainExtractor,
+                )
+                return LLMChainExtractor.from_llm(llm)  # type: ignore[arg-type]
+            warnings.warn(
+                "Contextual Compression was selected but no embeddings or LLM object is available; skipping it.",
+                stacklevel=2,
+            )
             return None
 
         if technique == "document_compressor_pipeline":
-            # Meta-technique: pipeline is assembled at the end
+            if len(config.techniques) > 1:
+                # Meta-technique: explicit companion compressors are assembled
+                # into the final pipeline by get_compressor().
+                return None
+            # If selected by itself, provide a real lightweight pipeline instead
+            # of building no compressor. When combined with other techniques,
+            # get_compressor still assembles the final pipeline in selection order.
+            transformers = []
+            if embeddings is not None:
+                from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
+                    EmbeddingsFilter,
+                )
+                from langchain_community.document_transformers import (  # noqa: PLC0415
+                    EmbeddingsRedundantFilter,
+                )
+
+                transformers.extend(
+                    [
+                        EmbeddingsRedundantFilter(embeddings=embeddings),  # type: ignore[arg-type]
+                        EmbeddingsFilter(
+                            embeddings=embeddings,  # type: ignore[arg-type]
+                            similarity_threshold=config.similarity_threshold,
+                        ),
+                    ]
+                )
+            elif llm is not None:
+                from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
+                    LLMChainExtractor,
+                )
+
+                transformers.append(LLMChainExtractor.from_llm(llm))  # type: ignore[arg-type]
+
+            if transformers:
+                from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
+                    DocumentCompressorPipeline,
+                )
+
+                return DocumentCompressorPipeline(transformers=transformers)
+            warnings.warn(
+                "Document Compressor Pipeline was selected but no embeddings or LLM object is available; skipping it.",
+                stacklevel=2,
+            )
             return None
 
         if technique == "summary_compression":
@@ -300,10 +361,9 @@ class ContextCompressor:
                     stacklevel=2,
                 )
                 return None
-            from langchain_classic.retrievers.document_compressors import (  # noqa: PLC0415
-                LLMChainFilter,
-            )
-            return LLMChainFilter.from_llm(llm)  # type: ignore[arg-type]
+            from ms_rag.query.compression_retriever import LLMSummaryCompressor  # noqa: PLC0415
+
+            return LLMSummaryCompressor(llm=llm)
 
         warnings.warn(f"Unknown compression technique {technique!r}; skipping it.", stacklevel=2)
         return None

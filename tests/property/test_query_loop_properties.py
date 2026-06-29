@@ -198,6 +198,11 @@ class TestSlashCommandClassification:
         loop = QueryLoop()
         assert loop._classify_input("/save") == "save"
 
+    def test_settings_commands(self) -> None:
+        loop = QueryLoop()
+        assert loop._classify_input("/settings") == "settings"
+        assert loop._classify_input("/edit") == "settings"
+
     def test_unknown_slash_command(self) -> None:
         loop = QueryLoop()
         assert loop._classify_input("/unknown") == "unknown_command"
@@ -212,6 +217,8 @@ class TestSlashCommandClassification:
         assert "/exit" in VALID_COMMANDS
         assert "/quit" in VALID_COMMANDS
         assert "/config" in VALID_COMMANDS
+        assert "/settings" in VALID_COMMANDS
+        assert "/edit" in VALID_COMMANDS
         assert "/save" in VALID_COMMANDS
         assert "/help" in VALID_COMMANDS
 
@@ -260,6 +267,54 @@ def test_display_config_renders_all_components() -> None:
     assert mock_table.add_row.call_count >= 10
 
 
+def test_query_enhancement_trace_renders_when_query_changes() -> None:
+    session = _make_session()
+    session.last_enhanced_queries = ["rewritten elephant query"]
+    session.last_primary_retrieval_query = "rewritten elephant query"
+    loop = QueryLoop()
+    mock_console = MagicMock()
+
+    with patch("ms_rag.cli.query_loop.Table") as mock_table_cls:
+        mock_table = MagicMock()
+        mock_table_cls.return_value = mock_table
+        loop._display_query_enhancement_trace(session, "tell me about elephants", mock_console)
+
+    mock_console.print.assert_called_once()
+    added_values = [call.args for call in mock_table.add_row.call_args_list]
+    assert any("Original query" in args for args in added_values)
+    assert any("Enhanced #1" in args for args in added_values)
+
+
+def test_query_enhancement_trace_skips_when_query_unchanged() -> None:
+    session = _make_session()
+    session.last_enhanced_queries = ["tell me about elephants"]
+    session.last_primary_retrieval_query = "tell me about elephants"
+    loop = QueryLoop()
+    mock_console = MagicMock()
+
+    loop._display_query_enhancement_trace(session, "tell me about elephants", mock_console)
+
+    mock_console.print.assert_not_called()
+
+
+def test_retrieval_trace_renders_context_count_and_preview() -> None:
+    session = _make_session()
+    session.last_retrieved_context_count = 1
+    session.last_retrieved_context_preview = ["Elephants are large mammals.\nThey have trunks."]
+    loop = QueryLoop()
+    mock_console = MagicMock()
+
+    with patch("ms_rag.cli.query_loop.Table") as mock_table_cls:
+        mock_table = MagicMock()
+        mock_table_cls.return_value = mock_table
+        loop._display_retrieval_trace(session, mock_console)
+
+    mock_console.print.assert_called_once()
+    added_values = [call.args for call in mock_table.add_row.call_args_list]
+    assert any("Context chunks" in args and "1" in args for args in added_values)
+    assert any("Preview #1" in args for args in added_values)
+
+
 # ---------------------------------------------------------------------------
 # Query error recovery (Req 19.3)
 # ---------------------------------------------------------------------------
@@ -300,6 +355,33 @@ def test_query_error_returns_to_prompt() -> None:
 
     # The query was attempted exactly once before /quit terminated the loop
     assert call_count["queries"] == 1
+
+
+def test_settings_command_invokes_editor_and_returns_to_prompt() -> None:
+    session = _make_session()
+    editor = MagicMock(return_value=True)
+    responses = iter(["/settings", "/quit"])
+
+    def text_ask(*args, **kwargs) -> str | None:
+        return next(responses, None)
+
+    with patch("ms_rag.cli.query_loop.questionary") as mock_q, \
+         patch("ms_rag.cli.query_loop.Panel"), \
+         patch("ms_rag.cli.query_loop.Text"):
+
+        mock_prompt = MagicMock()
+        mock_prompt.ask.side_effect = text_ask
+        mock_q.text.return_value = mock_prompt
+
+        mock_confirm = MagicMock()
+        mock_confirm.ask.return_value = True
+        mock_q.confirm.return_value = mock_confirm
+
+        loop = QueryLoop(settings_editor=editor)
+        loop.run(session)
+
+    editor.assert_called_once()
+    assert editor.call_args.args[0] is session
 
 
 def test_answer_panel_uses_wrapped_text_rendering() -> None:

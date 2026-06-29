@@ -100,9 +100,47 @@ RuntimeError: FAISS store has no documents yet.
 
 **Smoke tests:** `tests/smoke/test_vector_db_smoke.py` contains opt-in live backend checks for Chroma, FAISS, and Qdrant. They only run when `MS_RAG_SMOKE_VECTOR_DBS` names the target backend and the required connection settings are present.
 
+**Loader dependency preflight:** Before ingestion, the CLI now checks selected loaders against local document sources and reports required external tools. `UnstructuredPDFLoader` with PDFs requires Poppler (`pdfinfo`) for reliable page counting and should not silently fall back to PyPDF when Poppler/page-count errors occur. Tesseract is recommended for local OCR, Java is required for Tabula, and Ghostscript is recommended for Camelot. Missing required tools must produce a visible prompt/error so users know what to install or can choose LlamaParse instead.
+
+**Empty extraction guard:** If loaders/chunkers produce only empty chunks, ingestion must fail with a clear `No extractable text chunks were produced` message instead of writing an empty vector corpus that later answers "I don't know" for valid questions.
+
+**Loader output normalization:** Loader outputs must be normalized to LangChain `Document(page_content=..., metadata=...)` objects before chunking. LlamaParse/LlamaIndex can return documents with `.text` or `.get_content()` instead of `.page_content`; do not pass those raw objects into chunkers or vector stores.
+
+**DeepEval query-loop hygiene:** DeepEval live evaluation should run in quiet synchronous mode when supported (`async_mode=False`, `verbose_mode=False`) and suppress package progress output so Windows event-loop cleanup noise does not pollute the terminal UI.
+
 **Deployable docs:** `docs/` is a public, multi-page static, Vercel-ready documentation site for users. It covers the product pitch, setup, all RAG types, loaders/extractors, chunking, embeddings, vector databases, retrieval, reranking, compression, evaluation, observability, generated code, recommendations, production readiness, and docs deployment. Root `vercel.json` rewrites clean routes such as `/rag-types` and `/pipeline` to the matching docs pages and includes sitemap/robots routes.
 
 **Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\property\test_vectorization_properties.py tests\unit\test_vectordb_connector.py tests\property\test_query_loop_properties.py -q` passed with 66 tests.
+
+### Recent Credential Resolution Hardening — Store Beats Shell Environment
+
+**Issue observed:** Some SDKs read credentials directly from `os.environ`, so a stale shell key could be used even after the user typed a fresh key in the MS-RAGS terminal UI.
+
+**Resolution:** Runtime integrations must resolve credentials from `CredentialStore` first. For SDKs that only read environment variables, use `temporary_env()` from `ms_rag.utils.credentials` so the CLI-entered key is exposed only for that SDK call and the previous shell environment is restored afterward.
+
+**Covered paths:** RAGAS, DeepEval, Pinecone, FireCrawl, Apify, LlamaParse, and source-rebuild paths for keyword/advanced/GraphRAG retrieval now receive the active credential store.
+
+**Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\unit\test_credentials.py tests\unit\test_evaluation_framework.py tests\unit\test_vectordb_connector.py tests\property\test_ingestion_properties.py -q` passed with 100 tests.
+
+### Recent Code Generation Hardening — Selected Config + `.env`
+
+Generated output now writes three files to the selected folder: `pipeline.py`, `requirements.txt`, and `.env`. The `.env` file is generated from the same `PipelineConfig` as the Python code, including selected providers, embedding provider, cloud loaders, vector DB, keyword store, graph store, evaluators, reranker, and agentic tools. Secret values are intentionally blank; users fill them before running the standalone pipeline.
+
+**Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\property\test_codegen_properties.py tests\property\test_pipeline_config_properties.py tests\unit\test_credentials.py tests\unit\test_evaluation_framework.py tests\unit\test_vectordb_connector.py -q` passed with 129 tests total across the two runs.
+
+### Recent Self-RAG Visibility and Evidence Hardening
+
+Self-RAG, Corrective RAG, Agentic RAG, Adaptive RAG, and standard LCEL RAG now write a per-query `last_rag_trace` onto `SessionState`. `QueryLoop` displays this as a `RAG Reasoning Trace` table before the retrieval/evaluation/answer panels so users can see routing, retrieval, grading, rewriting, tool usage, and generation decisions instead of guessing what happened.
+
+Self-RAG document grading is guarded against over-filtering: if the LLM relevance grader removes every retrieved document but the original retrieved chunks contain clear lexical overlap with the user query, MS-RAGS keeps the strongest evidence and shows that safety decision in the trace. If generation returns the exact grounded-no-answer response despite available evidence, Self-RAG performs one visible grounded retry before returning the answer. Keep generated standalone LangGraph code in parity with this behavior.
+
+**Verification run:** `.\.venv\Scripts\python.exe -m py_compile ms_rag\llm\llm_integration.py ms_rag\cli\query_loop.py ms_rag\models.py ms_rag\codegen\code_generator.py` passed, and a fake Self-RAG graph simulation confirmed trace, lexical safety, and grounded retry behavior.
+
+### Recent Architecture Visibility Report
+
+After runtime wiring, MS-RAGS now renders a final `Selection Visibility Summary` table and `Selected Technical Architecture` flowchart from the actual `PipelineConfig`. This happens for both fresh interactive setup and `--load` sessions. The report must remain config-driven: do not hard-code a demo architecture or show options the user did not select. The flowchart is implemented in `ms_rag/ui/architecture.py` and should be kept in sync with any new configurable RAG component.
+
+**Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\unit\test_architecture_visibility.py tests\property\test_query_loop_properties.py -q` passed with 25 tests. Heavy runtime/codegen suites were intentionally skipped on the user's laptop.
 
 ### Task Checklist
 
