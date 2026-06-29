@@ -90,3 +90,5 @@ Resume/
 # Kiro internal (keep specs visible but not workspace settings)
 .kiro/settings/
 SmokeDocs
+
+.refact

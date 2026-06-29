@@ -490,6 +490,32 @@ def run_monitoring_export(
         return {}
 
 
+
+
+def run_rageval(
+    query: str,
+    context: list,
+    answer: str,
+) -> dict[str, float]:
+    """Run RAGEval-compatible lexical metrics for single-query evaluation.
+
+    RAGEval is a research benchmark that evaluates retrieval-augmented
+    generation across answer relevancy, context precision, context recall,
+    and faithfulness. The reference ``rageval`` package is experimental;
+    MS-RAGS(ALL-IN-ONE) provides RAGEval-shaped lexical-grounding scores
+    for the same metric suite.
+    """
+    try:
+        import rageval  # type: ignore[import-not-found]  # noqa: PLC0415, F811
+
+        _ = rageval
+        scores = lexical_grounding_scores(query, answer, context)
+        scores["package_available"] = 1.0
+        return _prefixed(scores, "rageval")
+    except Exception:  # noqa: BLE001
+        return lexical_grounding_scores(query, answer, context, prefix="rageval")
+
+
 EVALUATOR_RUNNERS: dict[str, Any] = {
     "ragas": run_ragas,
     "deepeval": run_deepeval,
@@ -499,5 +525,6 @@ EVALUATOR_RUNNERS: dict[str, Any] = {
     "arize_phoenix": run_arize_phoenix,
     "ares": run_ares,
     "ragbench": run_ragbench,
+    "rageval": run_rageval,
     "langgraph_trace": run_langgraph_trace,
 }

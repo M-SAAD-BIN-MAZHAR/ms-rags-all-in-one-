@@ -35,6 +35,7 @@ class GraphState(TypedDict, total=False):
     generation: str
     documents: list
     rewrite_count: int
+    hallucination_count: int
     tool_results: list[str]
     action: str
     route: str
@@ -787,6 +788,7 @@ def build_langgraph_workflow(
             answer = retry_answer
         return {
             "generation": answer,
+            "hallucination_count": state.get("hallucination_count", 0) + 1,
             "trace": trace,
         }
 
@@ -861,8 +863,14 @@ def build_langgraph_workflow(
         return "rewrite_query"
 
     def check_hallucination(state: GraphState) -> str:
-        """Check if generation is grounded in documents without creating runaway loops."""
-        if not state["documents"]:
+        """Check if generation is grounded in documents; retry up to 2 times."""
+        count = state.get("hallucination_count", 0)
+        if not state["documents"] or count >= 2:
+            if count >= 2:
+                warnings.warn(
+                    "Self-RAG max hallucination retries (2) reached. Returning the last generated answer.",
+                    stacklevel=2,
+                )
             return "end"
         check_prompt = ChatPromptTemplate.from_messages([
             ("system", "Is the answer fully supported by the provided context? Answer yes or no."),
@@ -876,10 +884,10 @@ def build_langgraph_workflow(
         }).lower()
         if "yes" not in result:
             warnings.warn(
-                "Self-RAG support check marked the answer as not fully grounded. "
-                "Returning the answer with a visible warning instead of looping indefinitely.",
+                f"Self-RAG support check ({count + 1}/2) marked the answer as not fully grounded; retrying generation.",
                 stacklevel=2,
             )
+            return "generate"
         return "end"
 
     # ── Build graph ────────────────────────────────────────────────────
@@ -1426,7 +1434,7 @@ def _answer_from_merged_queries(
             if use_reciprocal_rank_fusion:
                 scores[key] = scores.get(key, 0.0) + (1.0 / (rrf_k + rank + 1))
             else:
-                scores.setdefault(key, 1.0 / (rank + 1))
+                scores[key] = scores.get(key, 0.0) + (1.0 / (rank + 1))
 
     ranked_keys = sorted(
         docs_by_key,

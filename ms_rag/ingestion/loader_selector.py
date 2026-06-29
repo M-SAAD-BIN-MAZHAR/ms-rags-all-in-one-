@@ -76,6 +76,12 @@ ALL_LOADERS: list[LoaderInfo] = [
         description="Tabula — Java-based PDF table extractor via tabula-py",
     ),
     LoaderInfo(
+        loader_class="DoclingLoader",
+        display_name="DoclingLoader",
+        compatible_doc_types=["pdf", "docx"],
+        description="Docling (DS4SD) — structured document parsing with layout analysis, tables, and OCR",
+    ),
+    LoaderInfo(
         loader_class="LlamaParseLoader",
         display_name="LlamaParse (cloud, paid)",
         compatible_doc_types=["pdf", "docx", "pptx"],

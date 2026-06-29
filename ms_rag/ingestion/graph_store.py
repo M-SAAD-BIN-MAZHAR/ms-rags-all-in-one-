@@ -292,7 +292,7 @@ class GraphStoreConnector:
         local_lines: list[str] = []
         for node in nodes:
             node_id = node.get("id")
-            if node_id in names or any(str(node.get("name", "")).lower() in query.lower() for _ in [0]):
+            if node_id in names or str(node.get("name", "")).lower() in query.lower():
                 local_lines.append(f"Entity: {node.get('name')} ({node.get('type')})")
                 for edge in edges:
                     if edge.get("source") == node_id or edge.get("target") == node_id:

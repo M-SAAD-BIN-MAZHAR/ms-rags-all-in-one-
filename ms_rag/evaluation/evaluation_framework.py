@@ -111,6 +111,11 @@ EVALUATORS: list[EvaluatorInfo] = [
         description="ARES package-backed availability path plus ARES-compatible retrieval/generation scores",
     ),
     EvaluatorInfo(
+        evaluator_id="rageval",
+        display_name="RAGEval",
+        description="RAGEval-compatible lexical metrics: answer relevancy, context precision/recall, faithfulness",
+    ),
+    EvaluatorInfo(
         evaluator_id="ragbench",
         display_name="RAGBench",
         description="RAGBench-compatible single-query scoring with optional Hugging Face datasets tooling",

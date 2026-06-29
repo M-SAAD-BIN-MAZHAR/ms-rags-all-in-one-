@@ -697,6 +697,26 @@ class IngestionOrchestrator:
                     ),
                 ).load()
 
+        if loader_class_name == "DoclingLoader":
+            try:
+                from docling.document_converter import DocumentConverter  # type: ignore[import-not-found]  # noqa: PLC0415
+                from langchain_core.documents import Document  # noqa: PLC0415
+
+                converter = DocumentConverter()
+                result = converter.convert(source)
+                docling_doc = getattr(result, "document", result)
+                text = str(getattr(docling_doc, "text", str(docling_doc)))
+                return _normalize_documents(
+                    [Document(page_content=text, metadata={"source": source})],
+                    source,
+                    loader_class_name,
+                )
+            except ImportError as exc:
+                raise ImportError(
+                    "DoclingLoader requires the docling package. "
+                    "Install it with `pip install docling` or choose PyPDFLoader for basic text extraction."
+                ) from exc
+
         if loader_class_name == "LlamaParseLoader":
             try:
                 from llama_parse import LlamaParse  # type: ignore[import-not-found]  # noqa: PLC0415

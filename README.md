@@ -56,7 +56,7 @@ Inspired by OpenClaw's UX, MS-RAGS(ALL-IN-ONE) acts as a **live RAG workbench + 
 | **Retrieval Strategies** | 10 strategies — Dense Vector, BM25, TF-IDF, Hybrid, MMR, Ensemble, Parent-Child, Multi-Vector, Self-Query, Time-weighted |
 | **Rerankers** | 6 — Cross-Encoder, Cohere, BGE, LLM-based, ColBERT, FlashRank |
 | **Context Compression** | 6 techniques — LLM Chain Extraction, Embeddings Filter, Redundancy Removal, Document Compressor Pipeline, Contextual Compression, Summary Compression |
-| **Evaluation Options** | 11 — RAGAS, DeepEval, TruLens, LangSmith, Langfuse, Arize Phoenix, ARES, RAGBench, CI/CD Gate, LangGraph Trace, Monitoring Export |
+| **Evaluation Options** | 12 — RAGAS, DeepEval, TruLens, LangSmith, Langfuse, Arize Phoenix, ARES, RAGEval, RAGBench, CI/CD Gate, LangGraph Trace, Monitoring Export |
 
 ---
 
@@ -80,7 +80,7 @@ Inspired by OpenClaw's UX, MS-RAGS(ALL-IN-ONE) acts as a **live RAG workbench + 
 │ Step 12      │ Reranking (6 rerankers)                  │
 │ Step 13      │ Context Compression (6 techniques)       │
 │ Step 14      │ System Prompt Configuration              │
-│ Step 15      │ Evaluation Frameworks (11 frameworks)    │
+│ Step 15      │ Evaluation Frameworks (12 frameworks)    │
 │ Step 16      │ Runtime build + interactive query loop   │
 ├──────────────┴──────────────────────────────────────────┤
 │              CODE GENERATOR                              │
@@ -601,8 +601,8 @@ MS-RAGS-ALL-IN-ONE/
 │   ├── codegen/
 │   │   └── code_generator.py         # pipeline.py + requirements.txt generator
 │   ├── evaluation/
-│   │   ├── evaluation_framework.py   # 11 evaluation frameworks + live scoring
-│   │   └── evaluator_runners.py      # RAGAS, DeepEval, LangSmith, Langfuse, etc.
+│   │   ├── evaluation_framework.py   # 12 evaluation frameworks + live scoring
+│   │   └── evaluator_runners.py      # RAGAS, DeepEval, LangSmith, Langfuse, RAGEval, etc.
 │   ├── ingestion/
 │   │   ├── chunking_engine.py        # 11 chunking strategies
 │   │   ├── document_type_selector.py # 18 document types

@@ -34,8 +34,8 @@ from ms_rag.utils.validation import validate_numeric
 
 
 class TestEvaluatorListCompleteness:
-    def test_exactly_11_evaluators_defined(self) -> None:
-        assert len(EVALUATORS) == 11
+    def test_exactly_12_evaluators_defined(self) -> None:
+        assert len(EVALUATORS) == 12
 
     def test_all_required_evaluators_present(self) -> None:
         required = {
