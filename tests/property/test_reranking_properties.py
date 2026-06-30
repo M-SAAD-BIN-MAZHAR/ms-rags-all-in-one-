@@ -21,6 +21,8 @@ from ms_rag.query.reranking_module import (
     RERANKER_MAP,
     RERANKERS,
     RerankingModule,
+    _get_cross_encoder,
+    clear_reranker_model_cache,
 )
 from ms_rag.utils.exceptions import ValidationError
 from ms_rag.utils.validation import validate_numeric
@@ -210,6 +212,12 @@ class TestRerankMethod:
         config = RerankingConfig(reranker="llm_reranker", model_id="", top_k=4)
         result = module.rerank("query", docs, config)
         assert len(result) <= 4
+
+    def test_cross_encoder_cache_is_bounded_and_clearable(self) -> None:
+        """Local CrossEncoder cache must not retain many heavy models."""
+        assert _get_cross_encoder.cache_info().maxsize == 1
+        clear_reranker_model_cache()
+        assert _get_cross_encoder.cache_info().currsize == 0
 
 
 # ---------------------------------------------------------------------------

@@ -349,10 +349,7 @@ class TestEvaluateRuntime:
             evaluators=["ares", "monitoring_export"],
         )
 
-        with patch.dict(EVALUATOR_RUNNERS, {"ares": mock_ares}), patch(
-            "ms_rag.evaluation.evaluation_framework.run_monitoring_export",
-            mock_export,
-        ):
+        with patch.dict(EVALUATOR_RUNNERS, {"ares": mock_ares, "monitoring_export": mock_export}):
             scores = framework.evaluate("q", [], "a")
 
         mock_export.assert_called_once()

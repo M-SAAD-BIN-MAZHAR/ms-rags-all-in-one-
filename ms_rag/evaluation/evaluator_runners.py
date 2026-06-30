@@ -516,6 +516,39 @@ def run_rageval(
         return lexical_grounding_scores(query, answer, context, prefix="rageval")
 
 
+def run_cicd_gate(
+    query: str,
+    context: list,
+    answer: str,
+    scores: dict[str, float],
+    *,
+    thresholds: dict[str, float] | None = None,
+) -> dict[str, float]:
+    """Check accumulated scores against CI/CD thresholds. Returns pass/fail score.
+
+    This runner does not generate its own metrics. Instead, it evaluates
+    the aggregated scores from other evaluators against configured thresholds.
+
+    Args:
+        query:     The user query (unused but kept for consistent runner signature).
+        context:   Retrieved context (unused but kept for consistent signature).
+        answer:    Generated answer (unused but kept for consistent signature).
+        scores:    Accumulated scores from other evaluators.
+        thresholds: Dict mapping metric_name -> minimum acceptable score.
+
+    Returns:
+        {"cicd_gate_passed": 1.0} if all thresholds are met, {"cicd_gate_passed": 0.0} otherwise.
+    """
+    if not thresholds:
+        return {}
+    passed = True
+    for metric, threshold in thresholds.items():
+        score = scores.get(metric)
+        if score is not None and score < threshold:
+            passed = False
+    return {"cicd_gate_passed": 1.0 if passed else 0.0}
+
+
 EVALUATOR_RUNNERS: dict[str, Any] = {
     "ragas": run_ragas,
     "deepeval": run_deepeval,
@@ -526,5 +559,7 @@ EVALUATOR_RUNNERS: dict[str, Any] = {
     "ares": run_ares,
     "ragbench": run_ragbench,
     "rageval": run_rageval,
+    "cicd_gate": run_cicd_gate,
     "langgraph_trace": run_langgraph_trace,
+    "monitoring_export": run_monitoring_export,
 }

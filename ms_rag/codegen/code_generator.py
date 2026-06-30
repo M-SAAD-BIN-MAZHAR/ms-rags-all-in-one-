@@ -1083,22 +1083,36 @@ def init_vector_store(chunks: list = None):
 
         if db_type == "weaviate":
             return f'''# ─── Embedding + Vector Store ─────────────────────────────────
+def _connect_weaviate_client():
+    url = os.getenv("WEAVIATE_URL", "http://localhost:8080").strip().rstrip("/")
+    api_key = os.getenv("WEAVIATE_API_KEY") or None
+    auth = weaviate.auth.AuthApiKey(api_key) if api_key else None
+    if "weaviate.cloud" in url:
+        cluster_url = url if url.startswith(("http://", "https://")) else f"https://{{url}}"
+        return weaviate.connect_to_weaviate_cloud(
+            cluster_url=cluster_url,
+            auth_credentials=auth,
+        )
+    clean = url.replace("https://", "").replace("http://", "")
+    host_port = clean.split("/")[0]
+    host = host_port.split(":")[0]
+    port = int(host_port.split(":")[-1]) if ":" in host_port else 8080
+    secure = url.startswith("https://")
+    return weaviate.connect_to_custom(
+        http_host=host,
+        http_port=port,
+        http_secure=secure,
+        grpc_host=os.getenv("WEAVIATE_GRPC_HOST", host),
+        grpc_port=int(os.getenv("WEAVIATE_GRPC_PORT", "50051")),
+        grpc_secure=secure,
+        auth_credentials=auth,
+    )
+
+
 def init_vector_store(chunks: list = None):
     """Initialise embeddings and Weaviate vector store. Ingest chunks if provided."""
     embeddings = {emb_init}
-    url = os.getenv("WEAVIATE_URL", "http://localhost:8080")
-    host = url.replace("https://", "").replace("http://", "").split(":")[0]
-    port = int(url.rsplit(":", 1)[-1]) if ":" in url.replace("https://", "").replace("http://", "") else 8080
-    api_key = os.getenv("WEAVIATE_API_KEY") or None
-    client = weaviate.connect_to_custom(
-        http_host=host,
-        http_port=port,
-        http_secure=url.startswith("https://"),
-        grpc_host=host,
-        grpc_port=int(os.getenv("WEAVIATE_GRPC_PORT", "50051")),
-        grpc_secure=url.startswith("https://"),
-        auth_credentials=weaviate.auth.AuthApiKey(api_key) if api_key else None,
-    )
+    client = _connect_weaviate_client()
     vector_store = WeaviateVectorStore(
         client=client,
         index_name="{collection}",
@@ -1122,12 +1136,14 @@ def init_vector_store(chunks: list = None):
 def init_vector_store(chunks: list = None):
     """Initialise embeddings and MongoDB Atlas vector store. Ingest chunks if provided."""
     embeddings = {emb_init}
-    client = MongoClient(os.getenv("MONGODB_ATLAS_CLUSTER_URI", ""))
+    mongo_uri = os.getenv("MONGODB_ATLAS_CLUSTER_URI") or os.getenv("MONGODB_ATLAS_CONNECTION_STRING", "")
+    client = MongoClient(mongo_uri)
     db = client[os.getenv("MONGODB_ATLAS_DB_NAME", "ms_rag_db")]
     collection_obj = db[os.getenv("MONGODB_ATLAS_COLLECTION_NAME", "{collection}")]
     vector_store = MongoDBAtlasVectorSearch(
         collection=collection_obj,
         embedding=embeddings,
+        index_name=os.getenv("MONGODB_ATLAS_INDEX_NAME", "vector_index"),
     )
     if chunks:
         vector_store.add_documents(chunks)
@@ -1154,8 +1170,18 @@ def init_vector_store(chunks: list = None):
             ),
             "pinecone": f'PineconeVectorStore(index_name="{collection}", embedding=embeddings)',
             "pgvector": f'PGVector(embeddings=embeddings, collection_name="{collection}", connection=os.getenv("PGVECTOR_CONNECTION_STRING", ""))',
-            "milvus": f'Milvus(embedding_function=embeddings, collection_name="{collection}", connection_args={{"uri": os.getenv("MILVUS_URI", "http://localhost:19530")}})',
-            "elasticsearch": f'ElasticsearchStore(index_name="{collection}", embedding=embeddings, es_url=os.getenv("ELASTICSEARCH_URL", "http://localhost:9200"))',
+            "milvus": (
+                f'Milvus(embedding_function=embeddings, collection_name="{collection}", '
+                f'connection_args={{k: v for k, v in {{"uri": os.getenv("MILVUS_URI", "http://localhost:19530"), '
+                f'"token": os.getenv("MILVUS_TOKEN")}}.items() if v}})'
+            ),
+            "elasticsearch": (
+                f'ElasticsearchStore(index_name="{collection}", embedding=embeddings, '
+                f'es_url=os.getenv("ELASTICSEARCH_URL", "http://localhost:9200"), '
+                f'es_user=os.getenv("ELASTICSEARCH_USERNAME") or None, '
+                f'es_password=os.getenv("ELASTICSEARCH_PASSWORD") or None, '
+                f'es_api_key=os.getenv("ELASTICSEARCH_API_KEY") or None)'
+            ),
             "redis": (
                 f'RedisVectorStore(embeddings=embeddings, config=RedisConfig('
                 f'index_name=os.getenv("REDIS_INDEX_NAME", "{collection}"), '
@@ -1168,7 +1194,7 @@ def init_vector_store(chunks: list = None):
             ),
             "azure_ai_search": (
                 f'AzureSearch(azure_search_endpoint=os.getenv("AZURE_SEARCH_ENDPOINT", ""), '
-                f'azure_search_key=os.getenv("AZURE_SEARCH_KEY", ""), '
+                f'azure_search_key=os.getenv("AZURE_SEARCH_KEY") or os.getenv("AZURE_SEARCH_API_KEY", ""), '
                 f'index_name=os.getenv("AZURE_SEARCH_INDEX_NAME", "{collection}"), '
                 f'embedding_function=embeddings)'
             ),
@@ -1622,7 +1648,7 @@ def apply_reranking(retriever):
     return _RerankingRetriever(base_retriever=retriever, rerank_fn=rerank_documents)
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=1)
 def _get_cross_encoder(model_id: str):
     from sentence_transformers import CrossEncoder
 

@@ -544,7 +544,8 @@ class SessionState:
 
     current_step: int = 1
     query_history: list[tuple[str, str]] = field(default_factory=list)
-    # Each entry: (query_text, answer_text)
+    # Each entry: (query_text, answer_text) — capped at 100 entries in
+    # query_loop.py to prevent unbounded memory growth in long sessions.
     last_enhanced_queries: list[str] = field(default_factory=list)
     last_primary_retrieval_query: str = ""
     last_retrieved_context_count: int = 0

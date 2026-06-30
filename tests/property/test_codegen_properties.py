@@ -829,6 +829,45 @@ def test_generated_chroma_pipeline_uses_configured_persist_directory() -> None:
     assert "'./custom_chroma/saadi'" in code
 
 
+def test_generated_weaviate_pipeline_handles_weaviate_cloud() -> None:
+    config = _make_config()
+    config.vector_db = VectorDBConfig(
+        db_type="weaviate",
+        connection_params={},
+        collection_name="MsRagCollection",
+    )
+
+    code = CodeGenerator().generate(config).python_code
+
+    ast.parse(code)
+    assert "connect_to_weaviate_cloud" in code
+    assert "weaviate.cloud" in code
+    assert "connect_to_custom" in code
+
+
+def test_generated_cloud_vector_db_pipeline_preserves_auth_aliases() -> None:
+    expected = {
+        "milvus": ["MILVUS_TOKEN"],
+        "elasticsearch": ["ELASTICSEARCH_API_KEY", "ELASTICSEARCH_USERNAME", "ELASTICSEARCH_PASSWORD"],
+        "azure_ai_search": ["AZURE_SEARCH_KEY", "AZURE_SEARCH_API_KEY"],
+        "mongodb_atlas": ["MONGODB_ATLAS_CLUSTER_URI", "MONGODB_ATLAS_CONNECTION_STRING"],
+    }
+
+    for db_type, snippets in expected.items():
+        config = _make_config()
+        config.vector_db = VectorDBConfig(
+            db_type=db_type,
+            connection_params={},
+            collection_name=f"{db_type}_test",
+        )
+
+        code = CodeGenerator().generate(config).python_code
+
+        ast.parse(code)
+        for snippet in snippets:
+            assert snippet in code
+
+
 def test_generated_code_uses_updated_live_settings_config() -> None:
     config = _make_config()
     config.query_enhancement = ["hyde"]
@@ -861,6 +900,21 @@ def test_generated_code_applies_selected_reranking() -> None:
     assert "reranker = 'cohere_reranker'" in result.python_code
     assert "retriever = apply_reranking(retriever)" in result.python_code
     assert "COHERE_API_KEY" in result.python_code
+
+
+def test_generated_cross_encoder_cache_is_memory_bounded() -> None:
+    config = _make_config()
+    config.reranking_enabled = True
+    config.reranking = RerankingConfig(
+        reranker="cross_encoder",
+        model_id="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        top_k=3,
+    )
+
+    result = CodeGenerator().generate(config)
+
+    ast.parse(result.python_code)
+    assert "@lru_cache(maxsize=1)" in result.python_code
 
 
 @pytest.mark.parametrize(

@@ -142,6 +142,38 @@ After runtime wiring, MS-RAGS now renders a final `Selection Visibility Summary`
 
 **Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\unit\test_architecture_visibility.py tests\property\test_query_loop_properties.py -q` passed with 25 tests. Heavy runtime/codegen suites were intentionally skipped on the user's laptop.
 
+### Recent Test Memory Hygiene
+
+Local CrossEncoder rerankers are large and must not be cached aggressively. Runtime `_get_cross_encoder()` in `ms_rag/query/reranking_module.py` and generated standalone pipelines now use `@lru_cache(maxsize=1)`, and runtime exposes `clear_reranker_model_cache()` for test/session cleanup. `tests/conftest.py` adds an autouse cleanup fixture that clears the reranker cache, calls `gc.collect()`, and releases Torch CUDA cache when Torch is imported. Keep this fixture lightweight; do not import heavy ML frameworks inside it.
+
+**Memory-pressure audit notes:** Full-suite memory pressure is mainly caused by local HF/CrossEncoder models, repeated large generated-code strings/AST parsing in property tests, graph/vector runtime state retained on vector stores, and optional evaluation SDK imports. Prefer focused test subsets on 16GB laptops.
+
+**Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\property\test_reranking_properties.py::TestRerankMethod::test_cross_encoder_cache_is_bounded_and_clearable tests\property\test_codegen_properties.py::test_generated_cross_encoder_cache_is_memory_bounded tests\unit\test_architecture_visibility.py -q` passed.
+
+### Recent Vector DB Cloud Connection Hardening
+
+Weaviate Cloud must use `weaviate.connect_to_weaviate_cloud()` with an HTTPS cluster URL; do not route `*.weaviate.cloud` hosts through local/custom `http://host:8080` behavior. The live connector and generated standalone pipelines now share cloud-aware Weaviate logic. The vector DB connection probe no longer uses import-only checks for production backends: Milvus, Elasticsearch, OpenSearch, MongoDB Atlas, Redis, and Azure AI Search perform lightweight real client probes. Azure AI Search accepts either `AZURE_SEARCH_KEY` or `AZURE_SEARCH_API_KEY`, MongoDB Atlas accepts either `MONGODB_ATLAS_CLUSTER_URI` or `MONGODB_ATLAS_CONNECTION_STRING`, and generated pipelines preserve Milvus/Elastic/Azure/MongoDB auth aliases.
+
+**Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\unit\test_vectordb_connector.py -q` passed with 35 tests, and vector DB codegen checks passed with 12 tests.
+
+### Recent Preset Confirmation Crash Fix
+
+The interactive setup crashed after ingestion when a user kept the CRAG query enhancement preset because `_confirm_query_enhancement_preset()` called `print_success()` without importing it in that function scope. `_confirm_compression_preset()` had the same latent issue. Both helpers now import `print_success` locally, and `tests/unit/test_cli_preset_helpers.py` covers the keep-preset path for query enhancement and compression.
+
+**Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\unit\test_cli_preset_helpers.py -q` passed with 2 tests.
+
+### Recent Runtime Resource Cleanup
+
+Weaviate and other cloud vector DB clients can keep sockets open after a clean `/exit` unless the live runtime closes them explicitly. Fresh interactive sessions and `--load` sessions now wrap the query loop in `try/finally` and call `close_session_runtime()` from `ms_rag/utils/runtime_cleanup.py`. The cleanup helper closes vector stores, retrievers, chains, and common nested client attributes such as `client`, `_client`, `vectorstore`, and `vector_store` on a best-effort basis.
+
+**Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\unit\test_runtime_cleanup.py -q` passed.
+
+### Recent Warning UI Noise Reduction
+
+The terminal warning renderer must keep MS-RAGS runtime degradation warnings visible, but dependency deprecation warnings from `site-packages` should not appear as large Runtime notice panels. `install_warning_renderer()` now suppresses terminal panels for third-party `DeprecationWarning` messages such as Docling/RapidOCR/Pydantic internals while still logging them structurally and still rendering project warnings.
+
+**Verification run:** `.\.venv\Scripts\python.exe -m pytest tests\unit\test_logging.py -q` passed with 4 tests.
+
 ### Task Checklist
 
 - [x] Task 1 — Project scaffold + core data models (`ms_rag/models.py`, `pyproject.toml`, exceptions, validation)

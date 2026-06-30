@@ -169,8 +169,10 @@ class TestVectorDBListCompleteness:
 
     def test_azure_requires_endpoint_and_key(self) -> None:
         fields = VECTOR_DB_MAP["azure_ai_search"].credential_fields
+        optional = VECTOR_DB_MAP["azure_ai_search"].optional_fields
         assert "AZURE_SEARCH_ENDPOINT" in fields
-        assert "AZURE_SEARCH_KEY" in fields
+        assert "AZURE_SEARCH_KEY" in optional
+        assert "AZURE_SEARCH_API_KEY" in optional
 
 
 class TestGetVectorStoreDispatch:
@@ -311,6 +313,54 @@ class TestGetVectorStoreDispatch:
         vectors_config = mock_client.create_collection.call_args.kwargs["vectors_config"]
         assert vectors_config.size == 768
         assert mock_store.called
+
+    def test_weaviate_cloud_probe_uses_cloud_connector_not_local_8080(self) -> None:
+        connector = VectorDBConnector()
+        config = VectorDBConfig(
+            db_type="weaviate",
+            connection_params={
+                "WEAVIATE_URL": "cluster-id.c0.eu-central-1.aws.weaviate.cloud",
+                "WEAVIATE_API_KEY": "test-key",
+            },
+            collection_name="MsRagCollection",
+            dimension=768,
+        )
+        client = MagicMock()
+        client.is_ready.return_value = True
+
+        with patch("weaviate.connect_to_weaviate_cloud", return_value=client) as mock_cloud, \
+             patch("weaviate.connect_to_local") as mock_local, \
+             patch("weaviate.connect_to_custom") as mock_custom:
+            result = connector.test_connection(config)
+
+        assert result.success is True
+        mock_cloud.assert_called_once()
+        assert mock_cloud.call_args.kwargs["cluster_url"] == "https://cluster-id.c0.eu-central-1.aws.weaviate.cloud"
+        mock_local.assert_not_called()
+        mock_custom.assert_not_called()
+        client.close.assert_called_once()
+
+    def test_weaviate_cloud_vector_store_uses_cloud_connector(self) -> None:
+        connector = VectorDBConnector()
+        config = VectorDBConfig(
+            db_type="weaviate",
+            connection_params={
+                "WEAVIATE_URL": "https://cluster-id.c0.eu-central-1.aws.weaviate.cloud",
+                "WEAVIATE_API_KEY": "test-key",
+            },
+            collection_name="MsRagCollection",
+            dimension=768,
+        )
+        client = MagicMock()
+        sentinel = object()
+
+        with patch("weaviate.connect_to_weaviate_cloud", return_value=client) as mock_cloud, \
+             patch("langchain_weaviate.WeaviateVectorStore", return_value=sentinel) as mock_store:
+            result = connector.get_vector_store(config, MagicMock())
+
+        assert result is sentinel
+        mock_cloud.assert_called_once()
+        assert mock_store.call_args.kwargs["client"] is client
 
     def test_milvus_cloud_token_is_forwarded(self) -> None:
         connector = VectorDBConnector()

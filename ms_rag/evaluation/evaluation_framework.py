@@ -29,7 +29,6 @@ except ImportError:
 from ms_rag.evaluation.evaluator_runners import (
     EVALUATOR_RUNNERS,
     finite_scores,
-    run_monitoring_export,
 )
 from ms_rag.models import EvaluationConfig
 from ms_rag.utils.exceptions import ValidationError
@@ -320,13 +319,15 @@ class EvaluationFramework:
             scores.update(cleaned)
 
         if deferred_export:
-            export_scores = run_monitoring_export(
-                query,
-                context,
-                answer,
-                scores,
-            )
-            scores.update(export_scores)
+            export_runner = EVALUATOR_RUNNERS.get("monitoring_export")
+            if export_runner is not None:
+                export_scores = export_runner(
+                    query,
+                    context,
+                    answer,
+                    scores,
+                )
+                scores.update(export_scores)
 
         if ground_truth:
             gt_tokens = set(ground_truth.lower().split())
@@ -336,7 +337,10 @@ class EvaluationFramework:
                 scores["ground_truth_overlap"] = round(min(overlap, 1.0), 4)
 
         if "cicd_gate" in active.evaluators and active.cicd_thresholds:
-            scores["cicd_gate_passed"] = 1.0 if self.check_cicd_thresholds(scores, active) else 0.0
+            cicd_runner = EVALUATOR_RUNNERS.get("cicd_gate")
+            if cicd_runner is not None:
+                cicd_scores = cicd_runner(query, context, answer, scores, thresholds=active.cicd_thresholds)
+                scores.update(cicd_scores)
 
         return scores
 

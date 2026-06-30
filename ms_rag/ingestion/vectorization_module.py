@@ -482,6 +482,21 @@ class VectorizationModule:
                 selected_id = local_path
                 break
 
+        # Warn about memory-intensive local HuggingFace embedding models
+        if selected_info and selected_info.is_local and selected_info.dimensions >= 768:
+            estimated_gb = ""
+            if selected_info.model_id in ("intfloat/e5-mistral-7b-instruct",):
+                estimated_gb = " (~14GB RAM for model weights)"
+            elif selected_info.dimensions >= 1024:
+                estimated_gb = " (~1-2GB RAM)"
+            elif selected_info.dimensions >= 768:
+                estimated_gb = " (~0.5-1GB RAM)"
+            console.print(
+                f"[yellow]  ⚠ Memory notice: this local model loads model weights into RAM{estimated_gb}. "
+                "Ensure you have enough available memory before proceeding. "
+                "Choose a 'Hosted HuggingFace Inference API' option if memory is constrained.[/yellow]"
+            )
+
         provider = selected_info.provider if selected_info else "huggingface"
         if selected_info is not None:
             self._ensure_embedding_credentials(selected_info, credential_store, console)

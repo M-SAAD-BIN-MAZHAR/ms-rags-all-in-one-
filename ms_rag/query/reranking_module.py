@@ -415,9 +415,22 @@ class RerankingModule:
                 console.print(f"[red]  ✗ {exc}[/red]")  # type: ignore[union-attr]
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=1)
 def _get_cross_encoder(model_id: str) -> object:
-    """Load and cache local CrossEncoder rerankers for the process lifetime."""
+    """Load and cache local CrossEncoder rerankers for the process lifetime.
+
+    Capped at maxsize=1 to prevent memory exhaustion from holding multiple
+    large CrossEncoder models (each ~500MB–2GB) simultaneously.
+    """
     from sentence_transformers import CrossEncoder  # noqa: PLC0415
 
     return CrossEncoder(model_id)
+
+
+def clear_reranker_model_cache() -> None:
+    """Release cached local reranker models.
+
+    This is primarily used by tests and long-running CLI sessions on memory
+    constrained machines after reranking settings change.
+    """
+    _get_cross_encoder.cache_clear()

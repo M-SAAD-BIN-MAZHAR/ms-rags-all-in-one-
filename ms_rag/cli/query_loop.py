@@ -140,6 +140,9 @@ class QueryLoop:
 
             query = raw.strip()
             session_state.query_history.append((query, ""))
+            # Enforce max query history to prevent unbounded memory growth
+            if len(session_state.query_history) > 100:
+                session_state.query_history = session_state.query_history[-100:]
 
             try:
                 with telemetry.span("query.process", query_length=len(query)):

@@ -157,8 +157,11 @@ def run(load_path: str | None = None) -> None:
             if config.evaluation_enabled:
                 from ms_rag.evaluation.evaluation_framework import EvaluationFramework  # noqa: PLC0415
                 eval_framework = EvaluationFramework(credential_store=credential_store)
-            with telemetry.span("query_loop.run", load_path=load_path):
-                _run_query_loop(session, eval_framework=eval_framework)
+            try:
+                with telemetry.span("query_loop.run", load_path=load_path):
+                    _run_query_loop(session, eval_framework=eval_framework)
+            finally:
+                _close_session_runtime(session)
             return
         except SessionLoadError as exc:
             console.print(f"[yellow]  ⚠ {exc} Falling back to interactive setup.[/yellow]\n")
@@ -487,7 +490,10 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
         rag_chain=rag_chain,
     )
 
-    _run_query_loop(session, eval_framework=eval_framework if config.evaluation_enabled else None)
+    try:
+        _run_query_loop(session, eval_framework=eval_framework if config.evaluation_enabled else None)
+    finally:
+        _close_session_runtime(session)
     return config
 
 
@@ -594,7 +600,7 @@ def _confirm_query_enhancement_preset(
 ) -> list[str]:
     """Ask permission before applying a RAG-type query enhancement preset."""
     import questionary  # noqa: PLC0415
-    from ms_rag.ui.prompts import prompt_select  # noqa: PLC0415
+    from ms_rag.ui.prompts import print_success, prompt_select  # noqa: PLC0415
 
     preset = list(getattr(rag_preset, "query_enhancement", []) or [])
     if not preset:
@@ -635,7 +641,7 @@ def _confirm_compression_preset(
 ) -> object | None:
     """Ask permission before applying a RAG-type compression preset."""
     import questionary  # noqa: PLC0415
-    from ms_rag.ui.prompts import prompt_select  # noqa: PLC0415
+    from ms_rag.ui.prompts import print_success, prompt_select  # noqa: PLC0415
 
     preset = getattr(rag_preset, "compression", None)
     if preset is None:
@@ -971,6 +977,13 @@ def _display_selected_architecture(config: PipelineConfig, console: object) -> N
     from ms_rag.ui.architecture import display_architecture_report  # noqa: PLC0415
 
     display_architecture_report(config, console)
+
+
+def _close_session_runtime(session: SessionState) -> None:
+    """Close vector DB clients and other live resources after query mode exits."""
+    from ms_rag.utils.runtime_cleanup import close_session_runtime  # noqa: PLC0415
+
+    close_session_runtime(session)
 
 
 def _ensure_vector_db_connection(

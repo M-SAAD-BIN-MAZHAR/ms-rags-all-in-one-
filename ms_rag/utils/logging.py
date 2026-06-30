@@ -80,6 +80,18 @@ def install_warning_renderer(console: object | None = None) -> None:
     logger = get_logger()
     original_showwarning = warnings.showwarning
 
+    def should_render_terminal_notice(category: type[Warning], filename: str) -> bool:
+        """Return True for warnings that should interrupt the terminal UI."""
+        normalized = filename.replace("\\", "/")
+        is_project_warning = "/ms_rag/" in normalized or normalized.endswith("/ms_rag")
+        category_name = category.__name__.lower()
+        is_deprecation_style = (
+            issubclass(category, DeprecationWarning)
+            or "deprecat" in category_name
+        )
+        is_dependency_deprecation = is_deprecation_style and not is_project_warning
+        return not is_dependency_deprecation
+
     def showwarning(
         message: Warning | str,
         category: type[Warning],
@@ -97,6 +109,8 @@ def install_warning_renderer(console: object | None = None) -> None:
             reason=category.__name__,
             action="review_terminal_notice",
         )
+        if not should_render_terminal_notice(category, filename):
+            return
         if console is not None:
             try:
                 from rich.panel import Panel  # noqa: PLC0415

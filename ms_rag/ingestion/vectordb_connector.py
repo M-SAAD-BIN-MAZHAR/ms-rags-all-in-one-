@@ -150,16 +150,22 @@ VECTOR_DBS: list[VectorDBInfo] = [
         db_type="azure_ai_search",
         display_name="Azure AI Search",
         description="Azure managed search service with vector and hybrid search",
-        credential_fields=["AZURE_SEARCH_ENDPOINT", "AZURE_SEARCH_KEY"],
-        optional_fields=["AZURE_SEARCH_INDEX_NAME"],
+        credential_fields=["AZURE_SEARCH_ENDPOINT"],
+        optional_fields=["AZURE_SEARCH_KEY", "AZURE_SEARCH_API_KEY", "AZURE_SEARCH_INDEX_NAME"],
         default_collection="ms-rag-index",
     ),
     VectorDBInfo(
         db_type="mongodb_atlas",
         display_name="MongoDB Atlas Vector Search",
         description="MongoDB Atlas with vector search index on document collections",
-        credential_fields=["MONGODB_ATLAS_CLUSTER_URI"],
-        optional_fields=["MONGODB_ATLAS_DB_NAME", "MONGODB_ATLAS_COLLECTION_NAME"],
+        credential_fields=[],
+        optional_fields=[
+            "MONGODB_ATLAS_CLUSTER_URI",
+            "MONGODB_ATLAS_CONNECTION_STRING",
+            "MONGODB_ATLAS_DB_NAME",
+            "MONGODB_ATLAS_COLLECTION_NAME",
+            "MONGODB_ATLAS_INDEX_NAME",
+        ],
         default_collection="ms_rag_vectors",
     ),
 ]
@@ -393,30 +399,7 @@ class VectorDBConnector:
 
         if db_type == "weaviate":
             from langchain_weaviate import WeaviateVectorStore  # noqa: PLC0415
-            import weaviate  # noqa: PLC0415
-            url = params.get("WEAVIATE_URL", "localhost").strip()
-            api_key = params.get("WEAVIATE_API_KEY", "").strip()
-            auth = weaviate.auth.AuthApiKey(api_key) if api_key else None
-            if "weaviate.cloud" in url:
-                cluster_url = url if url.startswith(("http://", "https://")) else f"https://{url}"
-                client = weaviate.connect_to_weaviate_cloud(
-                    cluster_url=cluster_url,
-                    auth_credentials=auth,
-                )
-            else:
-                clean = url.replace("https://", "").replace("http://", "")
-                host = clean.split(":")[0]
-                port = int(clean.split(":")[-1]) if ":" in clean else 8080
-                secure = url.startswith("https://")
-                client = weaviate.connect_to_custom(
-                    http_host=host,
-                    http_port=port,
-                    http_secure=secure,
-                    grpc_host=params.get("WEAVIATE_GRPC_HOST", host),
-                    grpc_port=int(params.get("WEAVIATE_GRPC_PORT", "50051")),
-                    grpc_secure=secure,
-                    auth_credentials=auth,
-                )
+            client = _connect_weaviate(params)
             return WeaviateVectorStore(
                 client=client,
                 index_name=config.collection_name,
@@ -466,15 +449,19 @@ class VectorDBConnector:
 
         if db_type == "opensearch":
             from langchain_community.vectorstores import OpenSearchVectorSearch  # noqa: PLC0415
-            return OpenSearchVectorSearch(
-                index_name=config.collection_name,
-                embedding_function=embeddings,  # type: ignore[arg-type]
-                opensearch_url=params.get("OPENSEARCH_URL", "http://localhost:9200"),
-                http_auth=(
+            kwargs: dict[str, object] = {
+                "index_name": config.collection_name,
+                "embedding_function": embeddings,
+                "opensearch_url": params.get("OPENSEARCH_URL", "http://localhost:9200"),
+                "engine": params.get("OPENSEARCH_ENGINE", "faiss"),
+            }
+            if params.get("OPENSEARCH_USERNAME") or params.get("OPENSEARCH_PASSWORD"):
+                kwargs["http_auth"] = (
                     params.get("OPENSEARCH_USERNAME", "admin"),
                     params.get("OPENSEARCH_PASSWORD", "admin"),
-                ),
-                engine=params.get("OPENSEARCH_ENGINE", "faiss"),
+                )
+            return OpenSearchVectorSearch(
+                **kwargs,  # type: ignore[arg-type]
             )
 
         if db_type == "azure_ai_search":
@@ -684,24 +671,97 @@ class VectorDBConnector:
             client.get_collections()
 
         elif db_type == "weaviate":
-            import weaviate  # noqa: PLC0415
-            url = params.get("WEAVIATE_URL", "http://localhost:8080")
-            client = weaviate.connect_to_local(
-                host=url.replace("http://", "").split(":")[0],
-                port=int(url.split(":")[-1]) if ":" in url else 8080,
-            )
-            client.is_ready()
-            client.close()
+            client = _connect_weaviate(params)
+            try:
+                if not client.is_ready():
+                    raise RuntimeError("Weaviate client connected but cluster is not ready.")
+            finally:
+                client.close()
 
         elif db_type == "pgvector":
             import psycopg2  # noqa: PLC0415
             conn = psycopg2.connect(params.get("PGVECTOR_CONNECTION_STRING", ""))
             conn.close()
 
-        else:
-            # For other DBs, a simple import check is sufficient for the probe
-            # Real connection test happens in get_vector_store()
-            pass
+        elif db_type == "milvus":
+            from pymilvus import connections  # noqa: PLC0415
+            alias = f"ms_rag_probe_{id(config)}"
+            uri = params.get("MILVUS_URI", "http://localhost:19530")
+            kwargs: dict[str, object] = {"alias": alias, "uri": uri}
+            if params.get("MILVUS_TOKEN"):
+                kwargs["token"] = params["MILVUS_TOKEN"]
+            try:
+                connections.connect(**kwargs)
+            finally:
+                if connections.has_connection(alias):
+                    connections.disconnect(alias)
+
+        elif db_type == "elasticsearch":
+            from elasticsearch import Elasticsearch  # noqa: PLC0415
+            client_kwargs: dict[str, object] = {
+                "hosts": [params.get("ELASTICSEARCH_URL", "http://localhost:9200")]
+            }
+            if params.get("ELASTICSEARCH_API_KEY"):
+                client_kwargs["api_key"] = params["ELASTICSEARCH_API_KEY"]
+            elif params.get("ELASTICSEARCH_USERNAME") or params.get("ELASTICSEARCH_PASSWORD"):
+                client_kwargs["basic_auth"] = (
+                    params.get("ELASTICSEARCH_USERNAME", "elastic"),
+                    params.get("ELASTICSEARCH_PASSWORD", ""),
+                )
+            client = Elasticsearch(**client_kwargs)
+            client.info()
+            client.close()
+
+        elif db_type == "opensearch":
+            from opensearchpy import OpenSearch  # noqa: PLC0415
+            url = params.get("OPENSEARCH_URL", "http://localhost:9200")
+            client_kwargs: dict[str, object] = {
+                "hosts": [url],
+                "use_ssl": url.startswith("https://"),
+                "verify_certs": url.startswith("https://"),
+            }
+            if params.get("OPENSEARCH_USERNAME") or params.get("OPENSEARCH_PASSWORD"):
+                client_kwargs["http_auth"] = (
+                    params.get("OPENSEARCH_USERNAME", "admin"),
+                    params.get("OPENSEARCH_PASSWORD", "admin"),
+                )
+            client = OpenSearch(**client_kwargs)
+            client.info()
+            client.close()
+
+        elif db_type == "mongodb_atlas":
+            from pymongo import MongoClient  # noqa: PLC0415
+            uri = (
+                params.get("MONGODB_ATLAS_CLUSTER_URI")
+                or params.get("MONGODB_ATLAS_CONNECTION_STRING")
+                or ""
+            )
+            if not uri:
+                raise ValueError(
+                    "MongoDB Atlas requires MONGODB_ATLAS_CLUSTER_URI or "
+                    "MONGODB_ATLAS_CONNECTION_STRING."
+                )
+            client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            client.admin.command("ping")
+            client.close()
+
+        elif db_type == "redis":
+            import redis  # noqa: PLC0415
+            client = redis.from_url(params.get("REDIS_URL", "redis://localhost:6379"))
+            client.ping()
+            client.close()
+
+        elif db_type == "azure_ai_search":
+            from azure.core.credentials import AzureKeyCredential  # noqa: PLC0415
+            from azure.search.documents.indexes import SearchIndexClient  # noqa: PLC0415
+            key = params.get("AZURE_SEARCH_KEY") or params.get("AZURE_SEARCH_API_KEY")
+            if not key:
+                raise ValueError("Azure AI Search requires AZURE_SEARCH_KEY or AZURE_SEARCH_API_KEY.")
+            client = SearchIndexClient(
+                endpoint=params.get("AZURE_SEARCH_ENDPOINT", ""),
+                credential=AzureKeyCredential(key),
+            )
+            list(client.list_index_names())
 
     def _resolved_connection_params(self, config: VectorDBConfig) -> dict[str, str]:
         """Resolve sanitized env-var markers in connection_params to runtime values."""
@@ -714,6 +774,42 @@ class VectorDBConnector:
             else:
                 resolved[key] = value
         return resolved
+
+
+def _connect_weaviate(params: dict[str, str]) -> object:
+    """Create a Weaviate client for cloud or self-hosted URLs.
+
+    Weaviate Cloud hostnames must use HTTPS/443 via connect_to_weaviate_cloud.
+    Treating them as local Weaviate forces http://host:8080 and causes the
+    timeout the user saw during connection testing.
+    """
+    import weaviate  # noqa: PLC0415
+
+    raw_url = (params.get("WEAVIATE_URL") or "http://localhost:8080").strip().rstrip("/")
+    api_key = (params.get("WEAVIATE_API_KEY") or "").strip()
+    auth = weaviate.auth.AuthApiKey(api_key) if api_key else None
+
+    if "weaviate.cloud" in raw_url:
+        cluster_url = raw_url if raw_url.startswith(("http://", "https://")) else f"https://{raw_url}"
+        return weaviate.connect_to_weaviate_cloud(
+            cluster_url=cluster_url,
+            auth_credentials=auth,
+        )
+
+    clean = raw_url.replace("https://", "").replace("http://", "")
+    host_port = clean.split("/")[0]
+    host = host_port.split(":")[0]
+    port = int(host_port.split(":")[-1]) if ":" in host_port else 8080
+    secure = raw_url.startswith("https://")
+    return weaviate.connect_to_custom(
+        http_host=host,
+        http_port=port,
+        http_secure=secure,
+        grpc_host=params.get("WEAVIATE_GRPC_HOST", host),
+        grpc_port=int(params.get("WEAVIATE_GRPC_PORT", "50051")),
+        grpc_secure=secure,
+        auth_credentials=auth,
+    )
 
 
 class _FAISSFactory:

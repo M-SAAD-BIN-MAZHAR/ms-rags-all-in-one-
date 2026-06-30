@@ -49,3 +49,72 @@ def test_warning_renderer_prints_runtime_notice_panel() -> None:
             delattr(install_warning_renderer, "_installed")
 
     console.print.assert_called()
+
+
+def test_warning_renderer_suppresses_dependency_deprecation_panels() -> None:
+    original = warnings.showwarning
+    if hasattr(install_warning_renderer, "_installed"):
+        delattr(install_warning_renderer, "_installed")
+    console = MagicMock()
+
+    try:
+        install_warning_renderer(console)
+        warnings.showwarning(
+            "deprecated",
+            DeprecationWarning,
+            r"C:\project\.venv\Lib\site-packages\docling\pipeline\standard_pdf_pipeline.py",
+            588,
+        )
+    finally:
+        warnings.showwarning = original
+        if hasattr(install_warning_renderer, "_installed"):
+            delattr(install_warning_renderer, "_installed")
+
+    console.print.assert_not_called()
+
+
+def test_warning_renderer_still_prints_project_deprecation_panels() -> None:
+    original = warnings.showwarning
+    if hasattr(install_warning_renderer, "_installed"):
+        delattr(install_warning_renderer, "_installed")
+    console = MagicMock()
+
+    try:
+        install_warning_renderer(console)
+        warnings.showwarning(
+            "project deprecation",
+            DeprecationWarning,
+            r"C:\repo\ms_rag\query\retrieval_strategy.py",
+            149,
+        )
+    finally:
+        warnings.showwarning = original
+        if hasattr(install_warning_renderer, "_installed"):
+            delattr(install_warning_renderer, "_installed")
+
+    console.print.assert_called()
+
+
+def test_warning_renderer_suppresses_dependency_pydantic_deprecation_panels() -> None:
+    class PydanticDeprecatedSince20(Warning):
+        pass
+
+    original = warnings.showwarning
+    if hasattr(install_warning_renderer, "_installed"):
+        delattr(install_warning_renderer, "_installed")
+    console = MagicMock()
+
+    try:
+        install_warning_renderer(console)
+        warnings.showwarning(
+            "The `parse_obj` method is deprecated; use `model_validate` instead.",
+            PydanticDeprecatedSince20,
+            r"C:\project\.venv\Lib\site-packages\cohere\utils.py",
+            236,
+        )
+    finally:
+        warnings.showwarning = original
+        if hasattr(install_warning_renderer, "_installed"):
+            delattr(install_warning_renderer, "_installed")
+
+    console.print.assert_not_called()
