@@ -1,0 +1,264 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ms-rags-all-in-one"
+version = "1.0.0"
+description = "MS-RAGS(ALL-IN-ONE) — production-grade RAG framework builder terminal CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Muhammad Saad bin Mazhar" },
+]
+keywords = [
+    "rag",
+    "retrieval-augmented-generation",
+    "langchain",
+    "langgraph",
+    "vector-database",
+    "llm",
+    "cli",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Code Generators",
+]
+
+dependencies = [
+    # Terminal UI
+    "rich>=13.0.0",
+    "questionary>=2.0.0",
+
+    # CLI framework
+    "click>=8.1.0",
+
+    # LangChain core
+    "langchain>=0.3.0",
+    "langchain-classic>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-community>=0.3.0",
+    "langchain-text-splitters>=0.3.0",
+
+    # LangGraph (agentic RAG)
+    "langgraph>=0.2.0",
+
+    # LLM provider packages
+    "langchain-openai>=0.2.0",
+    "langchain-anthropic>=0.3.0",
+    "langchain-cohere>=0.3.0",
+    "langchain-google-genai>=2.0.0",
+    "langchain-mistralai>=0.2.0",
+    "langchain-groq>=0.2.0",
+
+    # HuggingFace (NOT langchain-community — deprecated)
+    "langchain-huggingface>=0.1.0",
+    "sentence-transformers>=3.0.0",
+
+    # Ollama (NOT langchain-community — deprecated)
+    "langchain-ollama>=0.2.0",
+
+    # Document loaders — all formats supported out of the box
+    "langchain-unstructured>=0.1.0",
+    "unstructured[pptx,md,image,epub,rtf]>=0.15.0",
+    "python-docx>=1.1.0",
+    "python-pptx>=1.0.0",
+    "docx2txt>=0.8",
+    "openpyxl>=3.1.0",
+    "msoffcrypto-tool>=5.4.0",
+    "pandas>=2.2.0",
+    "jq>=1.8.0",
+    "pypdf>=4.0.0",
+    "pdfplumber>=0.11.0",
+    "tabula-py>=2.9.0",
+    "camelot-py>=0.11.0",
+
+    # LangChain experimental (SemanticChunker)
+    "langchain-experimental>=0.3.0",
+
+    # Vector stores (core — always available)
+    "langchain-chroma>=0.1.0",
+    "chromadb>=0.5.0",
+    "faiss-cpu>=1.8.0",
+
+    # Vector store integrations (LangChain 1.x standalone packages)
+    "langchain-aws>=0.2.0",
+    "langchain-elasticsearch>=0.2.0",
+    "langchain-milvus>=0.1.0",
+    "langchain-postgres>=0.0.9",
+    "langchain-mongodb>=0.2.0",
+    "langchain-pinecone>=0.2.0",
+    "langchain-qdrant>=0.2.0",
+    "langchain-weaviate>=0.0.3",
+    "boto3>=1.34.0",
+    "pymongo>=4.6.0",
+
+    # gRPC — aligned for weaviate-client (<1.80) and grpcio-status
+    "grpcio>=1.59.5,<1.80.0",
+    "grpcio-status>=1.78.0,<1.80.0",
+
+    # Web loaders
+    "beautifulsoup4>=4.12.0",
+    "requests>=2.31.0",
+    "aiohttp>=3.9.0",
+    "lxml>=5.0.0",
+
+    # YouTube transcript loader
+    "youtube-transcript-api>=0.6.0",
+    "pytube>=15.0.0",
+    "llama-parse>=0.5.0",
+    "firecrawl-py>=1.0.0",
+    "apify-client>=1.8.0",
+    "jq>=1.7.0",
+
+    # BM25 / TF-IDF retrieval
+    "rank-bm25>=0.2.2",
+    "scikit-learn>=1.4.0",
+
+    # Credential encryption
+    "cryptography>=41.0.0",
+
+    # Code generation templates
+    "jinja2>=3.1.0",
+
+    # Session persistence
+    "python-dotenv>=1.0.0",
+
+    # Tiktoken for token-based chunking
+    "tiktoken>=0.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-"
+Documentation = "https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-/tree/main/docs-deploy"
+Repository = "https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-"
+Issues = "https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-/issues"
+
+[project.optional-dependencies]
+# ── Individual vector DB extras ──────────────────────────────────────────────
+pinecone = ["langchain-pinecone>=0.2.0", "pinecone-client>=4.0.0"]
+qdrant = ["langchain-qdrant>=0.2.0", "qdrant-client>=1.9.0"]
+weaviate = ["langchain-weaviate>=0.0.3", "weaviate-client>=4.0.0"]
+milvus = ["langchain-milvus>=0.1.0", "pymilvus>=2.4.0"]
+redis = ["langchain-redis>=0.2.0", "redis>=5.0.0"]
+pgvector = ["langchain-postgres>=0.0.9", "psycopg2-binary>=2.9.0", "pgvector>=0.3.0"]
+elasticsearch = ["langchain-elasticsearch>=0.2.0", "elasticsearch>=8.0.0"]
+opensearch = ["opensearch-py>=2.4.0"]
+mongodb = ["langchain-mongodb>=0.2.0", "pymongo>=4.6.0"]
+aws = ["langchain-aws>=0.2.0", "boto3>=1.34.0"]
+graph = ["neo4j>=5.20.0", "kuzu>=0.9.0"]
+
+# ── Individual evaluation framework extras ────────────────────────────────────
+ragas = ["ragas>=0.2.0"]
+deepeval = ["deepeval>=1.0.0"]
+trulens = ["trulens-core>=1.0.0", "trulens-apps-langchain>=1.0.0"]
+langsmith = ["langsmith>=0.1.0"]
+langfuse = ["langfuse>=3.0.0"]
+arize-phoenix = ["arize-phoenix>=4.0.0", "openinference-instrumentation-langchain>=0.1.0"]
+ares = ["ares-ai>=0.5.0"]
+ragbench = ["datasets>=2.20.0"]
+
+# ── Individual reranker extras ────────────────────────────────────────────────
+rerankers = ["flashrank>=0.2.0", "cohere>=5.0.0"]
+
+# ── Production — full feature support except Redis vectors and ares-ai ────────
+# Run: pip install -e ".[production]"
+#
+# Redis is intentionally kept as a separate `redis` extra. The latest
+# langchain-redis release (0.2.5) pins hf-xet<1.2.1, which conflicts with the
+# modern HuggingFace stack used for local/hosted HF embeddings. Install Redis
+# separately only when your environment is prepared for that upstream conflict.
+#
+# ares-ai is also intentionally kept as a separate `ares` extra because current
+# releases pin old OpenAI/Anthropic clients that conflict with the modern
+# provider stack used by MS-RAGS(ALL-IN-ONE). The framework still exposes
+# ARES-compatible local scoring without requiring the package.
+production = [
+    # All vector DBs
+    "langchain-pinecone>=0.2.0",
+    "pinecone-client>=4.0.0",
+    "langchain-qdrant>=0.2.0",
+    "qdrant-client>=1.9.0",
+    "langchain-weaviate>=0.0.3",
+    "weaviate-client>=4.0.0",
+    "langchain-milvus>=0.1.0",
+    "pymilvus>=2.4.0",
+    "langchain-postgres>=0.0.9",
+    "psycopg2-binary>=2.9.0",
+    "pgvector>=0.3.0",
+    "langchain-elasticsearch>=0.2.0",
+    "elasticsearch>=8.0.0",
+    "langchain-mongodb>=0.2.0",
+    "pymongo>=4.6.0",
+    "langchain-aws>=0.2.0",
+    "boto3>=1.34.0",
+    "opensearch-py>=2.4.0",
+    # GraphRAG graph stores
+    "neo4j>=5.20.0",
+    "kuzu>=0.9.0",
+    # All evaluation frameworks
+    "ragas>=0.2.0",
+    "deepeval>=1.0.0",
+    "trulens-core>=1.0.0",
+    "trulens-apps-langchain>=1.0.0",
+    "langsmith>=0.1.0",
+    "langfuse>=3.0.0",
+    "datasets>=2.20.0",
+    # Rerankers
+    "flashrank>=0.2.0",
+    "cohere>=5.0.0",
+    # Loader extras for production document coverage
+    "unstructured[pptx,md,image,epub,rtf]>=0.15.0",
+    "python-pptx>=1.0.0",
+    "msoffcrypto-tool>=5.4.0",
+    "jq>=1.8.0",
+    # Telemetry
+    "opentelemetry-api>=1.25.0",
+    "opentelemetry-sdk>=1.25.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.25.0",
+]
+
+telemetry = [
+    "opentelemetry-api>=1.25.0",
+    "opentelemetry-sdk>=1.25.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.25.0",
+]
+
+# ── Development / testing ─────────────────────────────────────────────────────
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.12.0",
+    "pytest-asyncio>=0.23.0",
+    "hypothesis>=6.100.0",
+    "coverage>=7.4.0",
+]
+
+[project.scripts]
+ms-rags = "ms_rag.__main__:main"
+ms-rag = "ms_rag.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ms_rag*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "smoke: opt-in live backend smoke tests",
+]
+
+[tool.coverage.run]
+source = ["ms_rag"]
+omit = ["tests/*", "ms_rag/codegen/templates/*"]

@@ -23,6 +23,8 @@
 
 [Live Documentation](https://ms-rags-all-in-one.vercel.app/) · [GitHub Repository](https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-)
 
+Created by **Muhammad Saad bin Mazhar**.
+
 </div>
 
 ---
