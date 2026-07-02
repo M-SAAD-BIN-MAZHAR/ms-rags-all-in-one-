@@ -12,6 +12,21 @@ from typing import Any
 _LOGGER_NAME = "ms_rag"
 
 
+_SENSITIVE_KEY_SUFFIXES = ("key", "secret", "token", "password", "api_key", "apikey")
+
+
+def _redact_value(key: str, value: Any) -> Any:
+    """Mask obvious secret-like values in structured logs."""
+    key_lower = key.lower()
+    if not any(key_lower.endswith(suffix) or suffix in key_lower for suffix in _SENSITIVE_KEY_SUFFIXES):
+        return value
+    if not isinstance(value, str) or not value:
+        return value
+    if len(value) <= 4:
+        return "***"
+    return f"***{value[-4:]}"
+
+
 class JsonFormatter(logging.Formatter):
     """Render log records as compact JSON lines."""
 
@@ -37,7 +52,7 @@ class JsonFormatter(logging.Formatter):
             "action",
         ):
             if hasattr(record, key):
-                payload[key] = getattr(record, key)
+                payload[key] = _redact_value(key, getattr(record, key))
         return json.dumps(payload, ensure_ascii=True)
 
 

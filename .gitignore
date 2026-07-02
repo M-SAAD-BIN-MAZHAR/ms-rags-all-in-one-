@@ -83,11 +83,19 @@ compose.override.yml
 # Local docs preview artifacts
 docs_server.err.log
 docs_server.out.log
+docs_server*.log
+
+# Deployable docs build output
+docs-deploy/
+docs-deploy/**
+docs-deploy/.vercel/
+docs-deploy/.vercel-cache/
 
 # Personal files
 Resume/
 
 # Kiro internal (keep specs visible but not workspace settings)
+.kiro/
 .kiro/settings/
 SmokeDocs
 

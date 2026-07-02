@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Security - MS-RAGS(ALL-IN-ONE)</title>
+    <link rel="stylesheet" href="assets/styles.css?v=1.0.1">
+  </head>
+  <body>
+    <div class="site-shell">
+      <div class="docs-frame">
+        <aside class="sidebar">
+          <div class="brand-block">
+            <div class="brand-mark">MS</div>
+            <div>
+              <div class="brand-title">MS-RAGS(ALL-IN-ONE)</div>
+              <div class="brand-subtitle">Guided production RAG</div>
+            </div>
+          </div>
+          <nav class="sidebar-nav">
+            <a href="index.html">Overview</a>
+            <a href="getting-started.html">Getting started</a>
+            <a href="rag-types.html">RAG types</a>
+            <a href="pipeline.html">Pipeline components</a>
+            <a href="databases.html">Vector databases</a>
+            <a href="production.html">Production readiness</a>
+            <a class="active" href="security.html">Security</a>
+          </nav>
+        </aside>
+        <main class="content">
+          <section>
+            <h1>Security</h1>
+            <p class="lead">Public release guidance for secrets, permissions, logging, and generated code.</p>
+            <div class="card-grid">
+              <div class="card"><h3>Secrets</h3><p>Never commit real API keys, tokens, or connection strings. Use environment variables or a secret manager.</p></div>
+              <div class="card"><h3>Permissions</h3><p>Ask before ingestion, web requests, file reads, API calls, and cloud connections.</p></div>
+              <div class="card"><h3>Allowlists</h3><p>Keep file, URL, and API allowlists narrow for agentic tools.</p></div>
+              <div class="card"><h3>Logging</h3><p>Use structured logs and redact sensitive values before writing them.</p></div>
+              <div class="card"><h3>Generated code</h3><p>Write placeholders into <code>.env</code> files, not live secrets into Python.</p></div>
+              <div class="card"><h3>Dependencies</h3><p>Pin production dependencies and review optional extras before release.</p></div>
+            </div>
+            <div class="callout">
+              For the repo-level checklist, see <a href="../SECURITY.md">SECURITY.md</a>.
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+    <script src="assets/app.js"></script>
+  </body>
+  </html>

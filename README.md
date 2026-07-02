@@ -380,6 +380,8 @@ Vercel traffic to the matching static docs pages, clean URLs, sitemap, robots fi
 and assets, so importing this repository into Vercel with the `Other` preset is
 enough to deploy the docs.
 
+For release hardening and public-facing safety rules, see [SECURITY.md](/C:/Users/msaad/OneDrive/Documents/RAG_framework/SECURITY.md).
+
 ---
 
 ## Usage Guide
