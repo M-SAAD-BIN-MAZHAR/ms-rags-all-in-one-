@@ -1060,6 +1060,9 @@ def _run_query_loop(session: SessionState, eval_framework: object | None = None)
         sess.compression_active = bool(runtime.get("compression_active"))
         if runtime.get("agent_runtime") is not None:
             sess.agent_runtime = runtime.get("agent_runtime")
+        # Settings changed (reranking/compression/enhancement) — cached answers
+        # from the old configuration are now stale, so drop the semantic cache.
+        sess.semantic_cache = None
         _display_runtime_readiness(sess.config, runtime, console)
         return True
 

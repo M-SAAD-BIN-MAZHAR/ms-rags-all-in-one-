@@ -139,7 +139,19 @@ class AgentToolConfigurator:
             ],
             console=con,
         )
-        settings: dict[str, Any] = {"memory_types": memory_types, "backend": backend, "max_records": 1000}
+        recall_limit = prompt_text(
+            "  How many memories to recall per query (default 5):",
+            default="5",
+            required=True,
+            console=con,
+            validator=lambda raw: max(1, min(50, int(raw))),
+        )
+        settings: dict[str, Any] = {
+            "memory_types": memory_types,
+            "backend": backend,
+            "max_records": 1000,
+            "recall_limit": int(recall_limit),
+        }
         if backend == "json":
             path = prompt_text(
                 "  Memory JSON path for local/container deploys:",

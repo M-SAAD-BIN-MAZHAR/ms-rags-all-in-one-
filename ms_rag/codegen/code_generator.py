@@ -2543,23 +2543,26 @@ def build_rag_chain(retriever):
         docs = list(state.get("documents", []) or [])
         context = "\\n\\n".join(d.page_content for d in docs)
         tool_context = "\\n\\n".join(state.get("tool_results", []))
-        if tool_context:
-            context = (context + "\\n\\nTool results:\\n" + tool_context).strip()
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("human", f"Context:\\n\\n{{context}}\\n\\nQuestion: {{{{question}}}}"),
-        ])
-        chain = prompt | llm | StrOutputParser()
-        answer = chain.invoke({{"question": state["question"]}})
+        # Agent memory / tool results are a distinct, explicitly-usable source so
+        # conversational/meta questions ("what did I ask earlier?") are answerable
+        # from memory. Content is passed as prompt variables (never interpolated
+        # into the template) so braces in it cannot corrupt the prompt.
+        if tool_context.strip():
+            sys_text = SYSTEM_PROMPT + "\\n\\nAGENT MEMORY & TOOLS: In addition to the context passages, you are given results from approved agent tools and agent memory. You MAY use them to answer, including questions about the current conversation, what the user asked earlier, or prior interactions. Information from agent memory or tools is valid evidence and does not require a document source citation."
+            human = "Context passages:\\n\\n{{context}}\\n\\nApproved tool results & agent memory:\\n\\n{{tool_context}}\\n\\nQuestion: {{question}}"
+            values = {{"context": context or "(no document passages retrieved)", "tool_context": tool_context, "question": state["question"]}}
+        else:
+            sys_text = SYSTEM_PROMPT
+            human = "Context passages:\\n\\n{{context}}\\n\\nQuestion: {{question}}"
+            values = {{"context": context, "question": state["question"]}}
+        prompt = ChatPromptTemplate.from_messages([("system", sys_text), ("human", human)])
+        answer = (prompt | llm | StrOutputParser()).invoke(values)
         trace = append_trace(state, f"generate: generated answer from {{len(docs)}} document(s)")
-        if docs and answer_is_unknown(answer):
-            retry_prompt = ChatPromptTemplate.from_messages([
-                ("system", SYSTEM_PROMPT + "\\n\\nSELF-RAG RETRY: Relevant context was retrieved. Before saying you do not know, extract the directly supported facts from the context. Do not use outside knowledge."),
-                ("human", f"Context:\\n\\n{{context}}\\n\\nQuestion: {{{{question}}}}"),
-            ])
-            retry_chain = retry_prompt | llm | StrOutputParser()
-            answer = retry_chain.invoke({{"question": state["question"]}})
-            trace = trace + ["generate: first answer was 'I don't know' despite retrieved evidence; ran one grounded retry"]
+        if (docs or tool_context) and answer_is_unknown(answer):
+            retry_sys = sys_text + "\\n\\nSELF-RAG RETRY: Relevant evidence was provided in the context passages and/or the agent-memory/tool section. Before saying you do not know, extract the directly supported facts. Questions about the conversation itself are answerable from agent memory and do not need a document citation. Do not use outside knowledge."
+            retry_prompt = ChatPromptTemplate.from_messages([("system", retry_sys), ("human", human)])
+            answer = (retry_prompt | llm | StrOutputParser()).invoke(values)
+            trace = trace + ["generate: first answer was 'I don't know' despite retrieved/memory evidence; ran one grounded retry"]
         return {{"generation": answer, "trace": trace}}
 
     def rewrite_query(state: GraphState) -> dict:

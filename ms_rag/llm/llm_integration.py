@@ -410,6 +410,36 @@ def rebuild_session_runtime(
     return runtime
 
 
+class _RecordingRetriever:
+    """Wraps the final retriever so documents fetched during chain/graph
+    execution are captured and reused for evaluation and the retrieval trace.
+
+    This removes a second full retrieval (and a second rerank/compression pass)
+    per query — the trace/eval previously re-invoked the retriever even though
+    generation had already retrieved the same context.
+    """
+
+    def __init__(self, base_retriever: object) -> None:
+        self.base_retriever = base_retriever
+        self.last_query: str | None = None
+        self.last_documents: list | None = None
+
+    def invoke(self, query: object, *args: object, **kwargs: object) -> object:
+        docs = self.base_retriever.invoke(query, *args, **kwargs)  # type: ignore[union-attr]
+        self.last_query = query if isinstance(query, str) else None
+        self.last_documents = list(docs) if docs is not None else []
+        return docs
+
+    def reset(self) -> None:
+        self.last_query = None
+        self.last_documents = None
+
+    def __or__(self, other: object) -> object:
+        from langchain_core.runnables import RunnableLambda  # noqa: PLC0415
+
+        return RunnableLambda(lambda q: self.invoke(q)) | other
+
+
 def build_session_runtime_from_vector_store(
     config: PipelineConfig,
     credential_store: object,
@@ -558,6 +588,10 @@ def build_session_runtime_from_vector_store(
         and retriever is not base_retriever
     )
 
+    # Wrap the final retriever so generation's retrieval is captured and reused
+    # for eval/trace instead of retrieving (and reranking/compressing) twice.
+    retriever = _RecordingRetriever(retriever)
+
     # Build one shared agent tool runtime so short-term memory survives across
     # turns and semantic memory can reuse the pipeline's embedding model.
     agent_runtime: object | None = None
@@ -685,6 +719,54 @@ def _answer_is_unknown(answer: object) -> bool:
     return normalized in {"i don t know", "i do not know"}
 
 
+def _generate_answer(
+    llm: object,
+    system_prompt: str,
+    *,
+    question: str,
+    context: str,
+    tool_context: str = "",
+) -> str:
+    """Generate a grounded answer for the agentic graph.
+
+    Agent-memory/tool results are presented as a distinct, explicitly-usable
+    source so conversational/meta questions ("what did I ask earlier?") can be
+    answered from memory without a document citation. Context and memory are
+    passed as prompt *variables*, not interpolated into the template string, so
+    braces in document or memory content can never corrupt the prompt.
+    """
+    from langchain_core.prompts import ChatPromptTemplate  # noqa: PLC0415
+    from langchain_core.output_parsers import StrOutputParser  # noqa: PLC0415
+
+    if tool_context.strip():
+        system_text = (
+            system_prompt
+            + "\n\nAGENT MEMORY & TOOLS: In addition to the context passages, you are given "
+            "results from approved agent tools and agent memory. You MAY use them to answer — "
+            "including questions about the current conversation, what the user asked earlier, or "
+            "prior interactions. Information taken from agent memory or tools is valid evidence and "
+            "does not require a document source citation."
+        )
+        human = (
+            "Context passages:\n\n{context}\n\n"
+            "Approved tool results & agent memory:\n\n{tool_context}\n\n"
+            "Question: {question}"
+        )
+        values = {
+            "context": context or "(no document passages retrieved)",
+            "tool_context": tool_context,
+            "question": question,
+        }
+    else:
+        system_text = system_prompt
+        human = "Context passages:\n\n{context}\n\nQuestion: {question}"
+        values = {"context": context, "question": question}
+
+    prompt = ChatPromptTemplate.from_messages([("system", system_text), ("human", human)])
+    chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
+    return chain.invoke(values)
+
+
 def invoke_rag_chain(rag_chain: object, query: str, *, requires_langgraph: bool) -> str:
     """Invoke an LCEL chain or LangGraph workflow and return an answer string."""
     if requires_langgraph:
@@ -773,34 +855,36 @@ def build_langgraph_workflow(
         docs = list(state.get("documents", []) or [])
         context = "\n\n".join(d.page_content for d in docs)
         tool_context = "\n\n".join(state.get("tool_results", []))
-        if tool_context:
-            context = f"{context}\n\nTool results:\n{tool_context}".strip()
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("human", f"Context:\n\n{context}\n\nQuestion: {{question}}"),
-        ])
-        chain = prompt | llm | StrOutputParser()  # type: ignore[operator]
-        answer = chain.invoke({"question": state["question"]})
+
+        answer = _generate_answer(
+            llm,
+            system_prompt,
+            question=state["question"],
+            context=context,
+            tool_context=tool_context,
+        )
         trace = _append_trace(
             state,
             f"generate: generated answer from {len(docs)} document(s)"
             + (f" and {len(state.get('tool_results', []))} tool result(s)" if state.get("tool_results") else ""),
         )
-        if docs and _answer_is_unknown(answer):
-            retry_prompt = ChatPromptTemplate.from_messages([
-                (
-                    "system",
-                    system_prompt
-                    + "\n\nSELF-RAG RETRY: Relevant context was retrieved. "
-                    "Before saying you do not know, extract the directly supported facts from the context. "
-                    "Do not use outside knowledge.",
-                ),
-                ("human", f"Context:\n\n{context}\n\nQuestion: {{question}}"),
-            ])
-            retry_chain = retry_prompt | llm | StrOutputParser()  # type: ignore[operator]
-            retry_answer = retry_chain.invoke({"question": state["question"]})
+        # Retry once if the model refused despite having documents OR agent
+        # memory/tool evidence (e.g. "what did I ask earlier?" answered from memory).
+        if (docs or tool_context) and _answer_is_unknown(answer):
+            retry_answer = _generate_answer(
+                llm,
+                system_prompt
+                + "\n\nSELF-RAG RETRY: Relevant evidence WAS provided in the context passages "
+                "and/or the agent-memory/tool section. Before saying you do not know, extract the "
+                "directly supported facts. Questions about the conversation itself (what the user "
+                "asked earlier, prior turns) are answerable from the agent-memory/tool section and "
+                "do not need a document citation. Do not use outside knowledge.",
+                question=state["question"],
+                context=context,
+                tool_context=tool_context,
+            )
             trace = trace + [
-                "generate: first answer was 'I don't know' despite retrieved evidence; ran one grounded retry"
+                "generate: first answer was 'I don't know' despite retrieved/memory evidence; ran one grounded retry"
             ]
             answer = retry_answer
         return {
@@ -1005,6 +1089,7 @@ def build_langgraph_workflow(
         def query_analysis(state: GraphState) -> dict:
             question = state["question"]
             tool_names = set(getattr(tool_runtime.config, "enabled_tools", []) or [])
+            memory_enabled = "memory" in tool_names
             trigger_notes: list[str] = []
             if "url_fetch" in tool_names and re.search(r"https?://", question):
                 trigger_notes.append("url_fetch")
@@ -1012,44 +1097,73 @@ def build_langgraph_workflow(
                 trigger_notes.append("file_read")
             if "api_request" in tool_names and re.search(r"api\s+(GET|POST|PUT|PATCH)\s+https?://", question, flags=re.IGNORECASE):
                 trigger_notes.append("api_request")
-            if "memory" in tool_names:
+            if memory_enabled:
                 trigger_notes.append("memory")
             if "web_search" in tool_names:
                 trigger_notes.append("web_search_when_retrieval_empty")
+
+            # The LLM planner decides dynamically whether the question needs the
+            # document corpus or is purely about the conversation/memory. The
+            # regex is only a soft hint + fallback default — it does not decide.
+            conversational_hint = memory_enabled and _is_conversational_memory_query(question)
+            allowed_actions = {"retrieve", "rewrite", "tools", "answer"}
+            memory_rule = ""
+            if memory_enabled:
+                allowed_actions.add("memory")
+                memory_rule = (
+                    "Use memory when the question is ONLY about the conversation itself or "
+                    "prior turns — e.g. what the user asked or you said earlier, summarizing or "
+                    "recapping the last few questions/answers, or recalling previous discussion — "
+                    "and does NOT need the document corpus. "
+                )
             planner_action = _llm_choice(
                 [
                     (
                         "system",
                         "You are routing an approved RAG agent. Choose exactly one action: "
-                        "retrieve, rewrite, tools, or answer. Use tools only if an approved "
-                        "tool trigger exists. Use rewrite for unclear questions. Use retrieve "
-                        "when private corpus evidence is needed. Use answer for simple general "
-                        "conversation.",
+                        + ", ".join(sorted(allowed_actions))
+                        + ". Use retrieve when the private document corpus is needed to answer "
+                        "(retrieve also consults agent memory automatically). "
+                        + memory_rule
+                        + "Use tools only if an approved tool trigger exists. Use rewrite for "
+                        "unclear questions. Use answer for simple general conversation.",
                     ),
                     (
                         "human",
-                        "Question: {question}\nApproved tool triggers: {triggers}\nAction:",
+                        "Question: {question}\nApproved tool triggers: {triggers}\n"
+                        "Looks like a conversation-history question: {conversational}\nAction:",
                     ),
                 ],
-                {"question": question, "triggers": ", ".join(trigger_notes) or "none"},
-                {"retrieve", "rewrite", "tools", "answer"},
-                "retrieve",
+                {
+                    "question": question,
+                    "triggers": ", ".join(trigger_notes) or "none",
+                    "conversational": "yes" if conversational_hint else "no",
+                },
+                allowed_actions,
+                "memory" if conversational_hint else "retrieve",
             )
+            if planner_action == "memory" and not memory_enabled:
+                planner_action = "retrieve"
             if planner_action == "tools" and not trigger_notes:
                 planner_action = "retrieve"
             if planner_action == "answer" and not _is_obvious_direct_chat(question):
                 planner_action = "retrieve"
+            note = (
+                " (conversational question — using agent memory, skipping corpus retrieval to save tokens)"
+                if planner_action == "memory"
+                else ""
+            )
             return {
                 "tool_results": [],
                 "action": planner_action,
-                "trace": _append_trace(state, f"agentic_rag: planner selected action={planner_action}"),
+                "trace": _append_trace(state, f"agentic_rag: planner selected action={planner_action}{note}"),
             }
 
         def route_agent_action(state: GraphState) -> str:
             action = str(state.get("action") or "retrieve")
             if action == "rewrite" and state.get("rewrite_count", 0) >= 2:
                 return "retrieve"
-            return action if action in {"retrieve", "rewrite", "tools", "answer"} else "retrieve"
+            return action if action in {"retrieve", "rewrite", "tools", "answer", "memory"} else "retrieve"
 
         def _maybe_summarize(text: str) -> str:
             if tool_runtime.enabled("document_summarization") and len(text) > 4000:
@@ -1087,7 +1201,13 @@ def build_langgraph_workflow(
                     clean_url = url.rstrip(".,")
                     response = tool_runtime.api_request(method.upper(), clean_url)
                     results.append(f"API response for {method.upper()} {clean_url}:\n{_maybe_summarize(response)}")
-            if tool_runtime.enabled("web_search") and not state.get("documents"):
+            # Web search is a fallback for empty corpus retrieval — but not on the
+            # memory-only route, where the user is asking about the conversation.
+            if (
+                tool_runtime.enabled("web_search")
+                and not state.get("documents")
+                and state.get("action") != "memory"
+            ):
                 try:
                     web_results = tool_runtime.web_search(question)
                     web_results = _maybe_summarize(web_results)
@@ -1120,6 +1240,7 @@ def build_langgraph_workflow(
                 "rewrite": "rewrite_query",
                 "tools": "retrieve",
                 "answer": "direct_answer",
+                "memory": "run_approved_tools",
             },
         )
         workflow.add_edge("rewrite_query", "query_analysis")
@@ -1215,6 +1336,41 @@ def build_langgraph_workflow(
 # ---------------------------------------------------------------------------
 
 
+def _env_float(name: str, default: float) -> float:
+    """Read a float from the environment, falling back to *default* on any error."""
+    import os  # noqa: PLC0415
+
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        warnings.warn(f"Invalid {name}={raw!r}; using default {default}.", stacklevel=2)
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an int from the environment, falling back to *default* on any error."""
+    import os  # noqa: PLC0415
+
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        warnings.warn(f"Invalid {name}={raw!r}; using default {default}.", stacklevel=2)
+        return default
+
+
+def _semantic_cache_disabled() -> bool:
+    """Return True when the semantic answer cache is turned off via env var."""
+    import os  # noqa: PLC0415
+
+    return os.getenv("MS_RAG_SEMANTIC_CACHE", "1").strip().lower() in {"0", "false", "no", "off"}
+
+
 def process_query(
     query: str,
     session_state: object,
@@ -1243,6 +1399,42 @@ def process_query(
     cfg = ss.config
 
     with telemetry.span("query.process", query_length=len(query)):
+        # Step 0: Semantic answer cache — serve a repeated/near-duplicate question
+        # instantly (by embedding similarity, independent of how long ago it was
+        # asked), skipping retrieval and generation. Conversational/memory
+        # questions are never cached because their answer changes over time.
+        embeddings = getattr(ss.vector_store, "_ms_rag_embeddings", None)
+        cacheable = (
+            embeddings is not None
+            and not _semantic_cache_disabled()
+            and not _is_conversational_memory_query(query)
+        )
+        if cacheable:
+            from ms_rag.query.semantic_cache import SemanticQueryCache  # noqa: PLC0415
+
+            if ss.semantic_cache is None:
+                ss.semantic_cache = SemanticQueryCache(
+                    embeddings,
+                    threshold=_env_float("MS_RAG_SEMANTIC_CACHE_THRESHOLD", 0.97),
+                    max_entries=_env_int("MS_RAG_SEMANTIC_CACHE_MAX_ENTRIES", 256),
+                )
+            hit = ss.semantic_cache.lookup(query)
+            if hit is not None:
+                ss.last_enhanced_queries = [query]
+                ss.last_primary_retrieval_query = query
+                ss.last_rag_trace = [
+                    f"semantic_cache: served cached answer (similarity {hit.similarity:.3f}, "
+                    f"matched earlier question '{hit.matched_query}') — skipped retrieval and generation",
+                ]
+                ss.last_retrieved_context_count = 0
+                ss.last_retrieved_context_preview = []
+                ss.last_rerank_trace = {}
+                ss.last_compression_trace = {}
+                ss.last_evaluation_scores = {}
+                ss.last_evaluation_warning = ""
+                telemetry.record_event("query.cache_hit", "Semantic cache hit", similarity=round(hit.similarity, 4))
+                return hit.answer
+
         # Step 1: Query Enhancement
         enhanced_queries = [query]
         if query_enhancer and cfg.query_enhancement:
@@ -1283,6 +1475,11 @@ def process_query(
         # Step 2: invoke the RAG chain
         if ss.rag_chain is None:
             return "Pipeline not initialised. Please complete all setup steps first."
+
+        # Reset the recording retriever so we can tell whether generation
+        # actually retrieved this turn (vs. a direct-answer/memory path).
+        if hasattr(ss.retriever, "reset"):
+            ss.retriever.reset()  # type: ignore[union-attr]
 
         try:
             requires_langgraph = bool(
@@ -1340,7 +1537,14 @@ def process_query(
         context_docs = []
         if ss.retriever:
             try:
-                context_docs = ss.retriever.invoke(primary_query)
+                # Reuse what generation already retrieved this turn (captured by
+                # the recording retriever); only retrieve if nothing was recorded
+                # (e.g. a direct-answer path that skipped retrieval).
+                recorded = getattr(ss.retriever, "last_documents", None)
+                if recorded is not None:
+                    context_docs = recorded
+                else:
+                    context_docs = ss.retriever.invoke(primary_query)
                 ss.last_retrieved_context_count = len(context_docs)
                 ss.last_retrieved_context_preview = [
                     str(getattr(doc, "page_content", "") or "")[:240]
@@ -1380,6 +1584,10 @@ def process_query(
             ss.last_evaluation_scores = {}
             ss.last_evaluation_warning = ""
 
+        # Store the freshly-generated answer so a later repeat is served from cache.
+        if cacheable and ss.semantic_cache is not None and isinstance(answer, str) and answer.strip():
+            ss.semantic_cache.add(query, answer)
+
     return answer
 
 
@@ -1403,6 +1611,30 @@ def _collect_retriever_trace(retriever: object) -> dict[str, dict[str, object]]:
             }
         current = getattr(current, "base_retriever", None)
     return trace
+
+
+def _is_conversational_memory_query(question: str) -> bool:
+    """Return True for questions about the conversation itself / prior turns.
+
+    These are answerable from agent memory alone, so the agentic graph can skip
+    corpus retrieval entirely — avoiding irrelevant chunks bloating the
+    generation prompt (and skipping the planner LLM call).
+    """
+    q = " ".join(str(question or "").lower().split())
+    if not q:
+        return False
+    patterns = (
+        r"\bwhat (did|have) (i|we) (ask|asked|say|said|discuss|discussed|talk|talked|cover|covered)",
+        r"\bwhat (i|we) (asked|said|discussed)",
+        r"\b(ask|asked|say|said|told|tell|discuss|discussed|mention|mentioned)\b.*\b(earlier|previously|before|prior|last time|already)\b",
+        r"\byou (said|told|mentioned|answered|responded)\b",
+        r"\b(previous|last|earlier|prior) (question|answer|response|message|query|conversation|reply)\b",
+        r"\bremember (what|when|that|our|the|my)\b",
+        r"\b(my|our) (previous|last|earlier|first) (question|query|message)\b",
+        r"\bwhat (was|were) (my|our) (previous|last|earlier|first)\b",
+        r"\brecall (what|our|the|my)\b",
+    )
+    return any(re.search(pattern, q) for pattern in patterns)
 
 
 def _is_obvious_direct_chat(question: str) -> bool:

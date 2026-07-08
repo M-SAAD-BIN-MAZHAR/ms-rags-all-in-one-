@@ -68,8 +68,13 @@ SEMANTIC_TYPES: frozenset[str] = frozenset({"semantic", "long_term"})
 
 
 def _slug_key(text: str) -> str:
-    """Normalise a user-profile attribute name into a stable snake_case key."""
-    cleaned = re.sub(r"[^a-z0-9]+", "_", str(text or "").strip().lower()).strip("_")
+    """Normalise a profile attribute name into a stable key.
+
+    Uses Unicode word characters (``\\w``), so non-Latin keys (Arabic, Chinese,
+    Cyrillic, etc.) are preserved instead of collapsing to a single fallback key
+    that would make international profile attributes overwrite each other.
+    """
+    cleaned = re.sub(r"\W+", "_", str(text or "").strip().lower(), flags=re.UNICODE).strip("_")
     return cleaned[:64] or "attribute"
 
 
@@ -128,6 +133,7 @@ class AgentMemoryStore:
         # Per-type cap for persistent types so no single type starves the others.
         self.max_records = int(self.settings.get("max_records", 1000))
         self.short_term_limit = int(self.settings.get("short_term_limit", 30))
+        self.recall_limit = max(1, int(self.settings.get("recall_limit", 5)))
         self._warned_no_embeddings = False
 
     # ------------------------------------------------------------------
@@ -751,9 +757,9 @@ class AgentToolRuntime:
         result = self.llm.invoke(prompt)  # type: ignore[attr-defined]
         return getattr(result, "content", str(result))
 
-    def recall_memory(self, query: str, limit: int = 5) -> str:
+    def recall_memory(self, query: str, limit: int | None = None) -> str:
         self._require_enabled("memory")
-        records = self.memory.recall(query, limit=limit)
+        records = self.memory.recall(query, limit=limit if limit is not None else self.memory.recall_limit)
         if not records:
             return ""
         return "\n\n".join(f"[{item['memory_type']}] {item['text']}" for item in records)
@@ -794,8 +800,10 @@ class AgentToolRuntime:
             attributes = self._extract_profile_attributes(query, answer)
             if not attributes:
                 raise ToolExecutionError(
-                    "No stable user-profile attributes could be extracted from this interaction. "
-                    "User Profile memory stores durable facts about the user, not conversation logs."
+                    "No personal profile attributes could be extracted from this answer. "
+                    "User Profile memory stores durable facts about a person (name, role, skills, "
+                    "education, etc.). To keep this as reusable knowledge instead, save it to "
+                    "Semantic or Long-Term memory."
                 )
             stored: list[str] = []
             for key, value in attributes.items():
@@ -841,15 +849,22 @@ class AgentToolRuntime:
         return facts[:5]
 
     def _extract_profile_attributes(self, query: str, answer: str) -> dict[str, str]:
-        """Ask the LLM for stable user attributes as key/value pairs."""
+        """Ask the LLM for stable person/profile attributes as key/value pairs.
+
+        Works whether the answer is phrased in first person ("my name is…") or as
+        a third-person bio ("Muhammad is an AI/ML Engineer…") — a profile save is
+        an explicit user action, so attributes of the person described are stored.
+        """
         if self.llm is None:
             return {}
         prompt = (
-            "From the interaction below, extract stable facts about the USER themselves — their "
-            "name, role, location, preferences, or constraints. Output one 'key: value' per line "
-            "using snake_case keys. Only durable user attributes, never general knowledge or "
-            "conversation summaries. If there are none, output exactly NONE.\n\n"
-            f"User: {query}\nAssistant: {answer}"
+            "Extract durable profile attributes about the main person described below as "
+            "'key: value' lines using snake_case keys — for example name, role, title, "
+            "employer, location, education, skills, achievements, or contact. Include only "
+            "concrete, stable facts stated in the text. No opinions, no general knowledge, and "
+            "no conversation summary. If the text describes no specific person's attributes, "
+            "output exactly NONE.\n\n"
+            f"Question: {query}\nAnswer: {answer}"
         )
         try:
             result = self.llm.invoke(prompt)  # type: ignore[attr-defined]
