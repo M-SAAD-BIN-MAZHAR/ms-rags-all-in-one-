@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ms-rags-all-in-one"
-version = "1.0.1"
+version = "1.0.2"
 description = "MS-RAGS(ALL-IN-ONE) — production-grade RAG framework builder terminal CLI"
 readme = "README.md"
 requires-python = ">=3.11"

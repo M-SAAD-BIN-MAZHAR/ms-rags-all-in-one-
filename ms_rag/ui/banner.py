@@ -12,6 +12,8 @@ Behaviour (Requirement 1):
 
 from __future__ import annotations
 
+from ms_rag import __version__
+
 MS_RAG_BANNER = r"""
 ███╗   ███╗███████╗      ██████╗  █████╗  ██████╗ ███████╗
 ████╗ ████║██╔════╝      ██╔══██╗██╔══██╗██╔════╝ ██╔════╝
@@ -23,7 +25,7 @@ MS_RAG_BANNER = r"""
 """
 
 TAGLINE = "Production-Grade RAG Framework Builder"
-VERSION_LINE = "v1.0.0  |  Powered by LangChain & LangGraph"
+VERSION_LINE = f"v{__version__}  |  Powered by LangChain & LangGraph"
 SEPARATOR = "─" * 60
 
 

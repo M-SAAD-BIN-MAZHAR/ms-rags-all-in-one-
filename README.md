@@ -121,7 +121,7 @@ If you do not want local PDF/OCR dependencies, choose **LlamaParseLoader** for c
 ### Public PyPI Install (Recommended)
 
 ```bash
-pip install ms-rags-all-in-one==1.0.1
+pip install ms-rags-all-in-one==1.0.2
 ms-rags
 ```
 
@@ -242,7 +242,7 @@ Use the public image when you want the ready-to-run container. Build locally onl
 
 | Command | What it installs | Recommended for |
 |---------|------------------|-----------------|
-| `docker build -t ms-rags-all-in-one:1.0.1 .` | Core MS-RAGS(ALL-IN-ONE) package and required base dependencies | Fast local testing, basic CLI walkthroughs, lightweight images |
+| `docker build -t ms-rags-all-in-one:1.0.2 .` | Core MS-RAGS(ALL-IN-ONE) package and required base dependencies | Fast local testing, basic CLI walkthroughs, lightweight images |
 | `docker build --build-arg INSTALL_EXTRAS=production -t ms-rags-all-in-one:production .` | Core MS-RAGS(ALL-IN-ONE) plus production providers, vector DB clients except Redis, evaluators, rerankers, telemetry, and loader dependencies | Production-style usage and full feature testing |
 | `docker build --build-arg INSTALL_EXTRAS=pinecone,qdrant,ragas,rerankers,telemetry -t ms-rags-all-in-one:custom .` | Only the optional extras you name | Smaller images for teams that support a fixed stack |
 | `docker build --build-arg USE_CONSTRAINTS=0 --build-arg INSTALL_EXTRAS=redis -t ms-rags-all-in-one:redis .` | Redis vector support path | Redis-only testing while the upstream Redis/HuggingFace dependency conflict exists |
@@ -253,7 +253,7 @@ If you want **all dependencies**, use the production build argument:
 docker build --build-arg INSTALL_EXTRAS=production -t ms-rags-all-in-one:production .
 ```
 
-The plain `ms-rags-all-in-one:1.0.1` local image is intentionally smaller. It is valid, but it does
+The plain `ms-rags-all-in-one:1.0.2` local image is intentionally smaller. It is valid, but it does
 not install every optional integration.
 
 Production Docker builds use `constraints-production.txt`. That file pins the
@@ -269,7 +269,7 @@ faster and avoids pulling every optional evaluator/reranker package unless the
 user asks for them.
 
 ```bash
-docker build -t ms-rags-all-in-one:1.0.1 .
+docker build -t ms-rags-all-in-one:1.0.2 .
 ```
 
 To build the full production image with every optional provider, vector
@@ -295,7 +295,7 @@ is a Docker network/DNS issue rather than an MS-RAGS(ALL-IN-ONE) code error. Ret
 after Docker networking is healthy, or pass your internal package index:
 
 ```bash
-docker build --build-arg PIP_INDEX_URL=https://pypi.org/simple -t ms-rags-all-in-one:1.0.1 .
+docker build --build-arg PIP_INDEX_URL=https://pypi.org/simple -t ms-rags-all-in-one:1.0.2 .
 ```
 
 If Docker fails with `resolution-too-deep`, make sure the build context includes
