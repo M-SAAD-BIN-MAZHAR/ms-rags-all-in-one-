@@ -94,6 +94,11 @@ docs-deploy/.vercel-cache/
 # Personal files
 Resume/
 
+# Agent memory store (runtime user data + embeddings — never commit)
+agent_memory/
+*.memory.json
+ms_rag_session*.json
+
 # Kiro internal (keep specs visible but not workspace settings)
 .kiro/
 .kiro/settings/

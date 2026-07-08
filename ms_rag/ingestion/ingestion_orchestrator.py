@@ -90,6 +90,57 @@ def _empty_retrieval_state() -> dict[str, object]:
     }
 
 
+def _coalesce_documents(docs: list, chunk_size: int) -> list:
+    """Merge adjacent same-source element documents up to ``chunk_size``.
+
+    Element-based loaders (Unstructured PDF/Word, HTML, etc.) return one
+    Document per line/element. ``TextSplitter.split_documents`` only ever splits
+    *within* a Document — it never merges across them — so those loaders would
+    otherwise yield many ~100-character chunks that wreck retrieval. This
+    coalesces consecutive elements from the same source into blocks near the
+    target chunk size before splitting, so the splitter produces real
+    section-sized chunks (and parent-child parents become real sections).
+
+    Documents that are already at/above the target are left as their own block;
+    the splitter still divides them normally afterwards.
+    """
+    if not docs:
+        return docs
+    target = chunk_size if isinstance(chunk_size, int) and chunk_size > 0 else 1500
+
+    merged: list = []
+    buf_texts: list[str] = []
+    buf_len = 0
+    buf_meta: dict | None = None
+    buf_source: object = object()  # sentinel that never equals a real source
+
+    def _flush() -> None:
+        nonlocal buf_texts, buf_len, buf_meta
+        if buf_texts:
+            merged.append(Document(page_content="\n\n".join(buf_texts), metadata=dict(buf_meta or {})))
+        buf_texts = []
+        buf_len = 0
+        buf_meta = None
+
+    for doc in docs:
+        text = str(getattr(doc, "page_content", "") or "").strip()
+        if not text:
+            continue
+        meta = dict(getattr(doc, "metadata", {}) or {})
+        source = meta.get("source")
+        # New source, or adding this element would exceed the target → flush.
+        if buf_texts and (source != buf_source or buf_len + len(text) + 2 > target):
+            _flush()
+        if not buf_texts:
+            buf_source = source
+            buf_meta = meta
+        buf_texts.append(text)
+        buf_len += len(text) + 2
+    _flush()
+
+    return merged or docs
+
+
 def _copy_document(doc: object) -> object:
     """Make a shallow document copy so metadata edits do not surprise loaders."""
     try:
@@ -375,6 +426,7 @@ class IngestionOrchestrator:
                             loader_map=loader_map,
                             youtube_language=youtube_language,
                         )
+                        docs = _coalesce_documents(docs, chunking_config.chunk_size)
                         prepared_docs = _prepare_parent_documents(docs, source_str)
                         retrieval_state["parent_documents"].update(prepared_docs["parent_documents"])
 
@@ -449,6 +501,7 @@ class IngestionOrchestrator:
                 loader_map=loader_map,
                 youtube_language=youtube_language,
             )
+            docs = _coalesce_documents(docs, chunking_config.chunk_size)
             chunks = splitter.split_documents(docs)
             texts.extend(
                 chunk.page_content
@@ -483,6 +536,7 @@ class IngestionOrchestrator:
                 loader_map=loader_map,
                 youtube_language=youtube_language,
             )
+            docs = _coalesce_documents(docs, chunking_config.chunk_size)
             prepared_docs = _prepare_parent_documents(docs, source_str)
             state["parent_documents"].update(prepared_docs["parent_documents"])
             chunks = splitter.split_documents(prepared_docs["documents"])
@@ -705,7 +759,32 @@ class IngestionOrchestrator:
                 converter = DocumentConverter()
                 result = converter.convert(source)
                 docling_doc = getattr(result, "document", result)
-                text = str(getattr(docling_doc, "text", str(docling_doc)))
+                # DoclingDocument exposes structured exporters, NOT a `.text`
+                # attribute. Using getattr(..., "text", str(doc)) silently dumps
+                # the object repr (schema_name='DoclingDocument' ...) instead of
+                # the actual content. Export to markdown (keeps headings), then
+                # plain text, and only then fall back — never to the repr.
+                text = ""
+                for exporter in ("export_to_markdown", "export_to_text"):
+                    fn = getattr(docling_doc, exporter, None)
+                    if callable(fn):
+                        try:
+                            candidate = str(fn() or "")
+                        except Exception:  # noqa: BLE001
+                            continue
+                        if candidate.strip():
+                            text = candidate
+                            break
+                if not text.strip():
+                    attr = getattr(docling_doc, "text", None)
+                    if isinstance(attr, str) and attr.strip():
+                        text = attr
+                if not text.strip():
+                    raise IngestionError(
+                        "DoclingLoader converted the document but could not extract any text. "
+                        "Try PyPDFLoader/Unstructured, or verify the file is not empty/scanned.",
+                        document_path=source,
+                    )
                 return _normalize_documents(
                     [Document(page_content=text, metadata={"source": source})],
                     source,

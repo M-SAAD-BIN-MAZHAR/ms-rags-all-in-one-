@@ -941,12 +941,49 @@ class _AgenticGeneratedChunker:
                 chunks.extend(size_splitter.split_documents([Document(page_content=part, metadata=dict(getattr(window, "metadata", {{}}) or {{}}))]))
         return chunks
 
+def _coalesce_documents(documents: list, target: int) -> list:
+    """Merge adjacent same-source element docs up to `target` chars before splitting.
+
+    Element-based loaders (Unstructured PDF/Word, HTML) return one Document per
+    line; TextSplitter.split_documents only splits within a Document and never
+    merges across them, which would yield tiny ~100-char chunks and wreck
+    retrieval. This coalesces consecutive same-source elements into section-sized
+    blocks first.
+    """
+    from langchain_core.documents import Document
+    if not documents:
+        return documents
+    target = target if isinstance(target, int) and target > 0 else 1500
+    merged = []
+    buf, buf_len, buf_meta, buf_src = [], 0, None, object()
+    def _flush():
+        nonlocal buf, buf_len, buf_meta
+        if buf:
+            merged.append(Document(page_content="\\n\\n".join(buf), metadata=dict(buf_meta or {{}})))
+        buf, buf_len, buf_meta = [], 0, None
+    for doc in documents:
+        text = str(getattr(doc, "page_content", "") or "").strip()
+        if not text:
+            continue
+        meta = dict(getattr(doc, "metadata", {{}}) or {{}})
+        source = meta.get("source")
+        if buf and (source != buf_src or buf_len + len(text) + 2 > target):
+            _flush()
+        if not buf:
+            buf_src = source
+            buf_meta = meta
+        buf.append(text)
+        buf_len += len(text) + 2
+    _flush()
+    return merged or documents
+
 def create_chunks(documents: list) -> list:
     """Split documents into chunks using {strategy} strategy."""
     from datetime import UTC, datetime
     import json
     global ADVANCED_PARENT_DOCUMENTS, ADVANCED_CHUNK_DOCUMENTS
     ADVANCED_PARENT_DOCUMENTS = {{}}
+    documents = _coalesce_documents(documents, {size})
     prepared_documents = []
     ingested_at = datetime.now(UTC).isoformat()
     for index, doc in enumerate(documents):
