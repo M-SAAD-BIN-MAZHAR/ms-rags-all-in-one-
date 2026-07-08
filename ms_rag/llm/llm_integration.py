@@ -1107,13 +1107,18 @@ def build_langgraph_workflow(
         workflow.add_node("rewrite_query", rewrite_query)
 
         workflow.set_entry_point("query_analysis")
+        # NOTE: the "tools" action routes through retrieve so approved tools
+        # (memory, web search, etc.) AUGMENT corpus context instead of replacing
+        # it. Retrieval always runs before generation; otherwise a query that
+        # the planner sends to tools would generate from zero documents even
+        # when the vector store holds the answer.
         workflow.add_conditional_edges(
             "query_analysis",
             route_agent_action,
             {
                 "retrieve": "retrieve",
                 "rewrite": "rewrite_query",
-                "tools": "run_approved_tools",
+                "tools": "retrieve",
                 "answer": "direct_answer",
             },
         )
