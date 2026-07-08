@@ -110,6 +110,17 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer your-token</code></pre>
           </section>
 
           <section>
+            <h2>Performance And Agent Memory</h2>
+            <p>A session-scoped <strong>semantic answer cache</strong> keys each answered question by its embedding. A repeated or near-duplicate question — regardless of how many queries ago it was first asked — is served from cache, skipping retrieval and generation. It is in-memory (no staleness, since the index is fixed for the session), never caches conversational/memory questions, is cleared when reranking/compression settings change, and is tunable or disabled via environment variables.</p>
+            <pre><code>MS_RAG_SEMANTIC_CACHE=1                 # set 0/false/off to disable
+MS_RAG_SEMANTIC_CACHE_THRESHOLD=0.97    # cosine similarity needed for a cache hit
+MS_RAG_SEMANTIC_CACHE_MAX_ENTRIES=256   # max cached (query -> answer) pairs
+MS_RAG_AGENT_MEMORY_PATH=./agent_memory/memory.json</code></pre>
+            <p>Retrieval (and any reranking/compression) runs <strong>once per query</strong> and is reused for generation and the evaluation/trace — no duplicate passes.</p>
+            <p>When the Memory tool is enabled for Agentic RAG, each memory type behaves per its purpose: <strong>semantic</strong>/<strong>long-term</strong> store LLM-extracted durable facts recalled by embedding similarity; <strong>episodic</strong> stores time/session-stamped events recalled by recency and relevance; <strong>user profile</strong> stores keyed attributes (name, role, skills, …) that are upserted and always injected; <strong>short-term</strong> is a session working window. Saving stores extracted facts/attributes rather than raw logs, keys are Unicode-safe, eviction is per-type, and recall depth is configurable. A dynamic LLM planner routes conversational questions to agent memory and skips corpus retrieval, while corpus questions retrieve normally.</p>
+          </section>
+
+          <section>
             <h2>Smoke Test Matrix</h2>
             <div class="table-wrap">
               <table>

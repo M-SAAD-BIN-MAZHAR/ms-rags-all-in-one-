@@ -56,9 +56,11 @@ Inspired by OpenClaw's UX, MS-RAGS(ALL-IN-ONE) acts as a **live RAG workbench + 
 | **Vector Databases** | 12 databases — ChromaDB, Pinecone, Qdrant, Weaviate, FAISS, Milvus, Redis (`langchain-redis`), PGVector, Elasticsearch, OpenSearch, Azure AI Search, MongoDB Atlas |
 | **Query Enhancement** | 7 techniques — Query Rewriting, Query Expansion, HyDE, Multi-Query, Step-Back, Sub-question Decomposition, RAG-Fusion |
 | **Retrieval Strategies** | 10 strategies — Dense Vector, BM25, TF-IDF, Hybrid, MMR, Ensemble, Parent-Child, Multi-Vector, Self-Query, Time-weighted |
-| **Rerankers** | 6 — Cross-Encoder, Cohere, BGE, LLM-based, ColBERT, FlashRank |
+| **Rerankers** | 6 — Cross-Encoder, Cohere, BGE, LLM-based, ColBERT (genuine token-level late-interaction / MaxSim), FlashRank |
 | **Context Compression** | 6 techniques — LLM Chain Extraction, Embeddings Filter, Redundancy Removal, Document Compressor Pipeline, Contextual Compression, Summary Compression |
-| **Evaluation Options** | 12 — RAGAS, DeepEval, TruLens, LangSmith, Langfuse, Arize Phoenix, ARES, RAGEval, RAGBench, CI/CD Gate, LangGraph Trace, Monitoring Export |
+| **Evaluation Options** | 12 — RAGAS, DeepEval, TruLens (real RAG-triad feedback), LangSmith, Langfuse, Arize Phoenix, ARES, RAGEval, RAGBench, CI/CD Gate, LangGraph Trace, Monitoring Export |
+| **Agent Memory** | 5 real memory types — Semantic (embedding-similarity recall), Long-Term (durable facts), Episodic (time/session events), User Profile (keyed, upserted attributes), Short-Term (session working memory). Configurable recall depth; per-type eviction |
+| **Performance** | Session semantic answer cache (repeated/near-duplicate questions served instantly, skipping retrieval + generation); one retrieval per query; dynamic memory-vs-corpus routing for Agentic RAG |
 
 ---
 
@@ -472,7 +474,7 @@ If you choose Agentic RAG, MS-RAGS(ALL-IN-ONE) asks whether you want to enable p
 | Tool | What it does | Required user permission |
 |------|--------------|--------------------------|
 | Web Search | Searches the public web through Tavily or Brave Search. | Provider API key plus max-results limit. |
-| Memory Systems | Stores short-term, long-term, semantic, episodic, and user profile memories. | Enabled memory types and a JSON memory path such as `./agent_memory/memory.json`. |
+| Memory Systems | Five real memory types, each with behaviour matching its purpose: **semantic**/**long-term** are embedding-indexed and recalled by meaning; **episodic** stores time/session-stamped events recalled by recency + relevance; **user profile** stores keyed attributes that are upserted (deduped by key) and always injected; **short-term** is a session working window. LLM-extracted facts/attributes on save (not raw logs), per-type eviction, and configurable recall depth. | Enabled memory types, backend (JSON/SQLite/Postgres/MongoDB Atlas), a memory path such as `./agent_memory/memory.json`, and recall depth. |
 | URL Fetch / Web Page Reader | Reads a specific URL for the agent. | Allowed domains, timeout, and max page size. |
 | File System Read | Reads selected local files. | Explicit file/folder allowlist and max file size. |
 | Document Summarization | Summarizes large tool results before generation. | Uses the selected LLM; no separate credential. |
@@ -538,6 +540,37 @@ Once the runtime is built, you can type natural language questions. Available co
 Empty Enter in the query loop re-prompts instead of exiting. Required workflow inputs (providers, document sources, vector DB connection, telemetry choice, etc.) loop until valid.
 
 When query enhancement is enabled, the live query loop prints a **Query Enhancement Trace** showing the original query, generated/re-written query variants, and the exact query sent to retrieval. This keeps HyDE, multi-query, rewrite, and fusion behavior visible instead of hidden.
+
+---
+
+## Performance & Agent Memory
+
+**Semantic answer cache.** During a live session, MS-RAGS(ALL-IN-ONE) caches each answered
+question by its embedding. When you ask a repeated or near-duplicate question — no matter
+how many queries ago you first asked it — the cached answer is returned instantly, skipping
+retrieval and generation. The trace shows a `semantic_cache: served cached answer …` line so
+it stays visible. The cache is session-scoped and in-memory (no staleness — the index is fixed
+for the session), never caches conversational/memory questions, and is cleared automatically
+when you change reranking/compression via `/settings`. Tune or disable it with the
+`MS_RAG_SEMANTIC_CACHE*` environment variables above.
+
+**One retrieval per query.** Retrieval (and any reranking/compression) runs once per query and
+is reused for both generation and the evaluation/trace — no duplicate retrieval passes.
+
+**Agent memory that behaves per type.** When the Memory tool is enabled for Agentic RAG:
+
+| Type | Stores | Recalled by |
+|------|--------|-------------|
+| Semantic / Long-Term | LLM-extracted durable facts (embedded) | Embedding similarity (meaning) |
+| Episodic | Time/session-stamped events | Recency blended with relevance |
+| User Profile | LLM-extracted keyed attributes (name, role, skills, …), upserted | Always injected (keyed, deduped) |
+| Short-Term | Current-session working turns | Recency window |
+
+Saving stores type-appropriate content (extracted facts/attributes, not raw logs), keys are
+Unicode-safe (international attributes stay distinct), eviction is per-type, and recall depth is
+configurable when you enable the Memory tool. For Agentic RAG, a dynamic LLM planner routes
+conversational questions ("what did I ask earlier?", "recap our chat") to agent memory and skips
+corpus retrieval, while corpus questions retrieve normally.
 
 ---
 
@@ -616,6 +649,14 @@ OTEL_SERVICE_NAME=ms-rags-all-in-one
 OTEL_ENVIRONMENT=production
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer your-token
+
+# Semantic answer cache (session-scoped, in-memory) — optional tuning
+MS_RAG_SEMANTIC_CACHE=1                 # set 0/false/off to disable
+MS_RAG_SEMANTIC_CACHE_THRESHOLD=0.97    # cosine similarity needed for a cache hit
+MS_RAG_SEMANTIC_CACHE_MAX_ENTRIES=256   # max cached (query -> answer) pairs
+
+# Agent memory store location (used when memory tools are enabled)
+MS_RAG_AGENT_MEMORY_PATH=./agent_memory/memory.json
 ```
 
 ---
@@ -690,10 +731,10 @@ MS-RAGS-ALL-IN-ONE/
 | Redis vectors | `langchain-redis>=0.2` | ⚠️ NOT deprecated `langchain_community.vectorstores.Redis` |
 | HuggingFace | `langchain-huggingface>=0.1` | Local `HuggingFaceEmbeddings` and hosted token-only `HuggingFaceEndpointEmbeddings`; ⚠️ NOT deprecated `langchain-community` |
 | Ollama | `langchain-ollama>=0.2` | ⚠️ NOT deprecated `langchain-community` |
-| TruLens | `trulens-core`, `trulens-apps-langchain` | ⚠️ NOT deprecated `trulens_eval` |
+| TruLens | `trulens-core`, `trulens-apps-langchain`, `trulens-providers-openai` (for real RAG-triad feedback) | ⚠️ NOT deprecated `trulens_eval` |
 | gRPC | `grpcio>=1.59.5,<1.80.0` | Pinned for `weaviate-client` compatibility |
 | Credential encryption | `cryptography>=41.0` | Fernet symmetric encryption + PBKDF2 |
-| Testing | `pytest>=8.0`, `hypothesis>=6.100` | 390 tests, property-based |
+| Testing | `pytest>=8.0`, `hypothesis>=6.100` | Extensive unit + property-based suite |
 
 ---
 
@@ -728,7 +769,7 @@ When evaluation is enabled in Step 15, metrics are computed **live after each qu
 | Evaluator | Runtime behaviour |
 |-----------|-------------------|
 | RAGAS / DeepEval | Package-backed LLM-judge scoring when installed and compatible. Step 15 asks for an OpenAI evaluator key and evaluator model such as `gpt-4o-mini`; lexical fallback is used with a visible warning if the evaluator API/package fails |
-| TruLens | Modern TruLens package validation when compatible; TruLens-prefixed groundedness scores with visible fallback warning if its LangChain adapter is incompatible |
+| TruLens | Real TruLens RAG triad — groundedness, answer relevance, and context relevance — via the TruLens OpenAI feedback provider (`trulens-providers-openai` + evaluator OpenAI key). Falls back to TruLens-prefixed lexical metrics with a visible warning if the provider/key is unavailable |
 | LangSmith / Langfuse | Logs trace/run when credentials are configured |
 | Arize Phoenix | OpenInference/Phoenix trace export when `PHOENIX_COLLECTOR_ENDPOINT` is configured; Phoenix-prefixed scores otherwise |
 | ARES | ARES-compatible retrieval/generation scores; install the external `ares-ai` package only in a separate ARES-focused environment if you need its package-backed path |
