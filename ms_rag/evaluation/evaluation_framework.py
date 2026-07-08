@@ -292,9 +292,9 @@ class EvaluationFramework:
                 continue
 
             try:
-                if evaluator_id in ("langsmith", "langfuse", "arize_phoenix", "ragas", "deepeval"):
+                if evaluator_id in ("langsmith", "langfuse", "arize_phoenix", "ragas", "deepeval", "trulens"):
                     kwargs = {"credential_store": self._credential_store}
-                    if evaluator_id in ("ragas", "deepeval"):
+                    if evaluator_id in ("ragas", "deepeval", "trulens"):
                         kwargs["evaluator_model"] = active.evaluator_llm_model
                     result = runner(query, context, answer, **kwargs)
                 elif evaluator_id == "langgraph_trace":

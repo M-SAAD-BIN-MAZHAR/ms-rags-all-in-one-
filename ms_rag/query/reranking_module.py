@@ -357,7 +357,16 @@ class RerankingModule:
         return [doc for _, doc in scored[: config.top_k]]
 
     def _rerank_colbert(self, query: str, docs: list, config: RerankingConfig) -> list:
-        return self._rerank_bge(query, docs, config)
+        """Rerank with genuine ColBERT-style late interaction (token-level MaxSim).
+
+        Unlike a cross-encoder, this encodes the query and each document into
+        per-token contextual embeddings and scores by summing, over every query
+        token, its maximum cosine similarity to any document token (MaxSim).
+        """
+        scorer = _get_colbert_scorer(config.model_id)
+        scores = scorer.score(query, [doc.page_content for doc in docs])
+        ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
+        return [doc for _, doc in ranked[: config.top_k]]
 
     def _rerank_flashrank(self, query: str, docs: list, config: RerankingConfig) -> list:
         from flashrank import Ranker, RerankRequest  # noqa: PLC0415
@@ -427,6 +436,63 @@ def _get_cross_encoder(model_id: str) -> object:
     return CrossEncoder(model_id)
 
 
+class _ColBERTLateInteractionScorer:
+    """Genuine ColBERT-style late-interaction (MaxSim) scorer.
+
+    Encodes query and documents into per-token contextual embeddings with a
+    transformer encoder, L2-normalises them, and scores each document as the
+    sum over query tokens of the maximum cosine similarity to any document
+    token. This is the ColBERT MaxSim operator — fundamentally different from a
+    cross-encoder's single joint relevance score.
+    """
+
+    def __init__(self, model_id: str, max_length: int = 512) -> None:
+        import torch  # noqa: PLC0415
+        from transformers import AutoModel, AutoTokenizer  # noqa: PLC0415
+
+        self._torch = torch
+        self.max_length = max_length
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        self.model = AutoModel.from_pretrained(model_id)
+        self.model.eval()
+
+    def _encode(self, texts: list[str]) -> list:
+        torch = self._torch
+        encoded = self.tokenizer(
+            texts,
+            padding=True,
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="pt",
+        )
+        with torch.no_grad():
+            hidden = self.model(**encoded).last_hidden_state  # (B, T, H)
+        hidden = torch.nn.functional.normalize(hidden, p=2, dim=-1)
+        mask = encoded["attention_mask"].bool()
+        return [hidden[i][mask[i]] for i in range(hidden.shape[0])]
+
+    def score(self, query: str, documents: list[str]) -> list[float]:
+        if not documents:
+            return []
+        query_tokens = self._encode([query])[0]  # (Tq, H)
+        scores: list[float] = []
+        batch_size = 16
+        for start in range(0, len(documents), batch_size):
+            for doc_tokens in self._encode(documents[start : start + batch_size]):
+                if doc_tokens.shape[0] == 0 or query_tokens.shape[0] == 0:
+                    scores.append(0.0)
+                    continue
+                similarity = query_tokens @ doc_tokens.T  # (Tq, Td)
+                scores.append(float(similarity.max(dim=1).values.sum().item()))
+        return scores
+
+
+@lru_cache(maxsize=1)
+def _get_colbert_scorer(model_id: str) -> _ColBERTLateInteractionScorer:
+    """Load and cache the late-interaction ColBERT scorer for the process."""
+    return _ColBERTLateInteractionScorer(model_id or "colbert-ir/colbertv2.0")
+
+
 def clear_reranker_model_cache() -> None:
     """Release cached local reranker models.
 
@@ -434,3 +500,4 @@ def clear_reranker_model_cache() -> None:
     constrained machines after reranking settings change.
     """
     _get_cross_encoder.cache_clear()
+    _get_colbert_scorer.cache_clear()

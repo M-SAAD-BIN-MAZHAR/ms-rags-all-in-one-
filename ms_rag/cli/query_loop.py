@@ -295,17 +295,21 @@ class QueryLoop:
             ).ask()
             if not memory_type:
                 return
-            text = f"User query: {query}\nAssistant answer: {answer}"
-            AgentToolRuntime(
-                cfg.agent_tools,
-                credential_store=session_state.credentials,
-                llm=session_state.llm,
-            ).remember(
-                str(memory_type),
-                text,
-                {"source": "live_query_loop"},
-            )
-            print_hint(console, f"Saved to {str(memory_type).replace('_', ' ')} memory.")
+            runtime = session_state.agent_runtime
+            if runtime is None:
+                runtime = AgentToolRuntime(
+                    cfg.agent_tools,
+                    credential_store=session_state.credentials,
+                    llm=session_state.llm,
+                    embeddings=getattr(session_state.vector_store, "_ms_rag_embeddings", None),
+                )
+                session_state.agent_runtime = runtime
+            stored = runtime.capture_interaction(str(memory_type), query, answer)
+            label = str(memory_type).replace("_", " ")
+            if stored:
+                print_hint(console, f"Saved {len(stored)} item(s) to {label} memory.")
+            else:
+                print_hint(console, f"Saved to {label} memory.")
         except Exception as exc:  # noqa: BLE001
             print_error(console, f"Could not save agent memory: {format_provider_error(exc)}")
 

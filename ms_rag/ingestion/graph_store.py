@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -329,11 +330,23 @@ class GraphStoreConnector:
             raw = getattr(result, "content", str(result))
             parsed = _extract_json_object(raw)
             if not isinstance(parsed.get("entities", []), list):
+                warnings.warn(
+                    "GraphRAG entity extraction: the LLM response did not contain a valid "
+                    "'entities' list; degrading to naive co-mention extraction for this chunk. "
+                    "Graph quality will be lower — check the generation model/output format.",
+                    stacklevel=2,
+                )
                 return _fallback_extract(text)
             if not isinstance(parsed.get("relationships", []), list):
                 parsed["relationships"] = []
             return parsed
-        except Exception:
+        except Exception as exc:
+            warnings.warn(
+                "GraphRAG entity extraction: the LLM call/JSON parse failed "
+                f"({type(exc).__name__}: {exc}); degrading to naive co-mention extraction "
+                "for this chunk. Graph quality will be lower.",
+                stacklevel=2,
+            )
             return _fallback_extract(text)
 
     def _build_communities(

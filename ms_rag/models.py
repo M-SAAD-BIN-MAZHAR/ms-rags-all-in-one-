@@ -541,6 +541,8 @@ class SessionState:
     retriever: Any = None         # LangChain BaseRetriever instance
     llm: Any = None               # LangChain BaseLLM / BaseChatModel instance
     rag_chain: Any = None         # RunnableSequence (LCEL) or CompiledGraph (LangGraph)
+    compression_active: bool = False  # True when a compression layer wraps the retriever
+    agent_runtime: Any = None     # Shared AgentToolRuntime — keeps short-term memory alive across turns
 
     current_step: int = 1
     query_history: list[tuple[str, str]] = field(default_factory=list)

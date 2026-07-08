@@ -16,7 +16,7 @@
         <a href="rag-types.html">RAG types</a><a href="pipeline.html">Pipeline components</a><a href="databases.html">Vector databases</a>
         <div class="nav-title">Production</div>
         <a class="active" href="production.html">Production readiness</a><a href="resources.html">Official resources</a>
-        <div class="nav-title">Project</div><a href="https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-" rel="noopener">GitHub repository</a>
+        <div class="nav-title">Project</div><a href="https://github.com/M-SAAD-BIN-MAZHAR/ms-rags-all-in-one-" rel="noopener">GitHub repository</a>
       </aside>
       <div class="content">
         <div class="mobile-bar"><strong>MS-RAGS(ALL-IN-ONE) Docs</strong><button type="button" data-mobile-toggle>Menu</button></div>
@@ -128,7 +128,7 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer your-token</code></pre>
             <h2>Docker Production Checklist</h2>
             <p>MS-RAGS(ALL-IN-ONE) includes a Dockerfile for teams that want a repeatable CLI runtime, CI smoke-test container, or production-style build environment.</p>
             <ol class="steps">
-              <li>Build the production image with <code>docker build --build-arg INSTALL_EXTRAS=production -t ms-rags-all-in-one:production .</code>.</li>
+              <li>Use the public image with <code>docker pull saad469/ms-rags-all-in-one</code>, or build locally only when you need a custom dependency set.</li>
               <li>Pass secrets at runtime through <code>--env-file</code>, Docker secrets, or the deployment platform secret manager.</li>
               <li>Mount document input and output folders instead of copying private data into the image.</li>
               <li>Mount persistence folders for local Chroma, FAISS, graph stores, keyword SQLite, generated code, and agent memory when needed.</li>
@@ -140,7 +140,7 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer your-token</code></pre>
   --env-file .env \
   -v "${PWD}/SmokeDocs:/app/SmokeDocs:ro" \
   -v "${PWD}/output:/app/output" \
-  ms-rags-all-in-one:production</code></pre>
+  saad469/ms-rags-all-in-one</code></pre>
           </section>
 
           <section>

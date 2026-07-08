@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ms-rags-all-in-one"
-version = "1.0.0"
+version = "1.0.1"
 description = "MS-RAGS(ALL-IN-ONE) — production-grade RAG framework builder terminal CLI"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -140,10 +140,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-"
-Documentation = "https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-/tree/main/docs-deploy"
-Repository = "https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-"
-Issues = "https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-/issues"
+Homepage = "https://github.com/M-SAAD-BIN-MAZHAR/ms-rags-all-in-one-"
+Documentation = "https://ms-rags-all-in-one.vercel.app/"
+Repository = "https://github.com/M-SAAD-BIN-MAZHAR/ms-rags-all-in-one-"
+Issues = "https://github.com/M-SAAD-BIN-MAZHAR/ms-rags-all-in-one-/issues"
 
 [project.optional-dependencies]
 # ── Individual vector DB extras ──────────────────────────────────────────────
@@ -162,7 +162,7 @@ graph = ["neo4j>=5.20.0", "kuzu>=0.9.0"]
 # ── Individual evaluation framework extras ────────────────────────────────────
 ragas = ["ragas>=0.2.0"]
 deepeval = ["deepeval>=1.0.0"]
-trulens = ["trulens-core>=1.0.0", "trulens-apps-langchain>=1.0.0"]
+trulens = ["trulens-core>=1.0.0", "trulens-apps-langchain>=1.0.0", "trulens-providers-openai>=1.0.0"]
 langsmith = ["langsmith>=0.1.0"]
 langfuse = ["langfuse>=3.0.0"]
 arize-phoenix = ["arize-phoenix>=4.0.0", "openinference-instrumentation-langchain>=0.1.0"]
@@ -212,6 +212,7 @@ production = [
     "deepeval>=1.0.0",
     "trulens-core>=1.0.0",
     "trulens-apps-langchain>=1.0.0",
+    "trulens-providers-openai>=1.0.0",
     "langsmith>=0.1.0",
     "langfuse>=3.0.0",
     "datasets>=2.20.0",

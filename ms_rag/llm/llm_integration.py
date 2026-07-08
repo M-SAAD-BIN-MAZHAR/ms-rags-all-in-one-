@@ -558,6 +558,19 @@ def build_session_runtime_from_vector_store(
         and retriever is not base_retriever
     )
 
+    # Build one shared agent tool runtime so short-term memory survives across
+    # turns and semantic memory can reuse the pipeline's embedding model.
+    agent_runtime: object | None = None
+    if config.agent_tools and config.agent_tools.enabled_tools:
+        from ms_rag.agent.tools import AgentToolRuntime  # noqa: PLC0415
+
+        agent_runtime = AgentToolRuntime(
+            config.agent_tools,
+            credential_store,
+            llm,
+            embeddings=embeddings,
+        )
+
     if config.rag_type and config.rag_type.requires_langgraph:
         rag_chain = build_langgraph_workflow(
             config.rag_type.rag_type,
@@ -566,6 +579,7 @@ def build_session_runtime_from_vector_store(
             config.system_prompt,
             agent_tools_config=config.agent_tools,
             credential_store=credential_store,
+            tool_runtime=agent_runtime,
         )
     else:
         rag_chain = build_rag_chain(
@@ -583,6 +597,7 @@ def build_session_runtime_from_vector_store(
         "llm": llm,
         "rag_chain": rag_chain,
         "compression_active": compression_active,
+        "agent_runtime": agent_runtime,
     }
 
 
@@ -696,6 +711,7 @@ def build_langgraph_workflow(
     system_prompt: str,
     agent_tools_config: object | None = None,
     credential_store: object | None = None,
+    tool_runtime: object | None = None,
 ) -> object:
     """Build a LangGraph StateGraph for agentic RAG variants.
 
@@ -728,7 +744,8 @@ def build_langgraph_workflow(
     from langchain_core.output_parsers import StrOutputParser  # noqa: PLC0415
     from ms_rag.agent.tools import AgentToolRuntime, ToolExecutionError  # noqa: PLC0415
 
-    tool_runtime = AgentToolRuntime(agent_tools_config, credential_store, llm)
+    if tool_runtime is None:
+        tool_runtime = AgentToolRuntime(agent_tools_config, credential_store, llm)
 
     # ── Shared nodes ──────────────────────────────────────────────────
 

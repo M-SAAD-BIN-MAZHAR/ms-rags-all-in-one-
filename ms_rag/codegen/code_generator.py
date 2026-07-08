@@ -226,6 +226,10 @@ class CodeGenerator:
             rr = config.reranking.reranker
             if rr in ("cross_encoder", "bge_reranker"):
                 reqs.add("sentence-transformers>=3.0.0")
+            elif rr == "colbert":
+                # Late-interaction MaxSim uses a transformer token encoder.
+                reqs.add("transformers>=4.40.0")
+                reqs.add("torch>=2.0.0")
             elif rr == "cohere_reranker":
                 reqs.add("cohere>=5.0.0")
                 reqs.add("langchain-cohere>=0.3.0")
@@ -1584,10 +1588,16 @@ def rerank_documents(query: str, docs: list) -> list:
     reranker = {reranker!r}
     model_id = {model_id!r}
     try:
-        if reranker in {{"cross_encoder", "bge_reranker", "colbert"}}:
+        if reranker in {{"cross_encoder", "bge_reranker"}}:
             model = _get_cross_encoder(model_id)
             pairs = [(query, getattr(doc, "page_content", "")) for doc in docs]
             scores = model.predict(pairs)
+            ranked = sorted(zip(scores, docs), key=lambda item: item[0], reverse=True)
+            return [doc for _, doc in ranked[:{top_k}]]
+
+        if reranker == "colbert":
+            scorer = _get_colbert_scorer(model_id or "colbert-ir/colbertv2.0")
+            scores = scorer.score(query, [getattr(doc, "page_content", "") for doc in docs])
             ranked = sorted(zip(scores, docs), key=lambda item: item[0], reverse=True)
             return [doc for _, doc in ranked[:{top_k}]]
 
@@ -1652,7 +1662,51 @@ def apply_reranking(retriever):
 def _get_cross_encoder(model_id: str):
     from sentence_transformers import CrossEncoder
 
-    return CrossEncoder(model_id)'''
+    return CrossEncoder(model_id)
+
+
+class _ColBERTLateInteractionScorer:
+    """ColBERT-style late interaction: token-level MaxSim, not a cross-encoder."""
+
+    def __init__(self, model_id: str, max_length: int = 512):
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+
+        self._torch = torch
+        self.max_length = max_length
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        self.model = AutoModel.from_pretrained(model_id)
+        self.model.eval()
+
+    def _encode(self, texts):
+        torch = self._torch
+        encoded = self.tokenizer(
+            texts, padding=True, truncation=True, max_length=self.max_length, return_tensors="pt"
+        )
+        with torch.no_grad():
+            hidden = self.model(**encoded).last_hidden_state
+        hidden = torch.nn.functional.normalize(hidden, p=2, dim=-1)
+        mask = encoded["attention_mask"].bool()
+        return [hidden[i][mask[i]] for i in range(hidden.shape[0])]
+
+    def score(self, query: str, documents: list) -> list:
+        if not documents:
+            return []
+        query_tokens = self._encode([query])[0]
+        scores = []
+        for start in range(0, len(documents), 16):
+            for doc_tokens in self._encode(documents[start:start + 16]):
+                if doc_tokens.shape[0] == 0 or query_tokens.shape[0] == 0:
+                    scores.append(0.0)
+                    continue
+                similarity = query_tokens @ doc_tokens.T
+                scores.append(float(similarity.max(dim=1).values.sum().item()))
+        return scores
+
+
+@lru_cache(maxsize=1)
+def _get_colbert_scorer(model_id: str):
+    return _ColBERTLateInteractionScorer(model_id or "colbert-ir/colbertv2.0")'''
 
     def _render_compressor_function(self, config: PipelineConfig) -> str:
         if not config.compression:

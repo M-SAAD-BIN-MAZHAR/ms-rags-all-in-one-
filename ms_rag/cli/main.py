@@ -488,6 +488,8 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
         retriever=retriever,
         llm=llm,
         rag_chain=rag_chain,
+        compression_active=bool(runtime.get("compression_active")),
+        agent_runtime=runtime.get("agent_runtime"),
     )
 
     try:
@@ -1055,6 +1057,9 @@ def _run_query_loop(session: SessionState, eval_framework: object | None = None)
         sess.retriever = runtime["retriever"]
         sess.llm = runtime["llm"]
         sess.rag_chain = runtime["rag_chain"]
+        sess.compression_active = bool(runtime.get("compression_active"))
+        if runtime.get("agent_runtime") is not None:
+            sess.agent_runtime = runtime.get("agent_runtime")
         _display_runtime_readiness(sess.config, runtime, console)
         return True
 

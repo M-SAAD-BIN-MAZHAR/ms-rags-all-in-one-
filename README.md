@@ -21,7 +21,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 [![Code style: production](https://img.shields.io/badge/code%20style-production-blue)]()
 
-[Live Documentation](https://ms-rags-all-in-one.vercel.app/) · [GitHub Repository](https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-)
+[Live Documentation](https://ms-rags-all-in-one.vercel.app/) · [GitHub Repository](https://github.com/M-SAAD-BIN-MAZHAR/ms-rags-all-in-one-)
 
 Created by **Muhammad Saad bin Mazhar**.
 
@@ -116,12 +116,21 @@ If you do not want local PDF/OCR dependencies, choose **LlamaParseLoader** for c
 
 ## Installation
 
-### One-Command Production Install (Recommended)
+### Public PyPI Install (Recommended)
+
+```bash
+pip install ms-rags-all-in-one==1.0.1
+ms-rags
+```
+
+Use this when you want the published package without cloning the repository.
+
+### Source Install For Development
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-.git
-cd MS-RAG-ALL-IN-ONE-
+git clone https://github.com/M-SAAD-BIN-MAZHAR/ms-rags-all-in-one-.git
+cd ms-rags-all-in-one-
 
 # 2. Create and activate virtual environment
 python -m venv .venv
@@ -139,7 +148,7 @@ pip install -e ".[production]"
 ms-rags
 ```
 
-That's it for the standard production feature set. The `[production]` extra includes:
+The source `[production]` extra includes:
 - All 12 LLM providers
 - ChromaDB, FAISS, Pinecone, Qdrant, Weaviate, Milvus, PGVector, Elasticsearch, OpenSearch, MongoDB Atlas, and AWS/Azure-compatible vector integrations
 - All 11 evaluation options are explicit about their runtime mode: package-backed scoring when RAGAS/DeepEval are installed and compatible, visible lexical fallback metrics when optional evaluator packages are incompatible with the installed LangChain family, TruLens-prefixed groundedness scores, LangSmith/Langfuse tracing, Phoenix OpenInference export, ARES-compatible scores, RAGBench dataset-compatible scoring, CI/CD gates, LangGraph trace export, and monitoring export.
@@ -208,11 +217,30 @@ MS-RAGS(ALL-IN-ONE) can also run inside a Docker container. This is useful when 
 repeatable CLI environment without installing Python dependencies directly on
 their machine.
 
+### Public Docker Image
+
+```bash
+docker pull saad469/ms-rags-all-in-one
+docker run --rm -it --env-file .env -v "${PWD}:/workspace" saad469/ms-rags-all-in-one
+```
+
+PowerShell:
+
+```powershell
+docker pull saad469/ms-rags-all-in-one
+docker run --rm -it `
+  --env-file .env `
+  -v "${PWD}:/workspace" `
+  saad469/ms-rags-all-in-one
+```
+
+Use the public image when you want the ready-to-run container. Build locally only if you need a custom dependency set.
+
 ### Which Docker Build Should I Use?
 
 | Command | What it installs | Recommended for |
 |---------|------------------|-----------------|
-| `docker build -t ms-rags-all-in-one:1.0.0 .` | Core MS-RAGS(ALL-IN-ONE) package and required base dependencies | Fast local testing, basic CLI walkthroughs, lightweight images |
+| `docker build -t ms-rags-all-in-one:1.0.1 .` | Core MS-RAGS(ALL-IN-ONE) package and required base dependencies | Fast local testing, basic CLI walkthroughs, lightweight images |
 | `docker build --build-arg INSTALL_EXTRAS=production -t ms-rags-all-in-one:production .` | Core MS-RAGS(ALL-IN-ONE) plus production providers, vector DB clients except Redis, evaluators, rerankers, telemetry, and loader dependencies | Production-style usage and full feature testing |
 | `docker build --build-arg INSTALL_EXTRAS=pinecone,qdrant,ragas,rerankers,telemetry -t ms-rags-all-in-one:custom .` | Only the optional extras you name | Smaller images for teams that support a fixed stack |
 | `docker build --build-arg USE_CONSTRAINTS=0 --build-arg INSTALL_EXTRAS=redis -t ms-rags-all-in-one:redis .` | Redis vector support path | Redis-only testing while the upstream Redis/HuggingFace dependency conflict exists |
@@ -223,7 +251,7 @@ If you want **all dependencies**, use the production build argument:
 docker build --build-arg INSTALL_EXTRAS=production -t ms-rags-all-in-one:production .
 ```
 
-The plain `ms-rags-all-in-one:1.0.0` image is intentionally smaller. It is valid, but it does
+The plain `ms-rags-all-in-one:1.0.1` local image is intentionally smaller. It is valid, but it does
 not install every optional integration.
 
 Production Docker builds use `constraints-production.txt`. That file pins the
@@ -239,7 +267,7 @@ faster and avoids pulling every optional evaluator/reranker package unless the
 user asks for them.
 
 ```bash
-docker build -t ms-rags-all-in-one:1.0.0 .
+docker build -t ms-rags-all-in-one:1.0.1 .
 ```
 
 To build the full production image with every optional provider, vector
@@ -265,7 +293,7 @@ is a Docker network/DNS issue rather than an MS-RAGS(ALL-IN-ONE) code error. Ret
 after Docker networking is healthy, or pass your internal package index:
 
 ```bash
-docker build --build-arg PIP_INDEX_URL=https://pypi.org/simple -t ms-rags-all-in-one:1.0.0 .
+docker build --build-arg PIP_INDEX_URL=https://pypi.org/simple -t ms-rags-all-in-one:1.0.1 .
 ```
 
 If Docker fails with `resolution-too-deep`, make sure the build context includes
@@ -300,7 +328,7 @@ temporary container filesystem.
 docker run --rm -it \
   --env-file .env \
   -v "%cd%:/workspace" \
-  ms-rags-all-in-one:1.0.0
+  saad469/ms-rags-all-in-one
 ```
 
 Linux/macOS:
@@ -309,7 +337,7 @@ Linux/macOS:
 docker run --rm -it \
   --env-file .env \
   -v "$PWD:/workspace" \
-  ms-rags-all-in-one:1.0.0
+  saad469/ms-rags-all-in-one
 ```
 
 Windows PowerShell:
@@ -318,7 +346,7 @@ Windows PowerShell:
 docker run --rm -it `
   --env-file .env `
   -v "${PWD}:/workspace" `
-  ms-rags-all-in-one:1.0.0
+  saad469/ms-rags-all-in-one
 ```
 
 ### Resume A Saved Session
@@ -327,7 +355,7 @@ docker run --rm -it `
 docker run --rm -it \
   --env-file .env \
   -v "$PWD:/workspace" \
-  ms-rags-all-in-one:1.0.0 --load session.json
+  saad469/ms-rags-all-in-one --load session.json
 ```
 
 ### Docker Notes

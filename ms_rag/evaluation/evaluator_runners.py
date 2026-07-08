@@ -245,25 +245,48 @@ def run_trulens(
     query: str,
     context: list,
     answer: str,
+    *,
+    credential_store: object | None = None,
+    evaluator_model: str | None = None,
 ) -> dict[str, float]:
-    """Run TruLens core package validation plus local groundedness scores.
+    """Run the real TruLens RAG feedback triad (groundedness, answer/context relevance).
 
-    The optional ``trulens.apps.langchain`` adapter can lag behind modern
-    LangChain releases. Live single-query evaluation does not need that adapter,
-    so this runner validates the stable TruLens core package instead of importing
-    TruChain and breaking on adapter compatibility.
+    Uses the TruLens OpenAI feedback provider to compute genuine LLM-judged
+    groundedness, answer relevance, and context relevance — the real TruLens RAG
+    triad, not a keyword proxy. Requires ``trulens-providers-openai`` and the
+    evaluator OpenAI key. If either is unavailable it falls back to lexical
+    grounding metrics and emits a visible warning (never a silent downgrade).
     """
+    ctx_texts = context_texts(context)
+    source = "\n\n".join(ctx_texts)
     try:
-        from trulens.core import Feedback  # noqa: PLC0415
-        from trulens.core import Select  # noqa: PLC0415
+        with temporary_env(_openai_env_from_store(credential_store)):
+            from trulens.providers.openai import OpenAI as TruLensOpenAI  # noqa: PLC0415
 
-        _ = (Feedback, Select)  # validate supported modern core package
-        scores = lexical_grounding_scores(query, answer, context)
-        scores["core_package_available"] = 1.0
-        return _prefixed(scores, "trulens")
+            provider = TruLensOpenAI(model_engine=evaluator_model or "gpt-4o-mini")
+            raw: dict[str, Any] = {}
+            if source.strip() and answer.strip():
+                grounded = provider.groundedness_measure_with_cot_reasons(source, answer)
+                raw["groundedness"] = grounded[0] if isinstance(grounded, tuple) else grounded
+            if query.strip() and answer.strip():
+                raw["answer_relevance"] = provider.relevance(query, answer)
+            if source.strip() and query.strip():
+                raw["context_relevance"] = provider.context_relevance(query, source)
+
+        scores = finite_scores(raw)
+        if scores:
+            return _prefixed(scores, "trulens")
+        warnings.warn(
+            "TruLens feedback returned no finite scores; using lexical fallback metrics.",
+            stacklevel=2,
+        )
+        return lexical_grounding_scores(query, answer, context, prefix="trulens")
     except Exception as exc:
         warnings.warn(
-            f"TruLens core import/check failed; using lexical fallback metrics: {exc}",
+            "TruLens real feedback unavailable "
+            f"({type(exc).__name__}: {exc}); using lexical fallback metrics. "
+            "Install `trulens-providers-openai` and configure the evaluator OpenAI key "
+            "for genuine TruLens groundedness/relevance scoring.",
             stacklevel=2,
         )
         return lexical_grounding_scores(query, answer, context, prefix="trulens")

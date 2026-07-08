@@ -20,7 +20,7 @@
         <a href="databases.html">Vector databases</a>
         <div class="nav-title">Production</div>
         <a href="production.html">Production readiness</a><a href="resources.html">Official resources</a>
-        <div class="nav-title">Project</div><a href="https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-" rel="noopener">GitHub repository</a>
+        <div class="nav-title">Project</div><a href="https://github.com/M-SAAD-BIN-MAZHAR/ms-rags-all-in-one-" rel="noopener">GitHub repository</a>
       </aside>
       <div class="content">
         <div class="mobile-bar"><strong>MS-RAGS(ALL-IN-ONE) Docs</strong><button type="button" data-mobile-toggle>Menu</button></div>
@@ -32,8 +32,12 @@
         <main>
           <section>
             <h2>Install</h2>
-            <pre><code>git clone https://github.com/M-SAAD-BIN-MAZHAR/MS-RAG-ALL-IN-ONE-.git
-cd MS-RAG-ALL-IN-ONE-
+            <pre><code>pip install ms-rags-all-in-one==1.0.1
+ms-rags</code></pre>
+            <p>Use the PyPI package when you want the released CLI without cloning the repository.</p>
+            <h3>Development install from source</h3>
+            <pre><code>git clone https://github.com/M-SAAD-BIN-MAZHAR/ms-rags-all-in-one-.git
+cd ms-rags-all-in-one-
 python -m venv .venv
 
 # Windows
@@ -80,11 +84,17 @@ ms-rags --load session.json</code></pre>
           <section>
             <h2>Run With Docker</h2>
             <p>Use Docker when you want a repeatable container environment instead of installing Python packages directly on the host machine.</p>
+            <pre><code>docker pull saad469/ms-rags-all-in-one
+docker run --rm -it \
+  --env-file .env \
+  -v "${PWD}:/workspace" \
+  saad469/ms-rags-all-in-one</code></pre>
+            <p>Build locally only if you need a custom dependency set.</p>
             <div class="table-wrap">
               <table>
                 <thead><tr><th>Build</th><th>Command</th><th>Use when</th></tr></thead>
                 <tbody>
-                  <tr><td>Core image</td><td><code>docker build -t ms-rags-all-in-one:1.0.0 .</code></td><td>You want a lightweight image for basic CLI testing.</td></tr>
+                  <tr><td>Core image</td><td><code>docker build -t ms-rags-all-in-one:1.0.1 .</code></td><td>You want a lightweight image for basic CLI testing.</td></tr>
                   <tr><td>Production image</td><td><code>docker build --build-arg INSTALL_EXTRAS=production -t ms-rags-all-in-one:production .</code></td><td>You want providers, vector DB clients, evaluators, telemetry, rerankers, and loader extras.</td></tr>
                   <tr><td>Custom image</td><td><code>docker build --build-arg INSTALL_EXTRAS=pinecone,qdrant,ragas,rerankers,telemetry -t ms-rags-all-in-one:custom .</code></td><td>Your team supports a fixed subset and wants a smaller image.</td></tr>
                 </tbody>
@@ -94,7 +104,7 @@ ms-rags --load session.json</code></pre>
   --env-file .env \
   -v "${PWD}/data:/app/data" \
   -v "${PWD}/output:/app/output" \
-  ms-rags-all-in-one:production</code></pre>
+  saad469/ms-rags-all-in-one</code></pre>
             <p>Do not bake API keys into the image. Use an env file, Docker secrets, or your deployment platform's secret manager. Mount local folders for documents, generated output, FAISS indexes, Chroma persistence, graph stores, and agent memory when those features need to survive container restarts.</p>
           </section>
 

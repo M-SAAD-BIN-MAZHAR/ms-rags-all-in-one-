@@ -86,6 +86,7 @@ class TestRebuildSessionRuntime:
             "llm",
             "rag_chain",
             "compression_active",
+            "agent_runtime",
         }
         assert runtime["vector_store"] is mock_store
         assert runtime["retriever"] is mock_retriever
