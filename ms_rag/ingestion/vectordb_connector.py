@@ -3,7 +3,6 @@
 Handles vector database selection, credential prompting, connection
 testing, vector store creation, and document ingestion.
 
-Requirement 9:
 - Display all 12 supported Vector_Databases (9.1)
 - Prompt for DB-specific credentials (9.2)
 - Show connection summary and confirm before testing (9.3)
@@ -209,7 +208,6 @@ class VectorDBConnector:
     ) -> VectorDBConfig:
         """Interactive flow: select DB → prompt credentials → confirm → return config.
 
-        Requirement 9.1-9.3.
         """
         import questionary  # noqa: PLC0415
         from ms_rag.ui.prompts import get_console, print_step, prompt_checkbox  # noqa: PLC0415
@@ -273,7 +271,7 @@ class VectorDBConnector:
             dimension=embedding_dimension,
         )
 
-        # Show summary (Req 9.3)
+        # Show summary
         self._display_config_summary(config, db_info, console)
 
         from ms_rag.ui.prompts import prompt_required_confirm  # noqa: PLC0415
@@ -315,7 +313,6 @@ class VectorDBConnector:
     def test_connection(self, config: VectorDBConfig) -> ConnectionResult:
         """Attempt a lightweight connection to the vector DB.
 
-        Requirement 9.4-9.5.
 
         Returns:
             ConnectionResult with success flag and optional error message.
@@ -512,7 +509,6 @@ class VectorDBConnector:
     ) -> int:
         """Add documents to the vector store with a Rich progress bar.
 
-        Requirement 9.6-9.7.
 
         Args:
             docs:         List of LangChain Document objects.

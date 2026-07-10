@@ -4,7 +4,6 @@ Presents the user with a numbered strategy selector, then prompts for
 all relevant parameters (chunk size, overlap, separators, tokenizer,
 language) with strategy-specific defaults pre-filled.
 
-Requirement 7:
 - Prompt chunk size with pre-filled default (7.1)
 - Prompt chunk overlap with pre-filled default (7.2)
 - Prompt separators for recursive_character strategy (7.3)
@@ -188,7 +187,7 @@ class ChunkingConfigurator:
         default_overlap: int,
         console: object,
     ) -> int:
-        """Prompt for chunk overlap, enforcing overlap < chunk_size (Req 7.5)."""
+        """Prompt for chunk overlap, enforcing overlap < chunk_size."""
         while True:
             raw: str = questionary.text(
                 f"  Chunk overlap (default: {default_overlap}, must be < {chunk_size}):",
@@ -209,7 +208,7 @@ class ChunkingConfigurator:
                 console.print(f"[red]  ✗ {exc}[/red]")  # type: ignore[union-attr]
 
     def _prompt_separators(self, console: object) -> list[str] | None:
-        """Prompt for custom separators or accept defaults (Req 7.3)."""
+        """Prompt for custom separators or accept defaults."""
         console.print(  # type: ignore[union-attr]
             "  [dim]Custom separators (comma-separated, e.g. '\\n\\n,\\n, ').[/dim]"
         )
@@ -232,7 +231,7 @@ class ChunkingConfigurator:
         return separators if separators else None
 
     def _prompt_tokenizer(self, strategy_id: str, console: object) -> str | None:
-        """Prompt for tokenizer selection (Req 7.4)."""
+        """Prompt for tokenizer selection."""
         if strategy_id == "token_based":
             choices = [
                 questionary.Choice("cl100k_base (GPT-4, GPT-3.5-turbo)", "cl100k_base"),

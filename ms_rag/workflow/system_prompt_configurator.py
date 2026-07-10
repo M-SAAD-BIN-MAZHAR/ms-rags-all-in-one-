@@ -3,7 +3,6 @@
 Displays the default production-grade system prompt and offers three
 options: use as-is, edit inline, or replace entirely.
 
-Requirement 15:
 - Display default prompt in a labelled panel (15.1)
 - Default prompt contains 5 testable instruction properties (15.2)
 - Offer use/edit/replace choice; accept any non-null content (15.3)
@@ -27,7 +26,7 @@ except ImportError:
 
 # ---------------------------------------------------------------------------
 # Default system prompt
-# Requirement 15.2 — must contain all 5 testable instruction properties:
+# must contain all 5 testable instruction properties:
 #   (a) Answer only from provided context passages
 #   (b) Cite source document name or chunk identifier
 #   (c) Respond with "I don't know" when context is insufficient
@@ -74,7 +73,6 @@ class SystemPromptConfigurator:
     def configure(self) -> str:
         """Display default prompt, offer choice, return final prompt string.
 
-        Requirement 15.1-15.6.
 
         Returns:
             The final system prompt string (never None or empty unless user
@@ -83,10 +81,10 @@ class SystemPromptConfigurator:
         console = Console()
         console.print("\n[bold cyan]Step 14 — System Prompt Configuration[/bold cyan]\n")
 
-        # Req 15.1: Display default in a labelled panel
+        # Display default in a labelled panel
         self._display_prompt_panel(DEFAULT_SYSTEM_PROMPT, console, title="Default System Prompt")
 
-        # Req 15.3: Three-way choice
+        # Three-way choice
         choice: str = questionary.select(
             "  What would you like to do with the system prompt?",
             choices=[
@@ -110,17 +108,17 @@ class SystemPromptConfigurator:
                 final_prompt = DEFAULT_SYSTEM_PROMPT
 
             elif choice == CHOICE_EDIT_INLINE:
-                # Req 15.4: pre-filled with current default, Ctrl+D or Done sentinel
+                # pre-filled with current default, Ctrl+D or Done sentinel
                 final_prompt = self._edit_inline(DEFAULT_SYSTEM_PROMPT, console)
 
             else:  # CHOICE_REPLACE
-                # Req 15.5: blank input, max 10,000 chars
+                # blank input, max 10,000 chars
                 final_prompt = self._replace_prompt(console)
                 if final_prompt is None:
                     # User cancelled — go back to choice
                     continue
 
-            # Req 15.6: handle storage failure gracefully
+            # handle storage failure gracefully
             try:
                 if not isinstance(final_prompt, str):
                     final_prompt = str(final_prompt)
@@ -166,7 +164,7 @@ class SystemPromptConfigurator:
     def _edit_inline(self, current_prompt: str, console: object) -> str:
         """Open multi-line text input pre-filled with current_prompt.
 
-        Req 15.4: Ctrl+D or 'Done' on a new line signals end of editing.
+        Ctrl+D or 'Done' on a new line signals end of editing.
         """
         console.print(  # type: ignore[union-attr]
             "  [dim]Edit the prompt below. Type [bold]Done[/bold] on a new line "
@@ -190,7 +188,7 @@ class SystemPromptConfigurator:
     def _replace_prompt(self, console: object) -> str | None:
         """Open blank multi-line input for full replacement.
 
-        Req 15.5: max 10,000 chars; re-prompt if exceeded.
+        max 10,000 chars; re-prompt if exceeded.
         """
         console.print(  # type: ignore[union-attr]
             "  [dim]Enter your custom system prompt below. "

@@ -3,7 +3,6 @@
 Provides interactive configuration and runtime application of all
 supported query enhancement techniques.
 
-Requirement 11:
 - Ask yes/no for query enhancement (11.1)
 - Show all 7 techniques as a checkbox (11.2)
 - Allow multi-select (11.3)
@@ -92,7 +91,6 @@ class QueryEnhancer:
     def configure(self, configured_providers: list[str] | None = None) -> list[str]:
         """Interactive yes/no → technique checkbox → optional HyDE LLM selection.
 
-        Requirement 11.1-11.6.
 
         Args:
             configured_providers: Available provider IDs for HyDE LLM selection.
@@ -135,7 +133,7 @@ class QueryEnhancer:
             console.print("  [dim]No techniques selected — raw query will be used.[/dim]")
             return []
 
-        # HyDE requires LLM selection (Req 11.6)
+        # HyDE requires LLM selection
         hyde_provider: str | None = None
         if "hyde" in selected:
             hyde_provider = self._select_hyde_llm(configured_providers or [], console)

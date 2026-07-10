@@ -3,7 +3,7 @@
 Provides retry_with_backoff() for wrapping external API calls (embedding,
 LLM inference, vector DB writes) with exponential backoff.
 
-Requirement 19.1: on failure, offer Retry / Skip / Abort choices.
+on failure, offer Retry / Skip / Abort choices.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ def retry_with_user_prompt(
 ) -> T | None:
     """Call *fn()* with backoff; after all attempts fail, prompt user for action.
 
-    Requirement 19.1: present Retry / Skip / Abort on final failure.
+    present Retry / Skip / Abort on final failure.
 
     Args:
         fn:             Zero-argument callable.

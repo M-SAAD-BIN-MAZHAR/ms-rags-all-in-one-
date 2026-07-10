@@ -4,7 +4,6 @@ Presents document loaders filtered by the user's selected document types.
 Handles credential prompting for paid loaders (LlamaParse, FireCrawl, Apify).
 Enforces one loader per document type.
 
-Requirement 5:
 - Display loaders filtered by selected doc types (5.1)
 - Include all required loaders per doc type (5.2)
 - Prompt credentials for paid loaders; block selection if cancelled (5.3)
@@ -299,7 +298,7 @@ class LoaderSelector:
 
         For each selected document type, shows only the loaders that are
         compatible with that type.  Credential-requiring loaders prompt for
-        credentials; if the user cancels, that loader is blocked (Req 5.3).
+        credentials; if the user cancels, that loader is blocked.
 
         Args:
             doc_types: List of doc_type_ids from DocumentTypeSelector.

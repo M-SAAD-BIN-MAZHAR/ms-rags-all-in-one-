@@ -3,7 +3,6 @@
 Defines all supported embedding models, filters them by configured
 providers, and returns the correct LangChain Embeddings instance.
 
-Requirement 8:
 - Display models filtered by configured providers + always-available local (8.1)
 - Include all 20+ required embedding models (8.2)
 - Store model identifier and provider in PipelineConfig (8.3)
@@ -402,8 +401,8 @@ class VectorizationModule:
     ) -> EmbeddingModelConfig:
         """Show filtered model list and return selected EmbeddingModelConfig.
 
-        Requirement 8.1 — filter by provider credentials.
-        Requirement 8.4 — prompt for local model path/name.
+        filter by provider credentials.
+        prompt for local model path/name.
 
         Args:
             configured_providers: Provider IDs with credentials available.
@@ -459,7 +458,7 @@ class VectorizationModule:
             (m for m in displayable if m.model_id == selected_id), None
         )
 
-        # Prompt for local path/name for Ollama (Requirement 8.4)
+        # Prompt for local path/name for Ollama
         local_path: str | None = None
         if selected_info and selected_info.model_id == "__user_specified__":
             console.print(

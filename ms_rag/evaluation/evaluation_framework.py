@@ -3,7 +3,6 @@
 Interactive configuration and runtime evaluation using all 11 supported
 evaluation frameworks.
 
-Requirement 16:
 - Ask yes/no for evaluation (16.1)
 - Display all 11 evaluators as a checkbox (16.2)
 - Allow multi-select (16.3)
@@ -176,7 +175,6 @@ class EvaluationFramework:
     def configure(self) -> EvaluationConfig | None:
         """Interactive yes/no → evaluator checkbox → credentials → thresholds.
 
-        Requirement 16.1-16.6.
 
         Returns:
             EvaluationConfig if enabled, None if user declines.
@@ -233,7 +231,7 @@ class EvaluationFramework:
         if any(EVALUATOR_MAP[eid].requires_evaluator_llm for eid in selected):
             evaluator_llm_provider, evaluator_llm_model = self._prompt_evaluator_llm(console)
 
-        # CI/CD gate thresholds (Req 16.5)
+        # CI/CD gate thresholds
         cicd_thresholds: dict[str, float] | None = None
         if "cicd_gate" in selected:
             cicd_thresholds = self._prompt_cicd_thresholds(console)
@@ -378,7 +376,7 @@ class EvaluationFramework:
         info: EvaluatorInfo,
         console: object,
     ) -> None:
-        """Prompt for evaluator credentials; keep evaluator selected on cancel. Req 16.4."""
+        """Prompt for evaluator credentials; keep evaluator selected on cancel."""
         if not info.credential_fields:
             return
 
@@ -433,7 +431,7 @@ class EvaluationFramework:
         return provider, model
 
     def _prompt_cicd_thresholds(self, console: object) -> dict[str, float]:
-        """Prompt for CI/CD metric thresholds. Req 16.5."""
+        """Prompt for CI/CD metric thresholds."""
         console.print(  # type: ignore[union-attr]
             "\n  [bold white]CI/CD Gate Thresholds[/bold white]\n"
             "  Enter minimum acceptable score (0.0-1.0) for each metric.\n"

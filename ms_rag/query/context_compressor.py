@@ -3,7 +3,6 @@
 Interactive configuration and LangChain document compressor factory for
 all 6 supported context compression techniques.
 
-Requirement 14:
 - Ask yes/no for compression (14.1)
 - Display all 6 techniques as a numbered checkbox (14.2)
 - Reject zero-technique selection; allow 1-6 techniques (14.3)
@@ -28,7 +27,7 @@ from ms_rag.models import CompressionConfig
 from ms_rag.utils.exceptions import ValidationError
 from ms_rag.utils.validation import validate_numeric
 
-# Techniques that require a configured LLM (Req 14.5)
+# Techniques that require a configured LLM
 LLM_REQUIRED_TECHNIQUES: frozenset[str] = frozenset(
     {"llm_chain_extraction", "summary_compression"}
 )
@@ -88,7 +87,6 @@ class ContextCompressor:
     ) -> CompressionConfig | None:
         """Interactive yes/no → checkbox → params → return config.
 
-        Requirement 14.1-14.6.
 
         Args:
             configured_providers: Provider IDs that have credentials configured.
@@ -369,7 +367,7 @@ class ContextCompressor:
         return None
 
     def _prompt_threshold(self, console: object) -> float:
-        """Prompt for Embeddings Filter similarity threshold (Req 14.4)."""
+        """Prompt for Embeddings Filter similarity threshold."""
         while True:
             raw: str | None = questionary.text(
                 "  Embeddings filter similarity threshold (0.0-1.0, default 0.75):",

@@ -2,7 +2,7 @@
 
 Renders the branded ASCII art banner and tagline on CLI startup.
 
-Behaviour (Requirement 1):
+Behaviour:
 - Displays full-width ASCII art containing "MS-RAGS(ALL-IN-ONE)" before any other output.
 - Prints a one-line tagline immediately below the banner.
 - Uses ANSI colour on colour-capable terminals via Rich.
@@ -37,7 +37,7 @@ def display_banner(console: object | None = None) -> None:  # type: ignore[type-
                  created internally.  Pass an explicit console in tests to
                  control output capture.
 
-    Fallback chain (Requirement 1.3):
+    Fallback chain:
         1. Try Rich coloured rendering.
         2. If Rich raises, fall back to ``print()``.
         3. If ``print()`` also raises, continue silently — startup must

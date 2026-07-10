@@ -3,7 +3,6 @@
 Handles all LLM provider credential collection, in-memory storage,
 and optional encrypted persistence to disk.
 
-Requirement 2:
 - Display all 12 supported LLM providers (2.1)
 - Prompt for provider-specific credential fields (2.2)
 - Store in CredentialStore; offer encrypted persistence (2.3)
@@ -142,7 +141,7 @@ class CredentialManager:
     def collect_credentials(self, provider_id: str) -> dict[str, str]:
         """Prompt the user for all required credential fields for *provider_id*.
 
-        Re-prompts on empty values (Requirement 2.4).
+        Re-prompts on empty values.
 
         Args:
             provider_id: One of the keys in PROVIDER_FIELDS.
@@ -212,7 +211,6 @@ class CredentialManager:
     def display_summary_and_confirm(self) -> bool:
         """Show credential summary and ask user to confirm or go back.
 
-        Requirement 2.6.
 
         Returns:
             True if user confirms, False if user wants to edit.
@@ -345,7 +343,7 @@ class CredentialManager:
     ) -> str:
         """Prompt for a single credential field, re-prompting on empty required input.
 
-        Requirement 2.4: re-prompt when user enters empty value for required fields.
+        re-prompt when user enters empty value for required fields.
         """
         q = questionary_module  # type: ignore[assignment]
         is_secret = _is_secret_field(field)

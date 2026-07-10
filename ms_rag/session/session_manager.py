@@ -3,7 +3,6 @@
 Handles /save command and --load CLI argument for PipelineConfig
 serialization and deserialization.
 
-Requirement 18:
 - /save serialises PipelineConfig to JSON (18.1)
 - --load deserialises and skips to query loop (18.2)
 - Descriptive error + fallback on missing/invalid file (18.3)

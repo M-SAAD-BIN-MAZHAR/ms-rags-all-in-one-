@@ -4,7 +4,6 @@ Presents all 15 supported RAG architecture variants to the user,
 shows descriptions, flags LangGraph-requiring types, and returns
 the selected RAGTypeConfig.
 
-Requirement 3:
 - Display numbered list of all 15 RAG types (3.1)
 - Show 2-4 sentence description on selection (3.2)
 - Accept exactly one selection per Session (3.3)
@@ -231,10 +230,10 @@ class RAGTypeSelector:
     def display_and_select(self) -> RAGTypeConfig:
         """Display numbered list, show description on selection, return config.
 
-        Requirement 3.1 — show all 15 types
-        Requirement 3.2 — show 2-4 sentence description
-        Requirement 3.3 — accept exactly one selection
-        Requirement 3.4 — LangGraph note only for agentic types
+        show all 15 types
+        show 2-4 sentence description
+        accept exactly one selection
+        LangGraph note only for agentic types
 
         Returns:
             The selected RAGTypeConfig.
@@ -276,7 +275,7 @@ class RAGTypeSelector:
         )
         console.print(panel)
 
-        # Show LangGraph note only for agentic types (Requirement 3.4)
+        # Show LangGraph note only for agentic types
         if config.requires_langgraph:
             console.print(LANGGRAPH_NOTE)
 

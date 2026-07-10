@@ -2,9 +2,8 @@
 
 Factory that returns the correct LangChain TextSplitter based on the
 user's selected ChunkingConfig.  Also holds strategy descriptions and
-defaults used by ChunkingConfigurator (Task 8).
+defaults used by ChunkingConfigurator.
 
-Requirement 6:
 - Support all 11 chunking strategies (6.1)
 - Provide 1-3 sentence descriptions per strategy (6.2)
 - Accept exactly one strategy per session (6.3)

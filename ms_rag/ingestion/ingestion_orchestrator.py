@@ -4,13 +4,13 @@ Coordinates the full ingestion pipeline:
   discover_documents → load → chunk → embed → store
 
 Implements:
-- Recursive directory discovery matching selected doc types (Req 20.2)
-- Per-document failure isolation with error logging (Req 19.2)
-- Exponential backoff retry for external API calls (Req 19.1)
-- Progress display via Rich (Req 9.6)
-- Post-ingestion summary (Req 9.7)
-- Loader assignment by detected file type / MIME (Req 20.3)
-- YouTube URL prompt for transcript language (Req 20.4)
+- Recursive directory discovery matching selected doc types
+- Per-document failure isolation with error logging
+- Exponential backoff retry for external API calls
+- Progress display via Rich
+- Post-ingestion summary
+- Loader assignment by detected file type / MIME
+- YouTube URL prompt for transcript language
 """
 
 from __future__ import annotations
@@ -284,7 +284,6 @@ class IngestionOrchestrator:
     ) -> list[Path | str]:
         """Recursively discover files and URLs matching selected doc types.
 
-        Requirement 20.1-20.4.
 
         Args:
             sources:   File paths, directory paths, or URLs.
@@ -349,7 +348,6 @@ class IngestionOrchestrator:
     ) -> IngestionResult:
         """Run the full load → chunk → embed → store pipeline.
 
-        Requirement 9.6, 19.2, 20.3.
 
         Per-document failures are isolated: failed documents are logged to
         IngestionResult.failed_documents and ingestion continues.
@@ -382,7 +380,7 @@ class IngestionOrchestrator:
                 failed_documents=[],
             )
 
-        # Display discovery summary (Req 20.5)
+        # Display discovery summary
         console.print(
             f"\n  [bold cyan]Discovered {total} document(s).[/bold cyan] Starting ingestion...\n"
         )
@@ -477,7 +475,7 @@ class IngestionOrchestrator:
         setattr(vector_store, "_ms_rag_keyword_corpus", keyword_corpus)
         _attach_retrieval_state(vector_store, retrieval_state)
 
-        # Post-ingestion summary (Req 9.7)
+        # Post-ingestion summary
         self._display_summary(result, console)
         return result
 
@@ -558,7 +556,7 @@ class IngestionOrchestrator:
     ) -> list:
         """Load a single source using the appropriate LangChain loader.
 
-        Requirement 20.3: loader is selected by file extension / source type.
+        loader is selected by file extension / source type.
 
         Args:
             source:           A Path or URL string.
@@ -974,7 +972,7 @@ class IngestionOrchestrator:
 
     @staticmethod
     def _display_summary(result: IngestionResult, console: object) -> None:
-        """Display post-ingestion summary (Req 9.7)."""
+        """Display post-ingestion summary."""
         console.print(  # type: ignore[union-attr]
             f"\n[bold green]  ✓ Ingestion complete![/bold green]\n"
             f"  [bold white]Chunks stored:[/bold white] {result.chunk_count}\n"

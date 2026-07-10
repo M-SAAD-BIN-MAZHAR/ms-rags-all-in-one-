@@ -316,7 +316,7 @@ def _run_interactive_setup(credential_store: CredentialStore, console: object) -
             collection_name=config.vector_db.collection_name if config.vector_db else "",
         )
 
-    # Connection test — must succeed before ingestion (Req 9.4-9.5)
+    # Connection test — must succeed before ingestion (9.5)
     with telemetry.span("setup.vector_db_connection"):
         config.vector_db = _ensure_vector_db_connection(
             db_connector,

@@ -3,8 +3,8 @@
 LLM factory, LCEL RAG chain assembly, and LangGraph agentic workflow
 builder for all supported RAG architecture variants.
 
-Requirement 17.2: generated code uses LangChain (LCEL chains)
-Requirement 17.3: generated code uses LangGraph for agentic RAG types
+generated code uses LangChain (LCEL chains)
+generated code uses LangGraph for agentic RAG types
 """
 
 from __future__ import annotations

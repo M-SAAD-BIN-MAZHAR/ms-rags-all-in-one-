@@ -3,7 +3,6 @@
 Interactive configuration and runtime reranking for all 6 supported
 reranker types.
 
-Requirement 13:
 - Ask yes/no for reranking (13.1)
 - Display all 6 rerankers with descriptions (13.2)
 - Check CredentialStore for Cohere; prompt if absent; block on cancel (13.3)
@@ -133,7 +132,6 @@ class RerankingModule:
     def configure(self, retrieval_top_k: int) -> RerankingConfig | None:
         """Interactive yes/no → reranker selection → model/credential → top_k.
 
-        Requirement 13.1-13.6.
 
         Args:
             retrieval_top_k: The top_k from RetrievalConfig; reranking top_k must be ≤ this.
@@ -178,7 +176,7 @@ class RerankingModule:
 
             info = RERANKER_MAP[reranker_id]
 
-            # Credential check for Cohere (Req 13.3)
+            # Credential check for Cohere
             if info.requires_credentials:
                 ok = self._ensure_credentials(info, console)
                 if not ok:
@@ -190,7 +188,7 @@ class RerankingModule:
 
             break
 
-        # Local model ID prompt (Req 13.4)
+        # Local model ID prompt
         model_id = DEFAULT_MODEL_IDS.get(reranker_id, "")
         if info.requires_local_model:
             raw = prompt_text(
@@ -219,7 +217,7 @@ class RerankingModule:
             )
             model_id = model_raw
 
-        # top_k prompt with immediate validation (Req 13.5)
+        # top_k prompt with immediate validation
         rerank_top_k = self._prompt_rerank_top_k(retrieval_top_k, console)
 
         config = RerankingConfig(
@@ -378,7 +376,7 @@ class RerankingModule:
         return [docs[i] for i in top_ids]
 
     def _ensure_credentials(self, info: RerankerInfo, console: object) -> bool:
-        """Check and optionally prompt for credentials. Req 13.3."""
+        """Check and optionally prompt for credentials."""
         if self._credential_store is not None:
             existing = self._credential_store.get(  # type: ignore[union-attr]
                 info.credential_provider, info.credential_field
@@ -401,7 +399,7 @@ class RerankingModule:
         return True
 
     def _prompt_rerank_top_k(self, retrieval_top_k: int, console: object) -> int:
-        """Prompt for reranking top_k; validate immediately ≤ retrieval_top_k. Req 13.5."""
+        """Prompt for reranking top_k; validate immediately ≤ retrieval_top_k."""
         from ms_rag.ui.prompts import prompt_text  # noqa: PLC0415
 
         while True:

@@ -3,7 +3,6 @@
 Interactive configuration and LangChain retriever factory for all 10
 supported retrieval strategies.
 
-Requirement 12:
 - Display numbered list of all 10 strategies (12.1)
 - Prompt top_k (1-1000, default 5) (12.2)
 - Prompt hybrid alpha (0.0-1.0) for Hybrid Search (12.3)
@@ -218,7 +217,6 @@ class RetrievalStrategyModule:
     def configure(self) -> RetrievalConfig:
         """Interactive flow: select strategy → prompt parameters → return config.
 
-        Requirement 12.1-12.7.
         """
         console = Console()
         console.print("\n[bold cyan]Step 11 — Retrieval Strategy[/bold cyan]\n")
@@ -240,7 +238,7 @@ class RetrievalStrategyModule:
             console=console,
         )
 
-        # Step 2: top_k (Req 12.2)
+        # Step 2: top_k
         top_k = self._prompt_int(
             prompt="  Number of chunks to retrieve (top_k, default 5):",
             default=5, min_val=1, max_val=1000,
@@ -683,7 +681,7 @@ class RetrievalStrategyModule:
                 console.print(f"[red]  ✗ {exc}[/red]")  # type: ignore[union-attr]
 
     def _prompt_metadata_fields(self, console: object) -> list[MetadataField]:
-        """Prompt for Self-Query metadata field definitions (Req 12.5)."""
+        """Prompt for Self-Query metadata field definitions."""
         console.print(  # type: ignore[union-attr]
             "  [bold white]Define metadata fields for Self-Query filtering.[/bold white]\n"
             "  At least one field is required.\n"
@@ -721,7 +719,7 @@ class RetrievalStrategyModule:
         return fields
 
     def _prompt_ensemble(self, console: object) -> tuple[list[str], list[float]]:
-        """Prompt for ensemble sub-retrievers and weights (Req 12.6)."""
+        """Prompt for ensemble sub-retrievers and weights."""
         console.print(  # type: ignore[union-attr]
             "  [bold white]Ensemble Retrieval — select 2+ sub-retrievers.[/bold white]\n"
         )

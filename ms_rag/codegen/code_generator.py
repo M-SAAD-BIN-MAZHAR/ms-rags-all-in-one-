@@ -2,7 +2,6 @@
 
 Renders a complete, standalone, deployable Python pipeline from PipelineConfig.
 
-Requirement 17:
 - Produce single self-contained Python file (17.1)
 - Use LangChain for all pipeline components (17.2)
 - Use LangGraph for agentic RAG types (17.3)
@@ -116,7 +115,7 @@ class CodeGenerator:
         )
 
     def save(self, code: GeneratedCode, output_dir: Path) -> None:
-        """Write pipeline.py and requirements.txt to output_dir. Req 17.7-17.8."""
+        """Write pipeline.py and requirements.txt to output_dir."""
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -134,12 +133,12 @@ class CodeGenerator:
         """Display code in terminal with syntax highlighting and offer to save."""
         c = console or Console()
 
-        # Display with Rich syntax highlighting (Req 17.6)
+        # Display with Rich syntax highlighting
         try:
             syntax = Syntax(code.python_code, "python", theme="monokai", line_numbers=True)
             c.print(syntax)  # type: ignore[union-attr]
         except Exception:  # noqa: BLE001
-            # Fallback: plain text display (Req 17.6 — still offer save)
+            # Fallback: plain text display (still offer save)
             c.print(code.python_code)  # type: ignore[union-attr]
 
         c.print(  # type: ignore[union-attr]
@@ -147,7 +146,7 @@ class CodeGenerator:
             f"({len(code.python_code):,} chars | RAG type: {code.rag_type})\n"
         )
 
-        # Offer to save (Req 17.7)
+        # Offer to save
         wants_save: bool = questionary.confirm(
             "  Save generated code to disk?",
             default=True,
@@ -165,7 +164,7 @@ class CodeGenerator:
             c.print("[yellow]  Save cancelled.[/yellow]")  # type: ignore[union-attr]
             return
 
-        # Require explicit confirmation before writing (Req 17.7)
+        # Require explicit confirmation before writing
         confirmed: bool = questionary.confirm(
             f"  Write pipeline.py, requirements.txt, and .env to {output_path.strip()}?",
             default=True,

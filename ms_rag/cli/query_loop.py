@@ -2,7 +2,6 @@
 
 The main interactive query interface after ingestion is complete.
 
-Requirement 10:
 - Present query input prompt (10.1)
 - Accept queries 1-4096 characters; reject > 4096 (10.2)
 - Re-prompt on empty/whitespace-only query (10.3)
@@ -207,7 +206,7 @@ class QueryLoop:
         return "query"
 
     def _confirm_exit(self, console: Console) -> bool:
-        """Ask Y/n confirmation before exiting. Req 10.4."""
+        """Ask Y/n confirmation before exiting."""
         while True:
             result = questionary.confirm(
                 "  Are you sure you want to exit?",
@@ -401,7 +400,7 @@ class QueryLoop:
             print_hint(console, "No settings were changed.")
 
     def _display_config(self, session_state: SessionState, console: Console) -> None:
-        """Display structured Pipeline_Config summary. Req 10.5."""
+        """Display structured Pipeline_Config summary."""
         cfg = session_state.config
 
         table = Table(title="Pipeline Configuration", border_style="cyan", show_header=True)
@@ -490,7 +489,7 @@ class QueryLoop:
         console.print(table)
 
     def _handle_save(self, session_state: SessionState, console: Console) -> None:
-        """Handle /save command. Req 18.1."""
+        """Handle /save command."""
         if self._session_manager is None:
             print_error(console, "Session manager not available. Cannot save.")
             return

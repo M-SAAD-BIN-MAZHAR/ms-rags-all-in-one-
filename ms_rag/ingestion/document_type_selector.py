@@ -4,7 +4,6 @@ Presents all supported document/source types as a multi-select checklist,
 validates that at least one type is selected, and stores the result in
 PipelineConfig.
 
-Requirement 4:
 - Display checklist of all 16+ Document_Types (4.1)
 - Allow multi-select (4.2)
 - Store selections in PipelineConfig (4.3)
@@ -186,7 +185,7 @@ class DocumentTypeSelector:
         """Show multi-select checklist and return selected doc type IDs.
 
         Re-presents the checklist if the user confirms with zero selections
-        (Requirement 4.4).
+.
 
         Returns:
             Non-empty list of selected document type IDs.
